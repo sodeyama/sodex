@@ -1,0 +1,9 @@
+2007-05-27  sode  <ta.sode@gmail.com>
+
+	* makefile (tools): change how to link the boota, bootm and kernel.
+
+2007-05-22  sode  <ta.sode@gmail.com>
+
+	* process.c: implements task switch not using tss.
+	
+

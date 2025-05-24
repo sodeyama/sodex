@@ -1,0 +1,64 @@
+#ifndef _SYSCALLDEF_H
+#define _SYSCALLDEF_H
+
+#define SYS_CALL_0     		0
+#define SYS_CALL_EXIT  		1
+#define SYS_CALL_FORK  		2
+#define SYS_CALL_READ  		3
+#define SYS_CALL_WRITE 		4
+#define SYS_CALL_OPEN  		5
+#define SYS_CALL_CLOSE		6
+#define SYS_CALL_WAITPID	7
+#define SYS_CALL_CREAT		8
+#define SYS_CALL_LINK		9
+#define SYS_CALL_UNLINK		10
+#define SYS_CALL_EXECVE		11
+#define SYS_CALL_CHDIR		12
+#define SYS_CALL_TIME		13
+#define SYS_CALL_MKNOD		14
+#define SYS_CALL_CHMOD		15
+#define SYS_CALL_LCHOWN16	16
+#define SYS_CALL_NI_SYSCALL	17
+#define SYS_CALL_STAT		18
+#define SYS_CALL_LSEEK		19
+#define SYS_CALL_GETPID		20
+#define SYS_CALL_MOUNT		21
+#define SYS_CALL_OLDMOUNT	22
+#define SYS_CALL_SETUID16	23
+#define SYS_CALL_GETUID16	24
+#define SYS_CALL_STIME		25
+#define SYS_CALL_PTRACE		26
+#define SYS_CALL_ALARM		27
+#define SYS_CALL_FSTAT		28
+#define SYS_CALL_PAUSE		29
+#define SYS_CALL_UTIME		30
+//#define SYS_CALL_NI_SYSCALL	31
+//#define SYS_CALL_NI_SYSCALL	32
+#define SYS_CALL_ACCESS		33
+#define SYS_CALL_NICE		34
+//#define SYS_CALL_NI_SYSCALL	35
+#define SYS_CALL_SYNC		36
+#define SYS_CALL_KILL		37
+#define SYS_CALL_RENAME		38
+#define SYS_CALL_MKDIR		39
+#define SYS_CALL_RMDIR		40
+#define SYS_CALL_DUP		41
+#define SYS_CALL_PIPE		42
+#define SYS_CALL_TIMES		43
+//#define SYS_CALL_NI_SYSCALL	44
+#define SYS_CALL_BRK		45
+#define SYS_CALL_SETGID16	46
+#define SYS_CALL_GETGID16	47
+#define SYS_CALL_SIGNAL		48
+#define SYS_CALL_SETEUID16	49
+#define SYS_CALL_GETEUID16	50
+
+#define SYS_CALL_GETDENTRY  100
+#define SYS_CALL_GETPSTAT   101
+
+#define SYS_CALL_TIMER      250
+
+#define SYS_CALL_MEMDUMP    300
+#define SYS_CALL_SEND       400
+
+#endif

@@ -1,15 +1,18 @@
 include ../../../../makefile.inc
 include ../../../makefile.inc
 
-OBJS = $(subst .S,.o,$(wildcard *.S)) 
+SUB_OBJDIR = ${USR_OBJDIR}/lib/libc/i386
+$(shell mkdir -p $(SUB_OBJDIR))
+
+SSRCS = $(wildcard *.S)
+OBJS = $(addprefix $(SUB_OBJDIR)/,$(subst .S,.o,$(SSRCS)))
 
 all: ${OBJS}
-	$(AR) rcs $(LIBAOBJ) ${OBJS} 
+	$(AR) rcs $(LIBAOBJ) ${OBJS}
 
-%.o : %.S
+$(SUB_OBJDIR)/%.o : %.S
 	$(CC) -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
-
 
 .PHONY: clean
 clean:
-	rm -f $(LIBA) ${OBJS}
+	rm -f $(LIBAOBJ) ${OBJS}

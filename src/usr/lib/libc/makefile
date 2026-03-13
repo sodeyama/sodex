@@ -1,21 +1,25 @@
 include ../../../makefile.inc
 include ../../makefile.inc
 
-SOBJS = $(subst .S,.o,$(wildcard *.S)) 
-COBJS = $(subst .c,.o,$(wildcard *.c))
+SUB_OBJDIR = ${USR_OBJDIR}/lib/libc
+$(shell mkdir -p $(SUB_OBJDIR))
+
+SSRCS = $(wildcard *.S)
+CSRCS = $(wildcard *.c)
+SOBJS = $(addprefix $(SUB_OBJDIR)/,$(subst .S,.o,$(SSRCS)))
+COBJS = $(addprefix $(SUB_OBJDIR)/,$(subst .c,.o,$(CSRCS)))
 
 OBJS = ${SOBJS} ${COBJS}
 
-all: ${OBJS} ${COBJS} ${CPPOBJS}
+all: ${OBJS}
 	cd i386; make
 	$(AR) rcs $(STDLIB) ${OBJS}
 
-%.o : %.S
+$(SUB_OBJDIR)/%.o : %.S
 	$(CC) -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
 
-%.o : %.c
+$(SUB_OBJDIR)/%.o : %.c
 	$(CC) -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
-
 
 .PHONY: clean
 clean:

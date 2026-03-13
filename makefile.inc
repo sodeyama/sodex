@@ -1,31 +1,41 @@
+# makefile.inc - Project-wide build configuration
+# Single source of truth for paths, toolchain, and flags.
 
-BASEDIR	= $(sodex)
-SRCDIR  = ${BASEDIR}/src
-BIN     = ${SRCDIR}/bin
-LIST    = ${BASEDIR}/list
-INCLUDE = $(SRCDIR)/include
-TOOLDIR = ${SRCDIR}/tools
-INITDIR = ${SRCDIR}/init
+# Project root (auto-detect from this file's location)
+BASEDIR := $(dir $(lastword $(MAKEFILE_LIST)))
+BASEDIR := $(BASEDIR:/=)
 
-USRDIR  = ${SRCDIR}/usr
-LIBDIR	= ${USRDIR}/lib
-LIBCDIR = ${LIBDIR}/libc
+SRCDIR    = ${BASEDIR}/src
+INCLUDE   = ${SRCDIR}/include
+TOOLDIR   = ${SRCDIR}/tools
+INITDIR   = ${SRCDIR}/init
+
+USRDIR    = ${SRCDIR}/usr
+LIBDIR    = ${USRDIR}/lib
+LIBCDIR   = ${LIBDIR}/libc
 DRIVERDIR = ${SRCDIR}/drivers
 KLIBDIR   = ${SRCDIR}/lib
 NETDIR    = ${SRCDIR}/net
 
-AS      = /usr/bin/as
-#CC      = /usr/local/bin/gcc
-CC      = /usr/bin/gcc
-C++		= /usr/bin/g++
-LD      = /usr/bin/ld
-MAKE	= /usr/bin/make
-AR      = /usr/bin/ar
+# Build output directories (all artifacts go here)
+BUILDDIR  = ${BASEDIR}/build
+OBJDIR    = ${BUILDDIR}/obj
+BIN       = ${BUILDDIR}/bin
+LIST      = ${BUILDDIR}/list
 
-#CFLAGS  = -nostdlib -fno-exceptions -ffreestanding -fno-builtin -Wall -fno-stack-protector
-CFLAGS  = -g -O0 -nostdlib -fno-exceptions -ffreestanding -fno-builtin -Wall
-ASFLAGS = 
-LFLAGS  = -T boot.ld -Map ${LIST}/boot.map --oformat binary
-#LFLAGS  = -Ttext 0x1000 -Map ${LIST}/boot.map --oformat binary
-BOOTA_LFLAGS = -Ttext 0x0 --oformat binary -nostdlib
-BOOTM_LFLAGS = -Ttext 0x200 --oformat binary -nostdlib
+# Toolchain (cross-compiler for i486 kernel)
+AS      = /opt/homebrew/bin/x86_64-elf-as
+CC      = /opt/homebrew/bin/x86_64-elf-gcc
+C++     = /usr/bin/g++
+LD      = /opt/homebrew/bin/x86_64-elf-ld
+MAKE    = /usr/bin/make
+AR      = /opt/homebrew/bin/x86_64-elf-ar
+
+# Compiler and linker flags
+CFLAGS  = -m32 -g -O0 -nostdlib -fno-exceptions -ffreestanding -fno-builtin -Wall -Wno-int-conversion -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -fno-stack-protector -fno-common
+ASFLAGS = --32
+
+LFLAGS  = -m elf_i386 -T ${BUILDDIR}/boot.ld -Map ${LIST}/boot.map --oformat binary --allow-multiple-definition
+BOOTA_LFLAGS = -m elf_i386 -Ttext 0x0 --oformat binary -nostdlib
+BOOTM_LFLAGS = -m elf_i386 -Ttext 0x200 --oformat binary -nostdlib
+PTEST_LFLAGS = -m elf_i386 -nostdlib

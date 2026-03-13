@@ -1,12 +1,16 @@
 include ../makefile.inc
 
-OBJS = $(subst .c,.o,$(wildcard *.c))
+SRCS = $(wildcard *.c)
+SUB_OBJDIR = $(OBJDIR)/net
+OBJS = $(addprefix $(SUB_OBJDIR)/,$(subst .c,.o,$(SRCS)))
+
+$(shell mkdir -p $(SUB_OBJDIR))
 
 all : ${OBJS}
 
-%.o: %.c
+$(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 .PHONY: clean
 clean:
-	rm -f ${OBJS}
+	rm -f $(OBJS)

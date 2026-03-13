@@ -2,20 +2,31 @@
 
 #define LOAD_OFFSET __PAGE_OFFSET
 
+/* Object file references - overridable for out-of-tree builds */
+#ifndef STARTUP_OBJ
+#define STARTUP_OBJ "startup.o"
+#endif
+#ifndef KERNEL_OBJ
+#define KERNEL_OBJ "kernel.o"
+#endif
+#ifndef VGA_OBJ
+#define VGA_OBJ "vga.o"
+#endif
+
 SECTIONS {
     . = __KERNEL_START;
 
     __text_start = .;
     .text : AT(ADDR(.text) - LOAD_OFFSET) {
-        "startup.o"(.text)
-        "kernel.o"(.text)
+        STARTUP_OBJ(.text)
+        KERNEL_OBJ(.text)
         * (.text)
     }
     __text_end = .;
 
     __rodata_start = .;
     .rodata : AT(ADDR(.rodata) - LOAD_OFFSET) {
-        "vga.o" (.rodata)
+        VGA_OBJ (.rodata)
         * (.rodata)
     }
     __rodata_end = .;
@@ -23,7 +34,7 @@ SECTIONS {
     . = ALIGN(0x1000);
     __data_start = .;
     .data : AT(ADDR(.data) - LOAD_OFFSET) {
-        "startup.o"(.data)
+        STARTUP_OBJ(.data)
         * (.data)
     }
     __data_end = .;

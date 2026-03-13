@@ -1,23 +1,25 @@
 include ../makefile.inc
 include makefile.inc
 
+SUB_OBJDIR = ${USR_OBJDIR}
+$(shell mkdir -p $(SUB_OBJDIR))
+
 IDLE   = ${USRDIR}/bin/idle
 INIT   = ${USRDIR}/bin/init
 PROC3  = ${USRDIR}/bin/proc3
 
-all: idle.o init.o proc3.o
+all: $(SUB_OBJDIR)/idle.o $(SUB_OBJDIR)/init.o $(SUB_OBJDIR)/proc3.o
 	cd lib; make
 	cd command; make
-	${LD} ${LFLAGS} idle.o -o ${IDLE} ${STATIC_LIBS}
-	${LD} ${LFLAGS} init.o -o ${INIT} ${STATIC_LIBS}
-	${LD} ${LFLAGS} proc3.o -o ${PROC3} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/idle.o -o ${IDLE} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/init.o -o ${INIT} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/proc3.o -o ${PROC3} ${STATIC_LIBS}
 
-%.o: %.c
+$(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
 
 .PHONY: clean
 clean:
 	cd lib; make clean
 	cd command; make clean
-	rm -f $(wildcard *.o)
-#	rm ${IDLE} ${INIT} ${PROC3} ${STATIC_LIBS}
+	rm -f $(SUB_OBJDIR)/*.o

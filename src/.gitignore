@@ -2,12 +2,8 @@
 *.a
 *.log
 
-boot.map
-boota.lst
-bootm.lst
+boot.ld
 
 bin/
 
-list/
-
-log/
+-d

@@ -1,16 +1,18 @@
 include ../../makefile.inc
 include ../makefile.inc
 
-SRCS	= crt0.S
-OBJS	= $(SRCS:.S=.o)
+SUB_OBJDIR = ${USR_OBJDIR}/lib
+$(shell mkdir -p $(SUB_OBJDIR))
 
-all: ${OBJS} 
+OBJS = $(SUB_OBJDIR)/crt0.o
+
+all: ${OBJS}
 	cd libc; make
 
-%.o: %.S
+$(SUB_OBJDIR)/%.o: %.S
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
 
-%.o: %.c
+$(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
 
 .PHONY: clean

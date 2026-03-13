@@ -71,7 +71,7 @@ make remake
 make clean && make
 ```
 
-**個別コンポーネント**:
+**個別コンポーネント**（`src/`ディレクトリ内で実行）:
 ```bash
 make tools      # kmkfsとgetsizeユーティリティのみビルド
 make ptest      # テストプロセスのみビルド
@@ -83,7 +83,7 @@ cd usr && make       # ユーザー空間コンポーネントのみビルド
 
 **クリーン**:
 ```bash
-make clean      # 全サブディレクトリとビルド成果物をクリーン
+make clean      # build/ディレクトリを削除（全ビルド成果物をクリーン）
 ```
 
 ### ビルド設定
@@ -102,11 +102,17 @@ DEVICE = USB_DEVICE   # USBブート（デフォルト）
 
 ### ビルド出力
 
-全バイナリは`src/bin/`に出力:
-- `kernel.bin`: メインカーネルバイナリ
-- `boota.bin`: 第1段階ブートローダ（カーネルサイズ情報を含む）
-- `bootm.bin`: 中間段階ブートローダ
-- `fsboot.bin`: ファイルシステムブートイメージ（kmkfsが作成）
+全ビルド成果物は`build/`ディレクトリに出力（out-of-treeビルド）:
+- `build/bin/`: バイナリ出力
+  - `kernel.bin`: メインカーネルバイナリ
+  - `boota.bin`: 第1段階ブートローダ（カーネルサイズ情報を含む）
+  - `bootm.bin`: 中間段階ブートローダ
+  - `fsboot.bin`: ファイルシステムブートイメージ（kmkfsが作成）
+- `build/obj/`: オブジェクトファイル（ソースツリー構造をミラー）
+  - `build/obj/drivers/`, `build/obj/lib/`, `build/obj/net/`, `build/obj/usr/`
+- `build/list/`: リンカマップ、リストファイル
+- `build/tools/`: ビルドツール（`kmkfs`, `getsize`）
+- `build/boot.ld`: プリプロセス済みリンカスクリプト
 
 ## 開発ワークフロー
 
@@ -148,7 +154,7 @@ DEVICE = USB_DEVICE   # USBブート（デフォルト）
 ビルドと実行（ソースに指定なし - 一般的な使用法）:
 ```bash
 make
-qemu-system-i386 -fda src/bin/fsboot.bin  # FDDモード用
+qemu-system-i386 -fda build/bin/fsboot.bin  # FDDモード用
 # またはUSBモードの場合、ブータブルUSBイメージを作成して-hdaを使用
 ```
 

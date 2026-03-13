@@ -1,8 +1,10 @@
 #ifndef _MEMORY_H
 #define _MEMORY_H
 
+#ifndef TEST_BUILD
 #include <sodex/const.h>
 #include <sys/types.h>
+#endif
 
 
 #define MAXMEMSIZE (((u_int16_t*)(0xc0090000))[0])
@@ -44,6 +46,7 @@ PUBLIC MemHole p_mfree_list;
 PUBLIC MemHole p_mhole_list;
 
 PUBLIC void init_mem();
+PUBLIC void init_mem_core(u_int32_t base_addr, u_int32_t pool_size);
 PUBLIC void* kalloc(u_int32_t size);
 PUBLIC int32_t kfree(void* ptr);
 PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit);

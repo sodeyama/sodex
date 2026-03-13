@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb
+TESTS = test_lib test_memb test_memory
 
 .PHONY: all clean test
 
@@ -52,6 +52,19 @@ test_memb_memb.o: $(SRC)/lib/memb.c
 		-c -o $@ $<
 
 test_memb_string.o: $(SRC)/lib/string.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
+
+# Memory management (kalloc/kfree) test
+test_memory: test_memory.c test_memory_memory.o test_memory_string.o
+	$(CC) $(CFLAGS) -o $@ test_memory.c test_memory_memory.o test_memory_string.o
+
+test_memory_memory.o: $(SRC)/memory.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -DMEMDEBUG=1 \
+		-I$(SRC)/include \
+		-Imocks \
+		-c -o $@ $<
+
+test_memory_string.o: $(SRC)/lib/string.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
 
 clean:

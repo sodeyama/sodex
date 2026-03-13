@@ -10,9 +10,14 @@
  *  Copyright (C) 2007 Sodex
  */
 
+#ifdef TEST_BUILD
+#include "mock_memory_deps.h"
+#include <memory.h>
+#else
 #include <ld/page_linker.h>
 #include <memory.h>
 #include <vga.h>
+#endif
 
 #define MEMDEBUG 1
 
@@ -25,19 +30,22 @@ PRIVATE void init_kmem();
 PRIVATE void init_pmem();
 PRIVATE void used_check(MemHole* mem);
 
+#ifndef TEST_BUILD
 PUBLIC void init_mem()
 {
   init_kmem();
   init_pmem();
 }
+#endif
 
-PRIVATE void init_kmem()
+/*
+ * init_mem_core: Hardware-independent core initialization.
+ * Sets up memory hole pool and free/used lists for kernel memory.
+ * base_addr: start of allocatable memory region
+ * pool_size: size of the allocatable region in bytes
+ */
+PUBLIC void init_mem_core(u_int32_t base_addr, u_int32_t pool_size)
 {
-  /* __bss_end is provided by the linker script.
-   * Align to next page boundary to avoid overlapping BSS. */
-  extern u_int32_t __bss_end;
-  u_int32_t kernel_membase = ((u_int32_t)&__bss_end + BLOCK_SIZE - 1) & ~(BLOCK_SIZE - 1);
-
   int i;
   for (i = 0; i < MAX_MHOLES; ++i) {
     if (i == MAX_MHOLES - 1)
@@ -73,9 +81,21 @@ PRIVATE void init_kmem()
   MemHole* mem = mhole_list.next;
   MHOLE_REMOVE(mem);
   MHOLE_INSERT_HEAD(mem, mfree_list);
-  mfree_list.next->base = kernel_membase;
-  mfree_list.next->size = KERNEL_MEMEND - kernel_membase;
+  mfree_list.next->base = base_addr;
+  mfree_list.next->size = pool_size;
 }
+
+#ifndef TEST_BUILD
+PRIVATE void init_kmem()
+{
+  /* __bss_end is provided by the linker script.
+   * Align to next page boundary to avoid overlapping BSS. */
+  extern u_int32_t __bss_end;
+  u_int32_t kernel_membase = ((u_int32_t)&__bss_end + BLOCK_SIZE - 1) & ~(BLOCK_SIZE - 1);
+
+  init_mem_core(kernel_membase, KERNEL_MEMEND - kernel_membase);
+}
+#endif
 
 PRIVATE MemHole* _search_used_mhole(void* ptr, MemHole* use_list)
 {
@@ -298,6 +318,7 @@ PUBLIC void _kprint_mem()
 }
 
 
+#ifndef TEST_BUILD
 /* For process, alloc physical memory between 32MB and 64MB */
 PRIVATE void init_pmem()
 {
@@ -409,6 +430,7 @@ PUBLIC u_int32_t get_realaddr(u_int32_t virt_addr)
 {
   return virt_addr - __PAGE_OFFSET;
 }
+#endif /* !TEST_BUILD */
 
 PRIVATE void used_check(MemHole* mem)
 {
@@ -416,7 +438,9 @@ PRIVATE void used_check(MemHole* mem)
   for (i = muse_list.next; i != &muse_list; i = i->next) {
     if (i->base == mem->base) {
       _kprintf("[MEMORY ALLOC ERROR] The mem block already be used !!\n");
+#ifndef TEST_BUILD
       for(;;);
+#endif
     }
   }
 }

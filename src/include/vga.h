@@ -35,6 +35,7 @@ PUBLIC void clr_screen();
 PUBLIC void init_screen();
 PUBLIC void screen_pointset(int x, int y);
 
+PUBLIC void screen_save_prompt();
 PUBLIC void print_registers();
 PUBLIC void debug_print();
 

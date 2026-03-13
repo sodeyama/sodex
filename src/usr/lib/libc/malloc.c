@@ -2,6 +2,11 @@
 #include <process.h>
 #include <stdlib.h>
 
+MemHole memhole[MAX_MHOLES];
+MemHole muse_list;
+MemHole mfree_list;
+MemHole mhole_list;
+
 static MemHole* _search_used_mhole(void* ptr, MemHole* use_list);
 static void merge_hole(MemHole* memfrom, MemHole* memto);
 static MemHole* new_mhole(MemHole* hole_list);

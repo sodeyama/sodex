@@ -186,17 +186,19 @@ ltr:
  *  buf is edi, ch is al, n is ecx
  *  return is buf       
  */
-memset: 
+memset:
         pushl   %ebp
         movl    %esp, %ebp
+        pushl   %edi
         movl    0x8(%ebp), %edi
         movb    0xc(%ebp), %al
         movl    0x10(%ebp), %ecx
-        
+        cld
         rep
         stosb
 
-        movl    0x8(%ebp), %eax     
+        movl    0x8(%ebp), %eax
+        popl    %edi
         popl    %ebp
         ret
 
@@ -204,17 +206,21 @@ memset:
  *  dest is edi, src is esi, n is ecx
  *  return is dest
  */
-memcpy: 
+memcpy:
         pushl   %ebp
         movl    %esp, %ebp
+        pushl   %esi
+        pushl   %edi
         movl    0x8(%ebp), %edi
         movl    0xc(%ebp), %esi
         movl    0x10(%ebp), %ecx
-        
+        cld
         rep
         movsb
 
-        movl    0x8(%ebp), %eax     
+        movl    0x8(%ebp), %eax
+        popl    %edi
+        popl    %esi
         popl    %ebp
         ret
 

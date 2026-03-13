@@ -1,0 +1,312 @@
+GAS LISTING bootusb.S 			page 1
+
+
+   1              	/*
+   2              	 *  @File        bootusb.S
+   3              	 *  @Brief       The initial boot section of Sodex from usb
+   4              	 *  
+   5              	 *  @Author      Sodex
+   6              	 *  @Revision    0.0.3
+   7              	 *  @License     BSD License
+   8              	 *  @Date        create: 2009/08/09
+   9              	 *      
+  10              	 *  Copyright (C) 2007 Sodex
+  11              	 */
+  12              	        
+  13              	BOOTSEG          = 0x07C0
+  14              	INITSEG          = 0x9000
+  15              	KERNEL_SEG       = 0x0100       
+  16              	KERNEL_STACK_SEG = 0x8000
+  17              	
+  18              	READ_MAX_SECTS   = 0x40
+  19              	
+  20              	.code16
+  21              	.text
+  22              	
+  23              	.macro  print   str
+  24              	        movw    \str, %si
+  25              	        call    printstr
+  26              	.endm
+  27              	
+  28              	.macro  print_w word
+  29              	        pushw   %ax
+  30              	        pushw   %bx
+  31              	        movw    \word, %bx        
+  32              	        movb    %bh, %al
+  33              	        call    print_char
+  34              	        movb    %bl, %al
+  35              	        call    print_char
+  36              	        popw    %bx        
+  37              	        popw    %ax
+  38              	.endm        
+  39              	
+  40              	.global _start
+  41              	_start: 
+  42 0000 66EA0800 	        jmpl    $BOOTSEG, $start2
+  42      0000C007 
+  43              	        
+  44              	start2:
+  45 0008 31F6     	        xorw    %si, %si
+  46 000a 31FF     	        xorw    %di, %di
+  47 000c B8C007   	        movw    $BOOTSEG, %ax
+  48 000f 8ED8     	        movw    %ax, %ds
+  49 0011 B80090   	        movw    $INITSEG, %ax
+  50 0014 8EC0     	        movw    %ax, %es
+  51 0016 B90001   	        movw    $0x100, %cx
+  52 0019 FC       	        cld
+  53 001a F3A5     	        rep     movsw
+  54 001c 66EA2400 	        jmpl    $INITSEG, $next
+  54      00000090 
+  55              	
+GAS LISTING bootusb.S 			page 2
+
+
+  56              	next:
+  57 0024 8ED8     	        movw    %ax, %ds
+  58 0026 B80080   	        movw    $KERNEL_STACK_SEG, %ax
+  59 0029 8ED0     	        movw    %ax, %ss
+  60 002b 31E4     	        xorw    %sp, %sp
+  61              	        
+  62 002d 8A164401 	        movb    (drive), %dl
+  63 0031 80FA80   	        cmp     $0x80, %dl
+  64 0034 0F82BA00 	        jb      error
+  65 0038 B441     	        movb    $0x41, %ah
+  66 003a BBAA55   	        movw    $0x55aa, %bx
+  67 003d CD13     	        int     $0x13
+  68 003f 0F82AF00 	        jc      error
+  69              	
+  70              	# read middle boot
+  71 0043 66C7064D 	        movl    $64 , (lba)
+  71      01400000 
+  71      00
+  72 004c C7064701 	        movw    $4, (sector_nums)
+  72      0400
+  73 0052 C7064B01 	        movw    $INITSEG, (buf_segment)
+  73      0090
+  74 0058 C7064901 	        movw    $0x200, (buf_offset)        
+  74      0002
+  75 005e E82F00   	        call    read_disk
+  76 0061 BE5701E8 	        print   $read_success
+  76      CD00
+  77              	
+  78              	# read kernel
+  79 0067 66C7064D 	        movl    $72 , (lba)
+  79      01480000 
+  79      00
+  80 0070 C7064701 	        movw    $KERNEL_SECTS, (sector_nums)
+  80      8400
+  81 0076 C7064B01 	        movw    $KERNEL_SEG, (buf_segment)
+  81      0001
+  82 007c C7064901 	        movw    $0x0, (buf_offset)        
+  82      0000
+  83 0082 E80B00   	        call    read_disk
+  84 0085 BE5701E8 	        print   $read_success
+  84      A900
+  85              	        
+  86 008b EA000200 	        ljmp    $0x9000, $0x0200        
+  86      90
+  87              	
+  88              	read_disk:
+  89 0090 8B0E4701 	        movw    (sector_nums), %cx
+  90 0094 83F940   	        cmp     $READ_MAX_SECTS, %cx
+  91 0097 7210     	        jb      read_init_end
+  92 0099 C7064701 	        movw    $READ_MAX_SECTS, (sector_nums)
+  92      4000
+  93 009f BB4000   	        movw    $READ_MAX_SECTS, %bx
+  94 00a2 C1E305   	        shl     $5, %bx                     # = READ_MAX_SECTS * 512 >> 4
+  95 00a5 891E5501 	        movw    %bx, (sector_seg_size)      # sector_seg_size is 0x800.
+  96              	read_init_end:
+  97 00a9 8A164401 	        movb    (drive), %dl        
+  98 00ad BB0090   	        movw    $INITSEG, %bx
+GAS LISTING bootusb.S 			page 3
+
+
+  99 00b0 8EDB     	        movw    %bx, %ds
+ 100 00b2 BE4501   	        movw    $read_param, %si
+ 101              	read_disk_itr:
+ 102 00b5 B80042   	        movw    $0x4200, %ax
+ 103 00b8 CD13     	        int     $0x13
+ 104 00ba 723E     	        jc      read_error
+ 105 00bc 83F900   	        cmp     $0x0, %cx
+ 106 00bf 7430     	        jz      read_disk_end
+ 107 00c1 2B0E4701 	        subw    (sector_nums), %cx
+ 108 00c5 83F900   	        cmp     $0x0, %cx
+ 109 00c8 7427     	        jz      read_disk_end
+ 110 00ca 83F940   	        cmp     $READ_MAX_SECTS, %cx
+ 111 00cd 7306     	        jae     read_over_max
+ 112 00cf 890E4701 	        movw    %cx, (sector_nums)           
+ 113 00d3 EB06     	        jmp     read_param_set
+ 114              	read_over_max:
+ 115 00d5 C7064701 	        movw    $READ_MAX_SECTS, (sector_nums)        
+ 115      4000
+ 116              	read_param_set:
+ 117 00db 6683064D 	        addl    $READ_MAX_SECTS, (lba)
+ 117      0140
+ 118 00e1 66831651 	        adcl    $0x0, (lba + 4)
+ 118      0100
+ 119 00e7 8B1E5501 	        movw    (sector_seg_size), %bx
+ 120 00eb 011E4B01 	        addw    %bx, (buf_segment)           # buf seg:offset += 0x8000
+ 121 00ef EBC4     	        jmp     read_disk_itr
+ 122              	read_disk_end:  
+ 123 00f1 C3       	        ret
+ 124              	        
+ 125              	
+ 126              	error:
+ 127 00f2 BE7B01E8 	        print   $error_mes
+ 127      3C00
+ 128 00f8 EB08     	        jmp     loop
+ 129              	
+ 130              	read_error:
+ 131 00fa BE8301E8 	        print   $read_error_mes
+ 131      3400
+ 132 0100 EB00     	        jmp     loop
+ 133              	
+ 134              	loop:
+ 135 0102 EBFE     	        jmp     loop
+ 136              	
+ 137              	print_char:
+ 138 0104 53       	        pushw   %bx     
+ 139 0105 50       	        pushw   %ax
+ 140 0106 C0E804   	        shr     $4, %al
+ 141 0109 3C09     	        cmpb    $9, %al
+ 142              	        
+ 143 010b 7704     	        ja      print_check1
+ 144 010d 0430     	        addb    $0x30, %al
+ 145 010f EB02     	        jmp     print_check1_end
+ 146              	print_check1:
+ 147 0111 0437     	        addb    $0x37, %al
+ 148              	print_check1_end:
+ 149              	        
+ 150 0113 B40E     	        movb    $0x0e, %ah
+GAS LISTING bootusb.S 			page 4
+
+
+ 151 0115 30FF     	        xorb    %bh, %bh
+ 152 0117 CD10     	        int     $0x10
+ 153 0119 58       	        popw    %ax
+ 154 011a 88C3     	        movb    %al, %bl
+ 155 011c 50       	        pushw   %ax
+ 156 011d 88D8     	        movb    %bl, %al
+ 157 011f 240F     	        andb    $0x0f, %al
+ 158              	
+ 159 0121 3C09     	        cmpb    $9, %al
+ 160 0123 7704     	        ja      print_check2
+ 161 0125 0430     	        addb    $0x30, %al
+ 162 0127 EB02     	        jmp     print_check2_end
+ 163              	print_check2:
+ 164 0129 0437     	        addb    $0x37, %al
+ 165              	print_check2_end:
+ 166              	        
+ 167 012b B40E     	        movb    $0x0e, %ah
+ 168 012d 30FF     	        xorb    %bh, %bh
+ 169 012f CD10     	        int     $0x10
+ 170 0131 58       	        popw    %ax
+ 171 0132 5B       	        popw    %bx     
+ 172 0133 C3       	        ret        
+ 173              	
+ 174              	printstr:
+ 175 0134 60       	        pusha
+ 176              	printstr_start:
+ 177 0135 AC       	        lodsb
+ 178 0136 3C00     	        cmpb    $0, %al
+ 179 0138 7408     	        jz      printstr_end
+ 180 013a B40E     	        movb    $0x0e, %ah
+ 181 013c B700     	        movb    $0, %bh
+ 182 013e CD10     	        int     $0x10
+ 183 0140 EBF3     	        jmp     printstr_start
+ 184              	printstr_end:
+ 185 0142 61       	        popa
+ 186 0143 C3       	        ret
+ 187              	
+ 188              	
+ 189 0144 80       	drive:  .byte 0x80
+ 190              	
+ 191              	read_param:
+ 192 0145 1000     	len:            .word 0x10
+ 193 0147 0000     	sector_nums:    .word 0x0
+ 194 0149 0000     	buf_offset:     .word 0x0
+ 195 014b 0000     	buf_segment:    .word 0x0
+ 196 014d 00000000 	lba:            .long 0x0, 0x0
+ 196      00000000 
+ 197              	
+ 198 0155 0000     	sector_seg_size:    .word 0x0
+ 199              	
+ 200              	read_success:       
+ 201 0157 72656164 	        .ascii  "read success\r\n\0"        
+ 201      20737563 
+ 201      63657373 
+ 201      0D0A00
+ 202              	over_80h:       
+ 203 0166 6F766572 	        .ascii  "over80h\r\n\0"
+GAS LISTING bootusb.S 			page 5
+
+
+ 203      3830680D 
+ 203      0A00
+ 204              	under_80h:       
+ 205 0170 756E6465 	        .ascii  "under80h\r\n\0"        
+ 205      72383068 
+ 205      0D0A00
+ 206              	error_mes: 
+ 207 017b 6572726F 	        .ascii  "error\r\n\0"
+ 207      720D0A00 
+ 208              	read_error_mes: 
+ 209 0183 72656164 	        .ascii  "read error\r\n\0"
+ 209      20657272 
+ 209      6F720D0A 
+ 209      00
+ 210              	crlf: 
+ 211 0190 0D0A00   	        .ascii  "\r\n\0"                        
+ 212              	
+ 213 0193 00000000 	        .org 510
+ 213      00000000 
+ 213      00000000 
+ 213      00000000 
+ 213      00000000 
+ 214 01fe 55AA     	        .word 0xAA55        
+GAS LISTING bootusb.S 			page 6
+
+
+DEFINED SYMBOLS
+                            *ABS*:00000084 KERNEL_SECTS
+           bootusb.S:13     *ABS*:000007c0 BOOTSEG
+           bootusb.S:14     *ABS*:00009000 INITSEG
+           bootusb.S:15     *ABS*:00000100 KERNEL_SEG
+           bootusb.S:16     *ABS*:00008000 KERNEL_STACK_SEG
+           bootusb.S:18     *ABS*:00000040 READ_MAX_SECTS
+           bootusb.S:41     .text:00000000 _start
+           bootusb.S:44     .text:00000008 start2
+           bootusb.S:56     .text:00000024 next
+           bootusb.S:189    .text:00000144 drive
+           bootusb.S:126    .text:000000f2 error
+           bootusb.S:196    .text:0000014d lba
+           bootusb.S:193    .text:00000147 sector_nums
+           bootusb.S:195    .text:0000014b buf_segment
+           bootusb.S:194    .text:00000149 buf_offset
+           bootusb.S:88     .text:00000090 read_disk
+           bootusb.S:200    .text:00000157 read_success
+           bootusb.S:174    .text:00000134 printstr
+           bootusb.S:96     .text:000000a9 read_init_end
+           bootusb.S:198    .text:00000155 sector_seg_size
+           bootusb.S:191    .text:00000145 read_param
+           bootusb.S:101    .text:000000b5 read_disk_itr
+           bootusb.S:130    .text:000000fa read_error
+           bootusb.S:122    .text:000000f1 read_disk_end
+           bootusb.S:114    .text:000000d5 read_over_max
+           bootusb.S:116    .text:000000db read_param_set
+           bootusb.S:206    .text:0000017b error_mes
+           bootusb.S:134    .text:00000102 loop
+           bootusb.S:208    .text:00000183 read_error_mes
+           bootusb.S:137    .text:00000104 print_char
+           bootusb.S:146    .text:00000111 print_check1
+           bootusb.S:148    .text:00000113 print_check1_end
+           bootusb.S:163    .text:00000129 print_check2
+           bootusb.S:165    .text:0000012b print_check2_end
+           bootusb.S:176    .text:00000135 printstr_start
+           bootusb.S:184    .text:00000142 printstr_end
+           bootusb.S:192    .text:00000145 len
+           bootusb.S:202    .text:00000166 over_80h
+           bootusb.S:204    .text:00000170 under_80h
+           bootusb.S:210    .text:00000190 crlf
+
+NO UNDEFINED SYMBOLS

@@ -1,5 +1,4 @@
 #!/bin/sh
-#sudo qemu -fda $sodex/src/bin/fsboot.bin -net nic -net user -net tap,ifname=mytap -usb -usbdevice host:0457:0151 &
-
-# disk image (mass storage)
-sudo qemu -fda $sodex/src/bin/fsboot.bin -net nic -net user -net tap,ifname=mytap -usb -usbdevice disk:disk.img
+# Sodex OS - QEMU launcher for macOS
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+qemu-system-i386 -drive file="$SCRIPT_DIR/fsboot.bin",format=raw,if=ide -m 128

@@ -140,7 +140,7 @@ PUBLIC void set_context(struct task_struct* task, u_int32_t eip, u_int32_t esp,
 PUBLIC void to_usermode();
 PUBLIC void to_kernelmode();
 PUBLIC int is_usermode();
-PUBLIC void sys_exit();
+PUBLIC void sys_exit(int status);
 PUBLIC int sys_waitpid(pid_t pid, int *status, int options);
 
 #define SAME_PRIVILEGE 0

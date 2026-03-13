@@ -33,6 +33,11 @@ PUBLIC void init_mem()
 
 PRIVATE void init_kmem()
 {
+  /* __bss_end is provided by the linker script.
+   * Align to next page boundary to avoid overlapping BSS. */
+  extern u_int32_t __bss_end;
+  u_int32_t kernel_membase = ((u_int32_t)&__bss_end + BLOCK_SIZE - 1) & ~(BLOCK_SIZE - 1);
+
   int i;
   for (i = 0; i < MAX_MHOLES; ++i) {
     if (i == MAX_MHOLES - 1)
@@ -68,8 +73,8 @@ PRIVATE void init_kmem()
   MemHole* mem = mhole_list.next;
   MHOLE_REMOVE(mem);
   MHOLE_INSERT_HEAD(mem, mfree_list);
-  mfree_list.next->base = KERNEL_MEMBASE;
-  mfree_list.next->size = KERNEL_MEMEND - KERNEL_MEMBASE;
+  mfree_list.next->base = kernel_membase;
+  mfree_list.next->size = KERNEL_MEMEND - kernel_membase;
 }
 
 PRIVATE MemHole* _search_used_mhole(void* ptr, MemHole* use_list)

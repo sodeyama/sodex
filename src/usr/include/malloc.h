@@ -16,11 +16,11 @@ typedef struct _MemHole {
   struct _MemHole*  next;
 } MemHole;
 
-MemHole memhole[MAX_MHOLES];
+extern MemHole memhole[MAX_MHOLES];
 
-MemHole muse_list;
-MemHole mfree_list;
-MemHole mhole_list;
+extern MemHole muse_list;
+extern MemHole mfree_list;
+extern MemHole mhole_list;
 
 #define MHOLE_REMOVE(p) do {    \
     p->prev->next = p->next;    \

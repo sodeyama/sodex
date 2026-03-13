@@ -1,12 +1,12 @@
 /*
  *  @File        elfloader.c
  *  @Brief       elf loader for creating a new process
- *  
+ *
  *  @Author      Sodex
  *  @Revision    0.1
  *  @License     suspension
  *  @Date        creae: 2007/07/24  update: 2007/07/24
- *      
+ *
  *  Copyright (C) 2007 Sodex
  */
 
@@ -27,12 +27,12 @@ PUBLIC int elf_loader(char *filename, u_int32_t *entrypoint, void *loadaddr,
                       u_int32_t *pg_dir, struct task_struct* task,
                       u_int32_t* allocation_point)
 {
-  // This condition is for initializing kernel 
+  // This condition is for initializing kernel
   if (current == NULL)
     current = task;
   int fd = open_env(filename, O_RDWR, 0);
   if (fd == 0) {
-    //_kprintf("%s file open error\n", __func__);
+    _kprintf("%s: file open error for '%s'\n", __func__, filename);
     return ELF_FAIL;
   }
   ext3_inode* inode = FD_TOINODE(fd, current);
@@ -101,14 +101,13 @@ PUBLIC int elf_loader(char *filename, u_int32_t *entrypoint, void *loadaddr,
   pg_load_cr3(pg_dir);
   for (i = 0; i < header->phdrcnt; i++) {
     size_t prg_size = prg_header[i].memsize;
+    int file_size = prg_header[i].filesize;
     if (prg_size == 0)
       continue;
-    //_kprintf("virtaddr:%x prg_size:%x offset:%x\n",
-    //         prg_header[i].virtaddr, prg_size, prg_header[i].offset);
-    if (prg_header[i].flags & ELF_PROGHEADER_FLAG_EXE)
-      memcpy(prg_header[i].virtaddr, elf_buf + prg_header[i].offset, prg_size);
-    else
-      memset(prg_header[i].virtaddr, 0, prg_size);
+    if (file_size > 0)
+      memcpy(prg_header[i].virtaddr, elf_buf + prg_header[i].offset, file_size);
+    if (prg_size > file_size)
+      memset(prg_header[i].virtaddr + file_size, 0, prg_size - file_size);
   }
   pg_load_cr3(old_cr3);
 

@@ -1,12 +1,12 @@
 /*
  *  @File execve.c
  *  @Brief execve
- *  
+ *
  *  @Author      Sodex
  *  @Revision    0.1
  *  @License     suspension
  *  @Date        creae: 2007/10/03  update: 2007/10/03
- *      
+ *
  *  Copyright (C) 2007 Sodex
  */
 
@@ -55,7 +55,6 @@ PUBLIC pid_t sys_execve(const char *filename, char *const argv[],
 
   struct task_struct* kern_task = __execve(filename, argv, envp);
   if (kern_task == NULL) {
-    //_kprintf("kern_task is NULL\n");
     if (strcmp(filename,"") != 0)
       _kprintf("command not found\n");
     return -1;
@@ -99,10 +98,8 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   u_int32_t entrypoint, loadaddr, allocation_point;
   int elf_ret;
   elf_ret = elf_loader(filename, &entrypoint, &loadaddr, pg_dir, kern_task, &allocation_point);
-  if (elf_ret == ELF_FAIL) {
-    //_kprintf("ELF_FAIL\n");
+  if (elf_ret == ELF_FAIL)
 	return NULL;
-  }
   kern_task->allocpoint = allocation_point;
   init_dlist_set(&(kern_task->run_list));
   init_dlist_set(&(kern_task->children));

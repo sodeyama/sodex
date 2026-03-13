@@ -7,5 +7,6 @@ LIBAOBJ = ${LIBCDIR}/libc.a
 
 STATIC_LIBS = ${CRTOBJ} ${STDLIB} ${LIBAOBJ}
 
-CFLAGS = -nostdlib -Wall
-LFLAGS = -nostdlib
+CFLAGS = -m32 -nostdlib -ffreestanding -fno-builtin -Wall -Wno-int-conversion -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -fno-stack-protector
+ASFLAGS = --32
+LFLAGS = -m elf_i386 -nostdlib

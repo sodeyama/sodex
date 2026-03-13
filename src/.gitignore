@@ -1,0 +1,13 @@
+*.o
+*.a
+*.log
+
+boot.map
+boota.lst
+bootm.lst
+
+bin/
+
+list/
+
+log/

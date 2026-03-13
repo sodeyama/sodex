@@ -76,7 +76,6 @@ PUBLIC void init_ext3fs()
   //_kprintf("end of read init dirty\n");
 
   rootdir = __read_rootdir(SODEX_ROOT_INO);
-  //_kprintf("end of read rootdir\n");
 }
 
 PRIVATE void init_dentry_lists(ext3_dentry* dentry)

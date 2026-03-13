@@ -1,12 +1,12 @@
 /*
  *  @File process.c
  *  @Brief control the process(task) using cpu's feature
- *  
+ *
  *  @Author      Sodex
  *  @Revision    0.1
  *  @License     suspension
  *  @Date        creae: 2007/05/09  update: 2007/05/10
- *      
+ *
  *  Copyright (C) 2007 Sodex
  */
 
@@ -51,10 +51,13 @@ PUBLIC void init_process()
   pg_dir = ((u_int32_t)pg_dir & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
   memset(pg_dir, 0, BLOCK_SIZE);
   create_kernel_page(pg_dir);
-  //tss.esp0 = pg_dir;
   makeGdt((u_int32_t)&tss, sizeof(TSS), type_tss, sel);
   ltr(sel);
   kernel_execve("/usr/bin/init", NULL, NULL);
+  if (current == NULL) {
+    _kputs(" PROCESS: execve failed\n");
+    return;
+  }
   struct task_struct* next = dlist_entry(current->run_list.next,
                                          struct task_struct, run_list);
   tss.esp0 = next->esp0;
@@ -135,7 +138,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
   } else if (state == TASK_ZOMBIE) {
     // skip the current
     current = dlist_entry(current->run_list.next,
-                          struct task_struct, run_list);    
+                          struct task_struct, run_list);
   } else if (state == TASK_RUNNING) {
   } else {
     _kprintf("The number %x of task state is not implemented\n",
@@ -222,7 +225,7 @@ PUBLIC void schedule()
     }
     //_kprintf("outer pv %x cr3:%x\n", next, next_cr3);
 
-    switch_to_outer_privilege(next_cs, next_ds, next_esp, next_cr3, 
+    switch_to_outer_privilege(next_cs, next_ds, next_esp, next_cr3,
                               next_eflags, next_eip, next_esp,
                               next_eax, next_ebx, next_ecx, next_edx,
                               next_esp, next_ebp, next_esi, next_edi);
@@ -238,8 +241,9 @@ PUBLIC void schedule()
   }
 }
 
-PUBLIC void sys_exit()
+PUBLIC void sys_exit(int status)
 {
+  (void)status; /* unused for now */
   current->state = TASK_ZOMBIE;
   for(;;);
 }

@@ -406,16 +406,16 @@ syscall_outer_privilege_switch:                   # user to kernel
         popl    %edi
         popl    %esi
         popl    %ebp
-        addl    $4, %esp      # %esp
+        addl    $4, %esp      # %esp (skip pusha's esp)
         popl    %ebx
         popl    %edx
         popl    %ecx
-        addl    $4, %esp      # %eax
+        popl    %eax          # restore eax (contains syscall return value)
 
         pushl   %eax
         movw    $__USER_DS, %ax
         movw    %ax, %ds
-        movw    %ax, %es        
+        movw    %ax, %es
         movw    %ax, %fs
         movw    %ax, %gs
         popl    %eax

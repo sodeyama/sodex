@@ -70,6 +70,6 @@ struct file {
 
 PUBLIC off_t lseek(int fd, off_t offset, int whence);
 PUBLIC int close(int fd);
-PUBLIC int fs_stdio_open();
+PUBLIC int fs_stdio_open(struct files_struct* ftask);
 
 #endif

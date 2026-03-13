@@ -69,34 +69,44 @@ startup:
         jmp     *%eax
 1:
 
-        xorl    %eax, %eax
-        movw    %ds, %ax
-        shll    $4, %eax
-        addl    $gdt, %eax
+        movl    $gdt, %eax
         movl    %eax, (gdtr+2)
         lgdt    gdtr
-                
+
         movl    $0xC009C000, %esp
+
+/*
+ * Zero BSS section
+ */
+        movl    $__bss_start, %edi
+        movl    $__bss_end, %ecx
+        subl    %edi, %ecx
+        shrl    $2, %ecx
+        xorl    %eax, %eax
+        rep     stosl
+
         jmp     start_kernel
         
 forever:
         jmp     forever
 
         
-.section ".bss.page_aligned","w"
+.section ".bss.page_aligned","aw",@nobits
 .global first_pg_dir
 first_pg_dir:
-  .fill 1024,4,0
+  .space 1024*4
 .global first_pg_tbl1
 first_pg_tbl1:
-  .fill 1024,4,0
+  .space 1024*4
 .global first_pg_tbl2
 first_pg_tbl2:
-  .fill 1024,4,0
+  .space 1024*4
 
+.section ".data"
 .global gdtr
 gdtr:   .word   gdt_end - gdt - 1
         .long   0       # filled in code
+.global gdt
 gdt:
 gdt00h:                 #It's dummy for cpu
         .word   0       #selector 00h
@@ -105,19 +115,41 @@ gdt00h:                 #It's dummy for cpu
         .byte   0
         .byte   0
         .byte   0
-gdt08h:                 #code segment
+gdt08h:                 #code segment DPL=0
         .word   0xFFFF  #selector 08h
         .word   0
         .byte   0
-        .byte   0x9A    # P=1, DPL=0, S=1, TYPE=5, A=0
+        .byte   0x9A    # P=1, DPL=0, S=1, TYPE=A(code,exec/read)
         .byte   0xCF    # G=1, D=1
         .byte   0
-gdt10h:                 #data segment
+gdt10h:                 #data segment DPL=0
         .word   0xFFFF  #selector 10h
         .word   0
         .byte   0
-        .byte   0x92    # P=1, DPL=0, S=1, TYPE=1, A=0
+        .byte   0x92    # P=1, DPL=0, S=1, TYPE=2(data,read/write)
         .byte   0xCF    # G=1, D=1
         .byte   0
+gdt18h:                 #reserved (padding for selector 18h)
+        .word   0
+        .word   0
+        .byte   0
+        .byte   0
+        .byte   0
+        .byte   0
+gdt20h:                 #code segment DPL=3 (user)
+        .word   0xFFFF  #selector 20h | RPL=3 = 0x23
+        .word   0
+        .byte   0
+        .byte   0xFA    # P=1, DPL=3, S=1, TYPE=A(code,exec/read)
+        .byte   0xCF    # G=1, D=1
+        .byte   0
+gdt28h:                 #data segment DPL=3 (user)
+        .word   0xFFFF  #selector 28h | RPL=3 = 0x2B
+        .word   0
+        .byte   0
+        .byte   0xF2    # P=1, DPL=3, S=1, TYPE=2(data,read/write)
+        .byte   0xCF    # G=1, D=1
+        .byte   0
+        .space  8*122   # reserve space for up to 128 GDT entries total
 gdt_end:                
 

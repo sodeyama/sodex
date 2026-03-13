@@ -3,7 +3,7 @@
 
 #include <sys/types.h>
 
-u_int32_t last_alloc_addr;
+extern u_int32_t last_alloc_addr;
 
 void *sbrk(intptr_t increment);
 

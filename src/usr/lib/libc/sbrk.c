@@ -2,6 +2,8 @@
 #include <sbrk.h>
 #include <stdlib.h>
 
+u_int32_t last_alloc_addr;
+
 void *sbrk(intptr_t increment)
 {
   if (last_alloc_addr == 0)

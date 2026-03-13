@@ -45,6 +45,10 @@ PRIVATE u_int32_t uhci_interrupt = 0;
 PUBLIC void init_uhci()
 {
   USB_HC_INFO* main_usb_info = usb_info[0];
+  if (main_usb_info == NULL) {
+    _kputs(" UHCI: No USB controller found\n");
+    return;
+  }
   qh_free_list_head = NULL;
   qh_free_list_tail = NULL;
   td_free_list_head = NULL;

@@ -30,6 +30,7 @@
 #include <uhci-hcd.h>
 #include <mstorage.h>
 #include <scsi.h>
+#include <ata.h>
 
 PRIVATE void mem_test();
 PRIVATE void fdc_test();
@@ -72,10 +73,10 @@ PUBLIC void start_kernel()
   _kputs(" KERNEL: SETUP PCI\n");
   init_pci();
 #ifdef USB_DEVICE
-  scsi_init();
-  _kputs(" KERNEL: SETUP SCSI EMU\n");
-  init_uhci();
-  _kputs(" KERNEL: SETUP UHCI\n");
+  ata_init();
+  rawdev.raw_read = ata_read;
+  rawdev.raw_write = ata_write;
+  _kputs(" KERNEL: SETUP ATA\n");
 #endif
   init_ext3fs();
   _kputs(" KERNEL: SETUP EXT3FS\n");

@@ -226,7 +226,14 @@ PUBLIC void i0Dh(u_int32_t ebp)
 
 PUBLIC void i0Eh()
 {
-  _kputs("\nInt0x0E PageFault error!\n");
+  u_int32_t cr2, ebp_val;
+  asm volatile("movl %%cr2, %0" : "=r"(cr2));
+  asm volatile("movl %%ebp, %0" : "=r"(ebp_val));
+  /* stack: ebp -> old_ebp -> ret_addr -> pusha(32) -> error_code -> eip -> cs */
+  u_int32_t error = *(u_int32_t*)(ebp_val + 40);
+  u_int32_t eip   = *(u_int32_t*)(ebp_val + 44);
+  u_int32_t cs    = *(u_int32_t*)(ebp_val + 48);
+  _kprintf("\nPageFault CR2=%x err=%x eip=%x cs=%x\n", cr2, error, eip, cs);
   disableInterrupt();
   for(;;);
 }
@@ -308,9 +315,9 @@ PUBLIC void interrupt_selector(int selector)
 
 PUBLIC void defaulthandler()
 {
-  _kputs("default handler\n");
-  disableInterrupt();
-  for(;;);
+  /* Send EOI to both PICs in case this is a hardware interrupt */
+  out8(0xA0, 0x20);
+  out8(0x20, 0x20);
 }
 
 PRIVATE void init_pic()
@@ -413,7 +420,7 @@ PUBLIC u_int8_t get_interrupt_bit_high()
 
 PUBLIC void init_setupidt()
 {
-  idtr.limit = sizeof(InterruptDescTable)*IDTNUM;
+  idtr.limit = sizeof(InterruptDescTable)*IDTNUM - 1;
   idtr.baseH = (u_int16_t)(((u_int32_t)&interruptDescTable >> 16) & 0xffff);
   idtr.baseL = (u_int16_t)(((u_int32_t)&interruptDescTable >>  0) & 0xffff);
 

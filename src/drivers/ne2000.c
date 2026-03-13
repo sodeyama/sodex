@@ -11,7 +11,7 @@
 int io_base;
 
 PRIVATE u_int16_t get_baseaddr();
-PRIVATE void set_macaddr();
+PRIVATE void set_macaddr(u_int8_t* buff);
 //PRIVATE void nic_enable_ctl(int flag);
 PRIVATE void nic_sendenable_ctl(int flag);
 PRIVATE void nic_recvenable_ctl(int flag);

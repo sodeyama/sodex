@@ -139,7 +139,7 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
     break;
   }
 
-  return ret;
+  *eax = ret;
 }
 
 PRIVATE int sys_read(int fd, const void* buf, size_t count)
@@ -161,6 +161,7 @@ PRIVATE int __stdin_read(int fd, const void* buf, size_t count)
   char stdin[KEY_BUF+1];
   memset(stdin, 0, KEY_BUF+1);
 
+  screen_save_prompt();
   asm("sti");
   while (TRUE) {
     //_kprintf("stdin_read\n");

@@ -18,6 +18,8 @@
 
 PRIVATE int screenX = 0;
 PRIVATE int screenY = 0;
+PRIVATE int promptX = 0;
+PRIVATE int promptY = 0;
 //char gColor = 0x7;
 //char gColor = 0x9a;
 //char gColor = 0x30;
@@ -38,7 +40,9 @@ PUBLIC void _kputc(char c)
       screenY++;
     return;
   } else if (c == KEY_BACK) {
-    _poscolor_printc(--screenX, screenY, gColor, 0);
+    if (screenY > promptY || (screenY == promptY && screenX > promptX)) {
+      _poscolor_printc(--screenX, screenY, gColor, 0);
+    }
     return;
   }
 
@@ -155,15 +159,14 @@ PUBLIC void clr_screen()
 
 PUBLIC void screen_scrollup()
 {
-  //asm __volatile__("cli");
   int i, j;
   for (i = SCREEN_WIDTH, j=0; i <= VRAMMAX; ++i, ++j)
     VRAM[2 * j] = VRAM[2 * i];
   for (i = 0; i < SCREEN_WIDTH*2; ++i)
     VRAM[2*SCREEN_WIDTH*SCREEN_HEIGHT+i] = 0;
-  //if (screenY > SCREEN_HEIGHT)
-  //  screenY--;
-  //asm __volatile__("sti");
+  screenY = SCREEN_HEIGHT - 1;
+  if (promptY > 0)
+    promptY--;
 }
 
 PUBLIC void screen_pointset(int x, int y)
@@ -184,6 +187,12 @@ PUBLIC void init_screen()
          "Copyright (C) 2007, Sodeyama\n");
   _kputs(" URL:http://d.hatena.ne.jp/sodex/ \n");
   _kputs("\n");
+}
+
+PUBLIC void screen_save_prompt()
+{
+  promptX = screenX;
+  promptY = screenY;
 }
 
 PUBLIC void debug_print()

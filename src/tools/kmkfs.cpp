@@ -14,7 +14,7 @@ using namespace std;
 #define EXT3_N_BLOCKS       15
 #define EXT3_NAME_LEN       256
 #define BLOCK_SIZE          4096    //4096Byte
-#define BLOCK_MAX           360     //360個
+#define BLOCK_MAX           700     //700個
 #define INODE_SIZE          128     //128Byte
 #define INODE_MAX           128     //128個
 #define INODE_PER_BLOCK     ((BLOCK_SIZE)/(INODE_SIZE)) //32
@@ -80,7 +80,7 @@ using namespace std;
 // buf size
 #define BUF_BOOTA           512
 #define BUF_BOOTM           2048
-#define BUF_KERNEL          512000 //500KB
+#define BUF_KERNEL          2500000 //2.5MB
 #define BUF_INIT            16384
 
 struct ext3_super_block {

@@ -11,7 +11,6 @@
 #define MAX_PMHOLES 1024
 
 // we need the memory size of 64MB at least
-#define KERNEL_MEMBASE 0xc0100000
 #define KERNEL_MEMEND  0xc2000000	// 32MB
 #define KERNEL_PMEMBASE 0x2000000	// physical address
 #define KERNEL_PMEMEND	0x4000000	// physical address

@@ -263,6 +263,13 @@ PUBLIC void i0Eh()
   u_int32_t eip   = *(u_int32_t*)(ebp_val + 44);
   u_int32_t cs    = *(u_int32_t*)(ebp_val + 48);
   _kprintf("\nPageFault CR2=%x err=%x eip=%x cs=%x\n", cr2, error, eip, cs);
+  /* Dump pusha registers from stack */
+  {
+    u_int32_t *regs = (u_int32_t*)(ebp_val + 8); /* after old_ebp and ret_addr */
+    com1_printf("PF: CR2=%x err=%x eip=%x cs=%x\r\n", cr2, error, eip, cs);
+    com1_printf("PF: EDI=%x ESI=%x EBP=%x ESP=%x\r\n", regs[0], regs[1], regs[2], regs[3]);
+    com1_printf("PF: EBX=%x EDX=%x ECX=%x EAX=%x\r\n", regs[4], regs[5], regs[6], regs[7]);
+  }
   disableInterrupt();
   for(;;);
 }

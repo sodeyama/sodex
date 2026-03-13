@@ -8,7 +8,6 @@
 #define PING_DATA_SIZE 56
 #define PING_PKT_SIZE (sizeof(struct icmp_hdr) + PING_DATA_SIZE)
 #define PING_COUNT     4
-#define PING_TIMEOUT   300  /* 3 seconds in ticks (100 Hz) */
 
 static u_int16_t checksum(u_int8_t *data, int len)
 {
@@ -25,84 +24,105 @@ static u_int16_t checksum(u_int8_t *data, int len)
     return (u_int16_t)(~sum);
 }
 
+static void print_decimal(int n)
+{
+    char buf[12];
+    int i = 0;
+    if (n == 0) { putc('0'); return; }
+    if (n < 0) { putc('-'); n = -n; }
+    while (n > 0) { buf[i++] = '0' + (n % 10); n /= 10; }
+    while (i > 0) putc(buf[--i]);
+}
+
+static void print_ip(u_int8_t *a)
+{
+    int i;
+    for (i = 0; i < 4; i++) {
+        print_decimal(a[i]);
+        if (i < 3) putc('.');
+    }
+}
+
+static struct sockaddr_in s_dest;
+static struct sockaddr_in s_from;
+static u_int8_t s_pkt[PING_PKT_SIZE];
+static u_int8_t s_reply[128];
+static int s_sent, s_received, s_seq;
+static int s_sock;
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: ping <ip address>\n");
+        puts("Usage: ping <ip>\n");
         return 1;
     }
 
-    struct sockaddr_in dest;
-    memset(&dest, 0, sizeof(dest));
-    dest.sin_family = AF_INET;
-    if (!inet_aton(argv[1], &dest.sin_addr)) {
-        printf("Invalid address: %s\n", argv[1]);
+    memset(&s_dest, 0, sizeof(s_dest));
+    s_dest.sin_family = AF_INET;
+    inet_aton(argv[1], &s_dest.sin_addr);
+
+    puts("PING ");
+    print_ip((u_int8_t *)&s_dest.sin_addr);
+    puts("\n");
+
+    s_sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (s_sock < 0) {
+        puts("socket fail\n");
         return 1;
     }
 
-    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (sock < 0) {
-        printf("socket() failed\n");
-        return 1;
-    }
+    s_sent = 0;
+    s_received = 0;
 
-    printf("PING %s: %d data bytes\n", argv[1], PING_DATA_SIZE);
+    for (s_seq = 1; s_seq <= PING_COUNT; s_seq++) {
+        memset(s_pkt, 0, PING_PKT_SIZE);
 
-    int sent = 0, received = 0;
-    u_int16_t seq;
-
-    for (seq = 1; seq <= PING_COUNT; seq++) {
-        u_int8_t pkt[PING_PKT_SIZE];
-        memset(pkt, 0, PING_PKT_SIZE);
-
-        /* Build ICMP echo request */
-        struct icmp_hdr *icmp = (struct icmp_hdr *)pkt;
+        struct icmp_hdr *icmp = (struct icmp_hdr *)s_pkt;
         icmp->type = ICMP_ECHO;
         icmp->code = 0;
         icmp->checksum = 0;
         icmp->id = htons(0x1234);
-        icmp->sequence = htons(seq);
+        icmp->sequence = htons(s_seq);
 
-        /* Fill data payload */
         int i;
         for (i = 0; i < PING_DATA_SIZE; i++)
-            pkt[sizeof(struct icmp_hdr) + i] = (u_int8_t)(i & 0xff);
+            s_pkt[sizeof(struct icmp_hdr) + i] = (u_int8_t)(i & 0xff);
 
-        /* Calculate checksum */
-        u_int16_t ck = checksum(pkt, PING_PKT_SIZE);
+        u_int16_t ck = checksum(s_pkt, PING_PKT_SIZE);
         icmp->checksum = htons(ck);
 
-        /* Send */
-        int ret = sendto(sock, pkt, PING_PKT_SIZE, 0,
-                        (struct sockaddr *)&dest, sizeof(dest));
+        int ret = sendto(s_sock, s_pkt, PING_PKT_SIZE, 0,
+                        (struct sockaddr *)&s_dest, sizeof(s_dest));
         if (ret < 0) {
-            printf("sendto() failed\n");
+            puts("sendto fail\n");
             continue;
         }
-        sent++;
+        s_sent++;
 
-        /* Receive reply */
-        u_int8_t reply[128];
-        struct sockaddr_in from;
-        int n = recvfrom(sock, reply, sizeof(reply), 0,
-                        (struct sockaddr *)&from, 0);
+        int n = recvfrom(s_sock, s_reply, sizeof(s_reply), 0,
+                        (struct sockaddr *)&s_from, 0);
 
         if (n > 0) {
-            struct icmp_hdr *reply_icmp = (struct icmp_hdr *)reply;
-            if (reply_icmp->type == ICMP_ECHOREPLY) {
-                u_int8_t *fa = (u_int8_t *)&from.sin_addr;
-                printf("%d bytes from %d.%d.%d.%d: icmp_seq=%d\n",
-                       n, fa[0], fa[1], fa[2], fa[3], seq);
-                received++;
-            }
+            s_received++;
+            print_decimal(n);
+            puts(" bytes from ");
+            print_ip((u_int8_t *)&s_from.sin_addr);
+            puts(": icmp_seq=");
+            print_decimal(s_seq);
+            putc('\n');
         } else {
-            printf("Request timeout for icmp_seq %d\n", seq);
+            puts("Request timeout for icmp_seq ");
+            print_decimal(s_seq);
+            putc('\n');
         }
     }
 
-    printf("--- %s ping statistics ---\n", argv[1]);
-    printf("%d packets transmitted, %d received\n", sent, received);
+    puts("--- ping statistics ---\n");
+    print_decimal(s_sent);
+    puts(" packets transmitted, ");
+    print_decimal(s_received);
+    puts(" received\n");
 
-    closesocket(sock);
+    closesocket(s_sock);
     return 0;
 }

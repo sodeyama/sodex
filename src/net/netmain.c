@@ -4,6 +4,7 @@
 #include <ne2000.h>
 #include <timer.h>
 #include <socket.h>
+#include <rs232c.h>
 
 #define CLOCK_CONF_SECOND 100
 #define PERIODIC_TIMER_INTERVAL  50

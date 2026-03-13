@@ -8,7 +8,7 @@ memset:
 
         cld
         rep
-        stosl
+        stosb
 
         popl    %ebp
         ret

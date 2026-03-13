@@ -14,6 +14,8 @@
 #include <uip_arp.h>
 #include <ne2000.h>
 
+EXTERN volatile u_int32_t kernel_tick;
+
 PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 
 PRIVATE u_int8_t icmp_sendbuf[1500];
@@ -222,6 +224,12 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
 
   struct sockaddr_in *dest = addr ? addr : &sk->remote_addr;
 
+  /* Copy user-space sockaddr_in to kernel stack before interrupts can change CR3 */
+  struct sockaddr_in dest_copy;
+  if (addr) {
+    memcpy(&dest_copy, addr, sizeof(struct sockaddr_in));
+    dest = &dest_copy;
+  }
   if (sk->type == SOCK_RAW && sk->protocol == IPPROTO_ICMP) {
     /* Build raw IP packet with ICMP payload */
     /* User provides: ICMP header + data in buf */
@@ -271,12 +279,9 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
     /* Copy to uip_buf for ARP resolution */
     memcpy(uip_buf, icmp_sendbuf, total_len < 60 ? 60 : total_len);
     uip_len = total_len;
+
     uip_arp_out();
 
-    /* uip_arp_out() either:
-     * 1. Resolved MAC and updated uip_buf ethernet header -> send uip_buf
-     * 2. Replaced uip_buf with ARP request -> send ARP first, then retry
-     */
     int send_len = uip_len < 60 ? 60 : uip_len;
     ne2000_send(uip_buf, send_len);
 
@@ -315,9 +320,17 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
   struct kern_socket *sk = &socket_table[sockfd];
   if (sk->state == SOCK_STATE_UNUSED) return -1;
 
-  /* If no data, block */
+  /* If no data, poll NE2000 directly (interrupts disabled to avoid context switch) */
   if (sk->rx_len == 0) {
-    sleep_on_timeout(&sk->recv_wq, sk->timeout_ticks);
+    EXTERN void network_poll(void);
+    int poll_count;
+    for (poll_count = 0; poll_count < 5000000; poll_count++) {
+      disableInterrupt();
+      network_poll();
+      enableInterrupt();
+      if (sk->rx_len > 0)
+        break;
+    }
     if (sk->rx_len == 0)
       return 0; /* timeout */
   }

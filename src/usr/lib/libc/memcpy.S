@@ -8,7 +8,7 @@ memcpy:
         
         cld
         rep
-        movsl
+        movsb
         
         popl    %ebp
         ret

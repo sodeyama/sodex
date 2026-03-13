@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory
+TESTS = test_lib test_memb test_memory test_vga
 
 .PHONY: all clean test
 
@@ -65,6 +65,13 @@ test_memory_memory.o: $(SRC)/memory.c
 		-c -o $@ $<
 
 test_memory_string.o: $(SRC)/lib/string.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
+
+# VGA _kvsnprintf format test
+test_vga: test_vga.c test_vga_vga.o
+	$(CC) $(CFLAGS) -o $@ test_vga.c test_vga_vga.o
+
+test_vga_vga.o: $(SRC)/vga.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
 
 clean:

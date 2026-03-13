@@ -15,6 +15,7 @@
 
 #include <sodex/const.h>
 #include <sys/types.h>
+#include <stdarg.h>
 
 #define SCREEN_WIDTH    80
 #define SCREEN_HEIGHT   25
@@ -27,6 +28,7 @@ PUBLIC void _pos_putc(int x, int y, char c);
 PUBLIC void _kputc(char c);
 PUBLIC void _kputs(char *str);
 PUBLIC void _kprintf(char *str, ...);
+PUBLIC int _kvsnprintf(char *buf, int size, const char *fmt, va_list ap);
 PUBLIC void _kprintb(u_int8_t c);
 PUBLIC void _kprintb16(u_int16_t c);
 PUBLIC void _kprintb32(u_int32_t c);

@@ -12,6 +12,9 @@
 #include <vga.h>
 #include <process.h>
 #include <pit8254.h>
+#include <sodex/const.h>
+
+PUBLIC volatile u_int32_t kernel_tick = 0;
 
 #define PIT_COUNTER0    0x040
 #define PIT_COUNTER1    0x041
@@ -42,7 +45,7 @@ PRIVATE void pit_setcounter(u_int16_t counter);
 
 PUBLIC void init_pit()
 {
-  //pit_setcounter(LATCH);
+  pit_setcounter(LATCH);
 }
 
 PRIVATE void pit_setcounter(u_int16_t counter)

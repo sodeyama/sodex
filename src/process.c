@@ -25,6 +25,8 @@
 #include <elfloader.h>
 #include <execve.h>
 
+EXTERN void network_poll(void);
+
 
 PRIVATE TSS tss;
 
@@ -111,6 +113,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
   pic_eoi(IRQ_TIMER);
   save_process(is_usermode, iret_eip, iret_cs, iret_eflags,
                iret_esp, iret_ss, ebp);
+  network_poll();
 
   while (current->signal) {
     u_int32_t sig = maxsignal(current->signal)+1;
@@ -320,5 +323,4 @@ PRIVATE void p_print_debug(struct task_struct* prev, struct task_struct* next)
   _kprintf("prev->count is %x, next->count is %x\n",
            prev->count, next->count);
 }
-
 

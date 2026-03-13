@@ -31,9 +31,14 @@
 #include <mstorage.h>
 #include <scsi.h>
 #include <ata.h>
+#include <uip.h>
+#include <uip_arp.h>
 #ifdef KTEST_BUILD
 PUBLIC void run_kernel_tests(void);
 #endif
+
+EXTERN void network_init(void);
+EXTERN void network_poll(void);
 
 PRIVATE void mem_test();
 PRIVATE void fdc_test();
@@ -43,10 +48,37 @@ PRIVATE void serial_test();
 PRIVATE void ext3_test();
 PRIVATE void syscall_test();
 
+PRIVATE void dbg_serial_init(void)
+{
+  out8(0x3F8 + 1, 0x00);
+  out8(0x3F8 + 3, 0x80);
+  out8(0x3F8 + 0, 0x01);
+  out8(0x3F8 + 1, 0x00);
+  out8(0x3F8 + 3, 0x03);
+  out8(0x3F8 + 2, 0xC7);
+  out8(0x3F8 + 4, 0x0B);
+}
+
+PRIVATE void dbg_serial_putc(char c)
+{
+  while (!(in8(0x3F8 + 5) & 0x20));
+  out8(0x3F8, c);
+}
+
+PRIVATE void dbg_serial_puts(const char *s)
+{
+  while (*s) {
+    if (*s == '\n') dbg_serial_putc('\r');
+    dbg_serial_putc(*s++);
+  }
+}
+
 PUBLIC void start_kernel()
 {
   // KERNEL setting
   init_screen();
+  dbg_serial_init();
+  dbg_serial_puts("SERIAL: kernel started\n");
 
   _kputs(" BOOTLOADER: Kernel was loaded\n");
   _kputs("\n");
@@ -92,27 +124,203 @@ PUBLIC void start_kernel()
 
   init_syscall();
   _kputs(" KERNEL: SETUP SYSTEMCALL\n");
-  //init_ne2000();
-  //_kputs(" KERNEL: SETUP NE2000\n");
+  dbg_serial_puts("SERIAL: before init_ne2000\n");
+
+  init_ne2000();
+  _kputs(" KERNEL: SETUP NE2000\n");
+  dbg_serial_puts("SERIAL: after init_ne2000\n");
+
+  /* Immediate NE2000 register dump right after init */
+  {
+    EXTERN int io_base;
+    u_int16_t ne_base = 0xC100;
+    _kprintf("io_base=%x ne_base=%x\n", io_base, ne_base);
+    /* Write IMR directly and verify via ISR test */
+    out8(ne_base + O_CR, CR_PAGE0|CR_STA|CR_RD_STOP);
+    out8(ne_base + O_IMR, IMR_ALL);
+    u_int8_t cr_test = in8(ne_base + 0x00);
+
+    /* Write a known pattern to PIC and read back */
+    u_int8_t pic1_before = in8(0x21);
+    out8(0x21, 0xAA);
+    u_int8_t pic1_after = in8(0x21);
+    out8(0x21, pic1_before); /* restore */
+
+    dbg_serial_puts("TEST CR=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((cr_test & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" PIC1 before=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((pic1_before & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" after_AA=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((pic1_after & (1<<b)) ? '1' : '0');
+    dbg_serial_puts("\n");
+    u_int8_t cr0 = in8(ne_base + 0x00);
+    u_int8_t isr0 = in8(ne_base + 0x07);
+    _kprintf("NE2K-POST: CR=%x ISR=%x IMR=NA\n", cr0, isr0);
+    u_int8_t pic1 = in8(0x21);
+    u_int8_t pic2 = in8(0xA1);
+    _kprintf("PIC-POST: m=%x s=%x\n", pic1, pic2);
+    /* binary to serial */
+    dbg_serial_puts("POST CR=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((cr0 & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" ISR=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((isr0 & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" IMR=QEMU-N/A");
+    dbg_serial_puts(" PICm=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((pic1 & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" PICs=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((pic2 & (1<<b)) ? '1' : '0');
+    dbg_serial_puts("\n");
+  }
+
+  /* uIP TCP/IP stack initialization */
+  dbg_serial_puts("SERIAL: before uip_init\n");
+  uip_init();
+  {
+    uip_ipaddr_t ipaddr;
+    uip_ipaddr(&ipaddr, 10, 0, 2, 15);
+    uip_sethostaddr(&ipaddr);
+    uip_ipaddr(&ipaddr, 255, 255, 255, 0);
+    uip_setnetmask(&ipaddr);
+    uip_ipaddr(&ipaddr, 10, 0, 2, 1);
+    uip_setdraddr(&ipaddr);
+  }
+  {
+    struct uip_eth_addr mac = {{0x52, 0x54, 0x00, 0x12, 0x34, 0x56}};
+    uip_setethaddr(mac);
+  }
+  _kputs(" KERNEL: SETUP uIP\n");
+
+  network_init();
+  _kputs(" KERNEL: SETUP NETWORK\n");
+
+  /* Test NE2000 TX/RX before process scheduler takes over */
+  {
+    /* Force IMR to enable all interrupts */
+    {
+      u_int16_t nb = 0xC100;
+      out8(nb + O_CR, CR_PAGE0|CR_STA|CR_RD_STOP);
+      out8(nb + O_IMR, 0x7F);
+      out8(nb + O_ISR, 0xFF);  /* Clear all pending */
+    }
+    dbg_serial_puts("SENDING ARP REQUEST\n");
+    u_int8_t arp_pkt[42];
+    int i;
+    for (i=0; i<6; i++) arp_pkt[i] = 0xFF;
+    arp_pkt[6]=0x52; arp_pkt[7]=0x54; arp_pkt[8]=0x00;
+    arp_pkt[9]=0x12; arp_pkt[10]=0x34; arp_pkt[11]=0x56;
+    arp_pkt[12]=0x08; arp_pkt[13]=0x06;
+    arp_pkt[14]=0x00; arp_pkt[15]=0x01;
+    arp_pkt[16]=0x08; arp_pkt[17]=0x00;
+    arp_pkt[18]=0x06; arp_pkt[19]=0x04;
+    arp_pkt[20]=0x00; arp_pkt[21]=0x01;
+    arp_pkt[22]=0x52; arp_pkt[23]=0x54; arp_pkt[24]=0x00;
+    arp_pkt[25]=0x12; arp_pkt[26]=0x34; arp_pkt[27]=0x56;
+    arp_pkt[28]=10; arp_pkt[29]=0; arp_pkt[30]=2; arp_pkt[31]=15;
+    for (i=32; i<38; i++) arp_pkt[i] = 0x00;
+    arp_pkt[38]=10; arp_pkt[39]=0; arp_pkt[40]=2; arp_pkt[41]=2;
+    /* Pad to minimum Ethernet frame size (60 bytes) */
+    u_int8_t frame[60];
+    memset(frame, 0, 60);
+    memcpy(frame, arp_pkt, 42);
+    ne2000_send(frame, 60);
+    dbg_serial_puts("ARP SENT\n");
+
+    /* Check CR and ISR immediately after send */
+    u_int16_t ne_base = 0xC100;
+    {
+      u_int8_t cr_after = in8(ne_base + 0x00);
+      u_int8_t isr_after = in8(ne_base + 0x07);
+      dbg_serial_puts("AFTER-TX CR=");
+      for (int b=7; b>=0; b--) dbg_serial_putc((cr_after & (1<<b)) ? '1' : '0');
+      dbg_serial_puts(" ISR=");
+      for (int b=7; b>=0; b--) dbg_serial_putc((isr_after & (1<<b)) ? '1' : '0');
+      dbg_serial_puts("\n");
+    }
+
+    /* Poll for PTX or PRX */
+    u_int32_t loops;
+    for (loops = 0; loops < 50000000; loops++) {
+      u_int8_t isr = in8(ne_base + 0x07);
+      if (isr) {
+        dbg_serial_puts("ISR=");
+        for (int b=7; b>=0; b--) dbg_serial_putc((isr & (1<<b)) ? '1' : '0');
+        dbg_serial_puts("\n");
+        out8(ne_base + 0x07, isr);
+        if (isr & 0x01) {
+          dbg_serial_puts("GOT PRX!\n");
+          ne2000_rx_pending = 1;
+          network_poll();
+        }
+        if (isr & 0x02) {
+          dbg_serial_puts("GOT PTX\n");
+        }
+        if (isr & 0x04) dbg_serial_puts("RXE\n");
+        if (isr & 0x08) dbg_serial_puts("TXE\n");
+        break;
+      }
+    }
+    if (loops == 50000000) {
+      dbg_serial_puts("NO ISR after 50M polls\n");
+      u_int8_t tsr = in8(ne_base + 0x04);
+      dbg_serial_puts("TSR=");
+      for (int b=7; b>=0; b--) dbg_serial_putc((tsr & (1<<b)) ? '1' : '0');
+      dbg_serial_puts("\n");
+    }
+    /* Check if IRQ handler was called */
+    {
+      EXTERN volatile u_int32_t ne2k_irq_count;
+      EXTERN volatile u_int8_t ne2k_last_isr;
+      dbg_serial_puts("IRQ count=");
+      /* Print count as decimal */
+      {
+        u_int32_t n = ne2k_irq_count;
+        if (n == 0) { dbg_serial_putc('0'); }
+        else {
+          char d[10]; int di = 0;
+          while (n) { d[di++] = '0' + (n % 10); n /= 10; }
+          while (di--) dbg_serial_putc(d[di]);
+        }
+      }
+      dbg_serial_puts(" last_isr=");
+      for (int b=7; b>=0; b--) dbg_serial_putc((ne2k_last_isr & (1<<b)) ? '1' : '0');
+      dbg_serial_puts("\n");
+    }
+  }
+
   init_process();
   _kputs(" KERNEL: SETUP PROCESS\n");
   _kputs(" KERNEL: SETUP SIGNAL\n");
 
   _kputs("\n");
 
+  {
+    /* NE2000 register debug dump (once) */
+    u_int16_t ne_base = 0xC100;
+    u_int8_t cr = in8(ne_base + 0x00);
+    u_int8_t isr = in8(ne_base + 0x07);
+    _kprintf("NE2K: CR=%x ISR=%x IMR=NA\n", cr, isr);
 
-  /*
-  char *buf = kalloc(512);
-  memset(buf, 0, 512);
-  scsi_write(3253, 1, buf);
-  //scsi_read(10, 4, buf);
-  int i;
-  for (i = 0; i < 16; i++) {
-    _kprintb(buf[i]);
+    /* PIC mask debug */
+    u_int8_t pic1 = in8(0x21);
+    u_int8_t pic2 = in8(0xA1);
+    _kprintf("PIC: master=%x slave=%x\n", pic1, pic2);
+
+    /* Output to serial as binary bit patterns */
+    dbg_serial_puts("NE2K CR=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((cr & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" ISR=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((isr & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" IMR=QEMU-N/A");
+    dbg_serial_puts("\nPIC m=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((pic1 & (1<<b)) ? '1' : '0');
+    dbg_serial_puts(" s=");
+    for (int b=7; b>=0; b--) dbg_serial_putc((pic2 & (1<<b)) ? '1' : '0');
+    dbg_serial_puts("\n");
   }
-  */
 
-  for(;;);
+  for(;;) {
+    network_poll();
+  }
 }
 
 PRIVATE void syscall_test()

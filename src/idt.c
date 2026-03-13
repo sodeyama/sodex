@@ -297,13 +297,8 @@ PUBLIC void i13h()
 
 PUBLIC void i20h_pictimer()
 {
-  /*
-  _pos_putc(0, 6, timercount[count%8]);
-  if (count == 255)
-    count = 0;
-  else
-    count++;
-  */
+  extern volatile u_int32_t kernel_tick;
+  kernel_tick++;
   pic_eoi(IRQ_TIMER);
 }
 
@@ -376,7 +371,8 @@ PRIVATE void init_pic()
   set_intr_bit(IRQ_TIMER);
   set_intr_bit(IRQ_KEY);
   //set_intr_bit(IRQ_FDC);
-  //set_intr_bit(IRQ_NE2000);
+  set_intr_bit(IRQ_CASCADE);  /* Enable cascade (IRQ2) for slave PIC */
+  set_intr_bit(IRQ_NE2000);
 }
 
 PUBLIC void set_intr_bit(u_int8_t intr_num)

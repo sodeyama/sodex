@@ -39,17 +39,13 @@
  */
 
 #include "clock-arch.h"
-//#include <sys/time.h>
+
+extern volatile unsigned int kernel_tick;
 
 /*---------------------------------------------------------------------------*/
 clock_time_t
 clock_time(void)
 {
-  //struct timeval tv;
-  //struct timezone tz;
-
-  //gettimeofday(&tv, &tz);
-
-  //return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+  return kernel_tick;
 }
 /*---------------------------------------------------------------------------*/

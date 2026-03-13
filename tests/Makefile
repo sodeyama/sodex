@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_ext3fs
+TESTS = test_lib test_memb test_memory test_vga test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll
 
 .PHONY: all clean test
 
@@ -77,6 +77,40 @@ test_vga_vga.o: $(SRC)/vga.c
 # ext3fs bitmap/parse tests (standalone, no ext3fs.c dependency)
 test_ext3fs: test_ext3fs.c
 	$(CC) $(CFLAGS) -o $@ test_ext3fs.c
+
+# clock_time / timer tests (Plan 01)
+test_clock: test_clock.c test_clock_clockarch.o test_clock_timer.o
+	$(CC) $(CFLAGS) -o $@ test_clock.c test_clock_clockarch.o test_clock_timer.o
+
+test_clock_clockarch.o: $(SRC)/net/clock-arch.c
+	$(CC) $(CFLAGS) -DTEST_BUILD \
+		-DCLOCK_CONF_SECOND=100 \
+		-I$(SRC)/include \
+		-include mocks/mock_kernel.h \
+		-c -o $@ $<
+
+test_clock_timer.o: $(SRC)/net/timer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD \
+		-DCLOCK_CONF_SECOND=100 \
+		-I$(SRC)/include \
+		-include mocks/mock_kernel.h \
+		-c -o $@ $<
+
+# NE2000 receive logic tests (Plan 02) - pure logic, no I/O deps
+test_ne2000: test_ne2000.c
+	$(CC) $(CFLAGS) -o $@ test_ne2000.c
+
+# NE2000 IRQ handler logic tests (Plan 03) - pure logic
+test_ne2000_irq: test_ne2000_irq.c
+	$(CC) $(CFLAGS) -o $@ test_ne2000_irq.c
+
+# Kernel network integration tests (Plan 04) - config validation
+test_kernel_net: test_kernel_net.c
+	$(CC) $(CFLAGS) -o $@ test_kernel_net.c
+
+# Network polling logic tests (Plan 05)
+test_netpoll: test_netpoll.c
+	$(CC) $(CFLAGS) -o $@ test_netpoll.c
 
 clean:
 	rm -f $(TESTS) *.o

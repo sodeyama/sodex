@@ -8,7 +8,8 @@
 #define NE2K_QEMU_BASEADDR  0xC100
 
 #define DATA_PORT_OFFSET    0x10
-#define RESET_PORT_OFFSET   0x18
+/* QEMU の NE2000 リセットポートは 0x1F */
+#define RESET_PORT_OFFSET   0x1F
 
 // page0 registers
 #define I_CR        0x0
@@ -164,12 +165,12 @@
 #define PSTART_ADDR 0x46
 #define PSTOP_ADDR  0x80
 #define BNRY_ADDR   0x46
-#define CURR_ADDR   0x46
+#define CURR_ADDR   (PSTART_ADDR + 1)
 
 
 PUBLIC void init_ne2000();
 PUBLIC int ne2000_send(void* buf, u_int16_t len);
 PUBLIC int ne2000_receive();
-//PUBLIC void i2Bh_ne2000_interrupt();
+EXTERN volatile u_int8_t ne2000_rx_pending;
 
 #endif

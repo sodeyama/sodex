@@ -54,8 +54,7 @@ $(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/
 # === Main targets ===
 
 .PHONY: all
-all : ${KERNEL} ${ACIENT} ${MIDDLE}
-	$(MAKE) tools
+all : ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
@@ -76,7 +75,7 @@ ${NET_OBJS} :
 # === Boot loader ===
 
 KSIZE=`${GETSIZE} ${KERNEL}`
-${ACIENT} : ${FIRST_BOOT_FILE} ${KERNEL}
+${ACIENT} : ${FIRST_BOOT_FILE} ${KERNEL} ${GETSIZE}
 	echo ${KSIZE}
 	${AS} ${ASFLAGS} --defsym KERNEL_SECTS=${KSIZE} ${FIRST_BOOT_FILE} -o $(OBJDIR)/boota.o -a > ${LIST}/boota.lst
 	${LD} ${BOOTA_LFLAGS} $(OBJDIR)/boota.o -o $@

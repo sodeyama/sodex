@@ -274,7 +274,7 @@ PUBLIC void init_ext3fs();
 PUBLIC void ext3_ls(ext3_dentry* dentry);
 PUBLIC int ext3_open(const char* pathname, int flags, mode_t mode);
 PUBLIC ssize_t ext3_read(int fd, void* buf, size_t count);
-PUBLIC ssize_t ext3_write(int fd, void* buf, size_t count);
+PUBLIC ssize_t ext3_write(int fd, const void* buf, size_t count);
 PUBLIC int ext3_mkdir(const char* pathname, mode_t mode);
 PUBLIC void ext3_flush();
 PUBLIC void ext3_dirty_print();

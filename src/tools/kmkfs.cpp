@@ -235,7 +235,7 @@ int first_data_block = 8;
 int current_inode = 0;
 int rootdir_inode;
 
-void error(char* str)
+void error(const char* str)
 {
   cerr << str << endl;
   exit(1);
@@ -380,7 +380,7 @@ void set_inode_bitmap(fstream& ofs, u_int8_t* ino_bitmap, u_int32_t size)
 
 int create_file(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
                 ext3_group_desc* gd, u_int8_t* ino_bitmap,
-                u_int8_t* block_bitmap, char *filename,
+                u_int8_t* block_bitmap, const char *filename,
                 u_int8_t* data, u_int32_t data_size, u_int32_t newino)
 {
   if (newino > INODE_MAX)
@@ -458,7 +458,7 @@ int create_file(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
 }
 
 int insert_dir_data(fstream& ofs, ext3_inode* inode, u_int32_t n_dirinode,
-                    u_int32_t n_fileinode, u_int8_t file_type, char *name)
+                    u_int32_t n_fileinode, u_int8_t file_type, const char *name)
 {
   u_int16_t rec_len;
   u_int8_t  pure_name_len, name_len;
@@ -830,7 +830,7 @@ void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
   u_int8_t buf[BUF_INIT];
 
   if (dir) {
-    while (dent = readdir(dir)) {
+    while ((dent = readdir(dir))) {
       memset(buf, 0, BUF_INIT);
       if ( strcmp(dent->d_name, ".") == 0 ||
            strcmp(dent->d_name, "..") == 0)

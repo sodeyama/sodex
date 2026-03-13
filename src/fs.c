@@ -49,5 +49,7 @@ PUBLIC int fs_stdio_open(struct files_struct* ftask)
   struct file* fs_stderr = kalloc(sizeof(struct file));
   memset(fs_stderr, 0, sizeof(struct file));
   fs_stderr->f_stdioflag = FLAG_STDOUT;
-  ftask->fs_fd[ftask->fs_freefd++] = fs_stderr;   
+  ftask->fs_fd[ftask->fs_freefd++] = fs_stderr;
+
+  return TRUE;
 }

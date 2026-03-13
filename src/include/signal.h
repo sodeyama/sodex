@@ -39,8 +39,8 @@ struct sigaction {
 
 PUBLIC sighandler_t sys_signal(int signum, sighandler_t sighandler);
 PUBLIC int sys_kill(pid_t pid, int signum);
-PUBLIC void *signal_dummy(int signum);
-PUBLIC void *core_dump(int signum);
-PUBLIC void *task_stop(int signum);
+PUBLIC void signal_dummy(int signum);
+PUBLIC void core_dump(int signum);
+PUBLIC void task_stop(int signum);
 
 #endif

@@ -41,13 +41,8 @@ PUBLIC void run_kernel_tests(void);
 EXTERN void network_init(void);
 EXTERN void network_poll(void);
 
-PRIVATE void mem_test();
-PRIVATE void fdc_test();
-PRIVATE void fs_test();
-PRIVATE void dlist_test();
-PRIVATE void serial_test();
-PRIVATE void ext3_test();
-PRIVATE void syscall_test();
+PRIVATE void __attribute__((unused)) ext3_test();
+PRIVATE void __attribute__((unused)) syscall_test();
 
 PRIVATE void dbg_serial_init(void)
 {
@@ -324,7 +319,7 @@ PUBLIC void start_kernel()
   }
 }
 
-PRIVATE void syscall_test()
+PRIVATE void __attribute__((unused)) syscall_test()
 {
   // system call test
   ext3_ls(rootdir);
@@ -345,7 +340,7 @@ PRIVATE void syscall_test()
                     :: "r" (fd_stdout), "r" (buf), "r" (size));
 }
 
-PRIVATE void ext3_test()
+PRIVATE void __attribute__((unused)) ext3_test()
 {
   int fd = ext3_open("/hoge", O_CREAT|O_RDWR, 0);
   char buf[16] = {'0', '1', '2', '3', '4', '5', '6', '7',

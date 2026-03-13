@@ -17,8 +17,9 @@
 int sys_brk(void* end_data_segment)
 {
   u_int32_t last_block = current->allocpoint;
-  if (last_block < end_data_segment) {
-    u_int32_t newsize = end_data_segment - last_block;
+  u_int32_t target = (u_int32_t)end_data_segment;
+  if (last_block < target) {
+    u_int32_t newsize = target - last_block;
     u_int32_t pg_dir = pg_get_cr3() + __PAGE_OFFSET;
     set_process_page(pg_dir, last_block, newsize);
     pg_load_cr3(pg_dir);

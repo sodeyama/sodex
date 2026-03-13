@@ -17,11 +17,11 @@ PRIVATE void uhc_enable_interrupt();
 PRIVATE void set_framelist_base(UHCI_FRAME_LIST* frame_list);
 PRIVATE void make_init_frame_list(UHCI_FRAME_LIST* frame_list);
 PRIVATE void global_reset();
-PRIVATE void force_global_resume();
+PRIVATE void __attribute__((unused)) force_global_resume();
 PRIVATE void reset_uhc();
 PRIVATE void run_uhci();
 PRIVATE void stop_uhci();
-PRIVATE void debug_uhci();
+PRIVATE void __attribute__((unused)) debug_uhci();
 PRIVATE UHCI_QH* make_setaddress_qh();
 PRIVATE UHCI_QH* make_setconfiguration_qh();
 PRIVATE void insert_qh_queue(UHCI_QH *qh);
@@ -140,7 +140,7 @@ PRIVATE void init_uhci_port(USB_HC_INFO* uhci)
   uhci->numports = port;
 }
 
-PRIVATE void insert_qh_free_list(UHCI_QH *qh)
+PRIVATE void __attribute__((unused)) insert_qh_free_list(UHCI_QH *qh)
 {
   if (qh_free_list_head == NULL) {
     qh_free_list_head = kalloc(sizeof(QH_FREE_LIST));
@@ -154,7 +154,7 @@ PRIVATE void insert_qh_free_list(UHCI_QH *qh)
   }
 }
 
-PRIVATE void insert_td_free_list(UHCI_TD *td)
+PRIVATE void __attribute__((unused)) insert_td_free_list(UHCI_TD *td)
 {
   if (td_free_list_head == NULL) {
     td_free_list_head = kalloc(sizeof(TD_FREE_LIST));
@@ -194,13 +194,12 @@ PRIVATE void free_td_list()
   td_free_list_tail = NULL;
 }
 
-static int count = 0;
 PUBLIC void intr_uhcihandler()
 {
   //disable_pic_interrupt(uhci_irq);
   u_int16_t status = in16(io_base + USBSTS_R);
   if (status & USBSTS_INT) {
-    //_kprintf(" USB Interrupt:%x\n", count++);
+    //_kputs(" USB Interrupt\n");
   }
   if (status & USBSTS_ERR_INT) {
     _kputs(" [UHCI INT] USB Error Interrupt\n");
@@ -294,7 +293,7 @@ PRIVATE void global_reset()
   delay(UHCI_DELAY_TIMES);
 }
 
-PRIVATE void force_global_resume()
+PRIVATE void __attribute__((unused)) force_global_resume()
 {
   USBCMD cmd;
   memset(&cmd, 0, sizeof(USBCMD));
@@ -338,7 +337,7 @@ PRIVATE void stop_uhci()
   delay(UHCI_DELAY_TIMES);
 }
 
-PRIVATE void debug_uhci()
+PRIVATE void __attribute__((unused)) debug_uhci()
 {
   USBCMD cmd;
   memset(&cmd, 0, sizeof(USBCMD));

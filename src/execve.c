@@ -30,8 +30,8 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
                                      char *const envp[]);
 PRIVATE void set_default_sigaction(struct task_struct* task);
 PRIVATE u_int32_t get_proc_stackmem(u_int32_t *pg_dir);
-PRIVATE int get_argc(char** argv);
-PRIVATE char** get_argv(char** argv);
+PRIVATE int get_argc(char *const argv[]);
+PRIVATE char** get_argv(char *const argv[]);
 PRIVATE pid_t alloc_pid();
 
 PUBLIC pid_t sys_fork()
@@ -174,7 +174,7 @@ PRIVATE pid_t alloc_pid()
   return (pid++);
 }
 
-PRIVATE int get_argc(char **argv)
+PRIVATE int get_argc(char *const argv[])
 {
   if (argv == NULL)
     return 0;
@@ -187,7 +187,7 @@ PRIVATE int get_argc(char **argv)
   return i;
 }
 
-PRIVATE char** get_argv(char** argv)
+PRIVATE char** get_argv(char *const argv[])
 {
   if (argv == NULL)
     return NULL;

@@ -132,19 +132,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 .PHONY: test-qemu ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
-	@(qemu-system-i386 \
-		-drive file=$(FSBOOT),format=raw \
-		-nographic \
-		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
-		-no-reboot \
-		-monitor none \
-		-serial file:$(LOGDIR)/test_serial.log \
-		-d int,cpu_reset -D $(LOGDIR)/test_qemu_debug.log \
-		2>/dev/null &); \
-	QPID=$$!; sleep 10; kill $$QPID 2>/dev/null; wait $$QPID 2>/dev/null; \
-	echo ""; \
-	echo "=== KERNEL INTEGRATION TESTS DONE ==="; \
-	echo "Logs: $(LOGDIR)/test_serial.log, $(LOGDIR)/test_qemu_debug.log"
+	@python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

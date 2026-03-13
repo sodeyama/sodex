@@ -49,7 +49,7 @@
 
 PUBLIC void init_dma();
 PUBLIC void init_fdc();
-PUBLIC char* fdc_rowread(u_int8_t head, u_int8_t track, u_int8_t sector);
+PUBLIC u_int8_t* fdc_rowread(u_int8_t head, u_int8_t track, u_int8_t sector);
 PUBLIC int fdc_read(u_int32_t logical_sector, u_int32_t num_sects, void* buf);
 PUBLIC int fdc_rowwrite(char* buf, u_int8_t head, u_int8_t track, 
                         u_int8_t sector);

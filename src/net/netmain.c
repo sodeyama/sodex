@@ -1,10 +1,27 @@
 #include <sodex/const.h>
+#include <io.h>
 #include <uip.h>
 #include <uip_arp.h>
 #include <ne2000.h>
 #include <timer.h>
 #include <socket.h>
 #include <rs232c.h>
+
+PRIVATE void nm_putc(char c) {
+  while (!(in8(0x3F8+5)&0x20)) {
+  }
+  out8(0x3F8,c);
+}
+PRIVATE void nm_puts(const char *s) {
+  while(*s){if(*s=='\n')nm_putc('\r');nm_putc(*s++);}
+}
+PRIVATE void nm_hex8(u_int8_t v) {
+  const char *h="0123456789ABCDEF";
+  nm_putc(h[(v>>4)&0xF]); nm_putc(h[v&0xF]);
+}
+PRIVATE void nm_hex16(u_int16_t v) {
+  nm_hex8((v>>8)&0xFF); nm_hex8(v&0xFF);
+}
 
 #define CLOCK_CONF_SECOND 100
 #define PERIODIC_TIMER_INTERVAL  50
@@ -27,7 +44,18 @@ PUBLIC void network_poll(void)
 
   int i;
 
-  if (ne2000_rx_pending) {
+  /* Check ISR directly and always try to receive */
+  {
+    u_int8_t isr = in8(0xC100 + 0x07);
+    if (isr) {
+      out8(0xC100 + 0x07, isr); /* ack all */
+      if (isr & 0x01)
+        ne2000_rx_pending = 1;
+    }
+  }
+
+  /* Always try to receive - don't rely solely on ne2000_rx_pending */
+  {
     ne2000_rx_pending = 0;
 
     while (1) {
@@ -49,6 +77,16 @@ PUBLIC void network_poll(void)
             uip_len = 0;
             continue;
           }
+        }
+
+        if (ip_hdr[9] == 6) { /* TCP only */
+          int ip_hl = (ip_hdr[0] & 0x0f) * 4;
+          u_int8_t tcp_flags = ip_hdr[ip_hl + 13];
+          nm_puts("NET-RX: TCP flags=0x");
+          nm_hex8(tcp_flags);
+          nm_puts(" len=");
+          nm_hex16(uip_len);
+          nm_puts("\n");
         }
 
         uip_input();

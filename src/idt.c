@@ -56,8 +56,6 @@
 
 PRIVATE InterruptDescTable interruptDescTable[IDTNUM];
 PRIVATE IDTR idtr;
-PRIVATE u_int16_t count = 0;
-PRIVATE char timercount[8] = {0x7C,0x2F,0x2D,0x5C,0x7C,0x2F,0x2D,0x5C};
 
 PRIVATE void makeGate(InterruptDescTable* idt, u_int16_t selector,
                      u_int32_t offset, u_int8_t copy, u_int8_t type);
@@ -465,6 +463,8 @@ PUBLIC void init_setupidt()
 
 PUBLIC int wait_interrupt(int intno)
 {
+  (void)intno;
+  return FALSE;
 }
 
 PUBLIC void pic_eoi(int irq)

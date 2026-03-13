@@ -25,6 +25,7 @@
 #define SOCK_STATE_CLOSED     5
 
 #define SOCK_RXBUF_SIZE  4096
+#define SOCK_TXBUF_SIZE  1460  /* Max TCP segment payload (MSS) */
 
 struct sockaddr_in {
     u_int16_t sin_family;
@@ -62,6 +63,12 @@ struct kern_socket {
     /* Accept backlog */
     int backlog_fds[4];
     int backlog_count;
+
+    /* TCP transmit buffer (pending data for uip_send in appcall) */
+    u_int8_t tx_buf[SOCK_TXBUF_SIZE];
+    u_int16_t tx_len;
+    u_int8_t  tx_pending;  /* 1 if data waiting to be sent */
+    u_int8_t  close_pending;  /* 1 if FIN should be sent from appcall */
 
     int      error;
     u_int32_t timeout_ticks;

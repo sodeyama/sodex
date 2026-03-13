@@ -164,14 +164,55 @@ PUBLIC int kern_connect(int sockfd, struct sockaddr_in *addr)
     uip_ipaddr_t ipaddr;
     u_int8_t *a = (u_int8_t *)&addr->sin_addr;
     uip_ipaddr(&ipaddr, a[0], a[1], a[2], a[3]);
+
+    disableInterrupt();
     struct uip_conn *conn = uip_connect(&ipaddr, addr->sin_port);
-    if (!conn) return -1;
+    if (!conn) {
+      enableInterrupt();
+      return -1;
+    }
     conn->appstate = sockfd;
     sk->tcp_conn = conn;
-    sk->state = SOCK_STATE_CONNECTED;
-    /* Block until connected */
-    sleep_on(&sk->connect_wq);
-    return 0;
+
+    /* Trigger SYN send (may generate ARP request first if MAC unknown) */
+    uip_periodic_conn(conn);
+    if (uip_len > 0) {
+      uip_arp_out();
+      ne2000_send(uip_buf, uip_len);
+    }
+    enableInterrupt();
+
+    /* Poll network until connected or timeout.
+     * The sequence is: ARP request → ARP reply → SYN → SYN-ACK → CONNECTED.
+     * We need periodic processing to retransmit SYN after ARP resolves. */
+    {
+      EXTERN void network_poll(void);
+      int poll_count;
+      int syn_retry = 0;
+      for (poll_count = 0; poll_count < 20000000; poll_count++) {
+        disableInterrupt();
+        network_poll();
+        enableInterrupt();
+
+        if (sk->state == SOCK_STATE_CONNECTED)
+          return 0;
+        if (sk->state == SOCK_STATE_CLOSED)
+          return -1;
+
+        /* Periodically retrigger SYN in case first was replaced by ARP */
+        if ((poll_count % 500000) == 499999 && syn_retry < 10) {
+          disableInterrupt();
+          uip_periodic_conn(conn);
+          if (uip_len > 0) {
+            uip_arp_out();
+            ne2000_send(uip_buf, uip_len);
+          }
+          enableInterrupt();
+          syn_retry++;
+        }
+      }
+    }
+    return -1; /* timeout */
   } else if (sk->type == SOCK_RAW || sk->type == SOCK_DGRAM) {
     sk->state = SOCK_STATE_CONNECTED;
     return 0;
@@ -193,18 +234,6 @@ PRIVATE u_int16_t ip_checksum(u_int8_t *data, int len)
   while (sum >> 16)
     sum = (sum & 0xffff) + (sum >> 16);
   return (u_int16_t)(~sum);
-}
-
-/* htons/htonl for kernel use */
-PRIVATE u_int16_t k_htons(u_int16_t h)
-{
-  return ((h & 0xff) << 8) | ((h >> 8) & 0xff);
-}
-
-PRIVATE u_int32_t k_htonl(u_int32_t h)
-{
-  return ((h & 0xff) << 24) | ((h & 0xff00) << 8) |
-         ((h >> 8) & 0xff00) | ((h >> 24) & 0xff);
 }
 
 PUBLIC int kern_send(int sockfd, void *buf, int len, int flags)
@@ -319,8 +348,19 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
   }
 
   if (sk->type == SOCK_STREAM && sk->tcp_conn) {
-    /* TCP send via uIP */
-    uip_send(buf, len);
+    /* TCP send via uIP: buffer data and trigger poll */
+    disableInterrupt();
+    if (len > SOCK_TXBUF_SIZE) len = SOCK_TXBUF_SIZE;
+    memcpy(sk->tx_buf, buf, len);
+    sk->tx_len = len;
+    sk->tx_pending = 1;
+    /* Trigger uip_appcall via poll so uip_send() runs in correct context */
+    uip_poll_conn(sk->tcp_conn);
+    if (uip_len > 0) {
+      uip_arp_out();
+      ne2000_send(uip_buf, uip_len);
+    }
+    enableInterrupt();
     return len;
   }
 
@@ -360,12 +400,36 @@ PUBLIC int kern_close_socket(int sockfd)
 {
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
   struct kern_socket *sk = &socket_table[sockfd];
+  EXTERN void network_poll(void);
 
   if (sk->tcp_conn) {
-    uip_close();
+    int poll_count;
+
+    /* FIN は appcall コンテキストで送る */
+    disableInterrupt();
+    sk->close_pending = 1;
+    uip_poll_conn(sk->tcp_conn);
+    if (uip_len > 0) {
+      uip_arp_out();
+      ne2000_send(uip_buf, uip_len);
+    }
+    enableInterrupt();
+
+    for (poll_count = 0; poll_count < 10000000; poll_count++) {
+      disableInterrupt();
+      network_poll();
+      enableInterrupt();
+
+      if (sk->state == SOCK_STATE_CLOSED)
+        break;
+    }
   }
   if (sk->udp_conn) {
     uip_udp_remove(sk->udp_conn);
+  }
+
+  if (sk->tcp_conn) {
+    sk->tcp_conn->appstate = -1;
   }
 
   /* Wake up any blocked waiters */

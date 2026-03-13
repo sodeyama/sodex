@@ -56,7 +56,7 @@ PRIVATE int __insert_dir_data(char* datablock, int fileino, u_int8_t file_type,
                               char *name, int last);
 PRIVATE void ext3_read_1block(ext3_dentry* dentry, void* buf, int lblock,
                               off_t first_pos, off_t end_pos);
-PRIVATE void ext3_write_1block(ext3_dentry* dentry, void* buf, int lblock,
+PRIVATE void ext3_write_1block(ext3_dentry* dentry, const void* buf, int lblock,
                                off_t first_pos, off_t end_pos);
 
 PUBLIC void init_ext3fs()
@@ -299,7 +299,6 @@ PRIVATE void __read_dentry(ext3_inode* inode, ext3_dentry* parent)
                BLOCK_SIZE/FDC_SECTOR_SIZE, blockbuf);
       parent->d_dirblock = p;
       u_int16_t len, sum_len = 0;
-      int count = 0;
       while (TRUE) {
         ext3_dentry* dentry = (ext3_dentry*)kalloc(sizeof(ext3_dentry));
         if (dentry == NULL) {
@@ -686,7 +685,7 @@ PRIVATE int __does_exist(ext3_inode* inode, int lblock, char** iblock_buf,
   return FALSE;
 }
 
-PRIVATE void ext3_write_1block(ext3_dentry* dentry, void* buf, int lblock,
+PRIVATE void ext3_write_1block(ext3_dentry* dentry, const void* buf, int lblock,
                                off_t first_pos, off_t end_pos)
 {
   ext3_inode* inode = dentry->d_inode;
@@ -791,7 +790,7 @@ PRIVATE void ext3_write_1block(ext3_dentry* dentry, void* buf, int lblock,
   }
 }
 
-PUBLIC ssize_t ext3_write(int fd, void* buf, size_t count)
+PUBLIC ssize_t ext3_write(int fd, const void* buf, size_t count)
 {
   ext3_dentry* dentry = FD_TODENTRY(fd, current);
   struct file* file = FD_TOFILE(fd, current);
@@ -976,4 +975,3 @@ PUBLIC void ext3_dirty_print()
   }
   _kputc('\n');
 }
-

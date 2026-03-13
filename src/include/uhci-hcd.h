@@ -1,5 +1,5 @@
 #ifndef _UHCI_HCD_H
-#define _UHCI_UCD_H
+#define _UHCI_HCD_H
 
 #include <sodex/const.h>
 #include <sys/types.h>

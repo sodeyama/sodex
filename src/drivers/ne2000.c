@@ -38,16 +38,15 @@ PRIVATE void ne_serial_hex16(u_int16_t v)
 int io_base;
 
 PRIVATE u_int16_t get_baseaddr();
-PRIVATE void set_macaddr(u_int8_t* buff);
+PRIVATE void __attribute__((unused)) set_macaddr(u_int8_t* buff);
 //PRIVATE void nic_enable_ctl(int flag);
-PRIVATE void nic_sendenable_ctl(int flag);
-PRIVATE void nic_recvenable_ctl(int flag);
-PRIVATE void nic_enable_interrupt(int flag);
+PRIVATE void __attribute__((unused)) nic_sendenable_ctl(int flag);
+PRIVATE void __attribute__((unused)) nic_recvenable_ctl(int flag);
+PRIVATE void __attribute__((unused)) nic_enable_interrupt(int flag);
 PRIVATE void read_remote_dma(u_int16_t addr, void* buf, u_int16_t len);
 PRIVATE void write_remote_dma(u_int16_t addr, void* buf, u_int16_t len);
-PRIVATE void init_ringbuf();
-PRIVATE void init_sendreceive_config();
-PRIVATE void init_interrupt();
+PRIVATE void __attribute__((unused)) init_ringbuf();
+PRIVATE void __attribute__((unused)) init_sendreceive_config();
 
 PUBLIC void init_ne2000()
 {
@@ -189,6 +188,11 @@ PUBLIC int ne2000_receive()
     packet_page = PSTART_ADDR;
   }
 
+  /* BNRYの次ページがCURRに追いついていたら空 */
+  if (packet_page == curr) {
+    return 0;
+  }
+
   ne_serial_puts("NE2K-RX: bnry=0x");
   ne_serial_hex8(bnry);
   ne_serial_puts(" curr=0x");
@@ -196,11 +200,6 @@ PUBLIC int ne2000_receive()
   ne_serial_puts(" pkt=0x");
   ne_serial_hex8(packet_page);
   ne_serial_putc('\n');
-
-  /* BNRYの次ページがCURRに追いついていたら空 */
-  if (packet_page == curr) {
-    return 0;
-  }
 
   /* パケットヘッダ読み出し（4バイト） */
   u_int8_t pkt_hdr[4];
@@ -275,7 +274,7 @@ PRIVATE u_int16_t get_baseaddr()
   return NE2K_QEMU_BASEADDR;
 }
 
-PRIVATE void set_macaddr(u_int8_t* buff)
+PRIVATE void __attribute__((unused)) set_macaddr(u_int8_t* buff)
 {
   disableInterrupt();
   out8(io_base+O_CR, CR_PAGE1);
@@ -289,7 +288,7 @@ PRIVATE void set_macaddr(u_int8_t* buff)
   enableInterrupt();
 }
 
-PRIVATE void init_ringbuf()
+PRIVATE void __attribute__((unused)) init_ringbuf()
 {
   out8(io_base+O_CR, CR_PAGE0);
   out8(io_base+O_PSTART, PSTART_ADDR);
@@ -300,7 +299,7 @@ PRIVATE void init_ringbuf()
   out8(io_base+O_CR, CR_PAGE0);
 }
 
-PRIVATE void init_sendreceive_config()
+PRIVATE void __attribute__((unused)) init_sendreceive_config()
 {
   u_int8_t cr_status = in8(io_base+I_CR);
   out8(io_base+O_CR, cr_status|CR_PAGE0);
@@ -308,7 +307,7 @@ PRIVATE void init_sendreceive_config()
   out8(io_base+O_RCR, RCR_AB);
 }
 
-PRIVATE void nic_sendenable_ctl(int flag)
+PRIVATE void __attribute__((unused)) nic_sendenable_ctl(int flag)
 {
   if (flag) {
     out8(io_base+O_TCR, TCR_LB_NORMAL);
@@ -318,7 +317,7 @@ PRIVATE void nic_sendenable_ctl(int flag)
   }
 }
 
-PRIVATE void nic_recvenable_ctl(int flag)
+PRIVATE void __attribute__((unused)) nic_recvenable_ctl(int flag)
 {
   if (flag) {
     out8(io_base+O_RCR, RCR_AB);
@@ -328,7 +327,7 @@ PRIVATE void nic_recvenable_ctl(int flag)
   }
 }
 
-PRIVATE void nic_enable_interrupt(int flag)
+PRIVATE void __attribute__((unused)) nic_enable_interrupt(int flag)
 {
   if (flag) {
     out8(io_base + O_ISR, 0xFF);
@@ -434,7 +433,6 @@ PUBLIC void send_test()
   buf[12] = 0x00;
   buf[13] = 0x08;
 
-  int count = 0;
   while (TRUE) {
     int ret = ne2000_send(buf, 512);
     _kprintf("%x\n", ret);

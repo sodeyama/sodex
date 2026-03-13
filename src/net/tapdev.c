@@ -43,7 +43,6 @@
 #include "tapdev.h"
 #include "uip.h"
 
-static int drop = 0;
 static int fd;
 
 
@@ -82,7 +81,7 @@ tapdev_read(void)
 {
   //fd_set fdset;
   //struct timeval tv, now;
-  int ret;
+  int ret = 0;
   
   //tv.tv_sec = 0;
   //tv.tv_usec = 1000;

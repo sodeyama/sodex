@@ -19,11 +19,11 @@
 #include <lib.h>
 #include <ihandlers.h>
 
-PRIVATE char* __create_filepath(char* filename, char* path);
+PRIVATE char* __create_filepath(const char* filename, const char* path);
 
 PRIVATE char* path_usrbin = "/usr/bin";
 
-PUBLIC int elf_loader(char *filename, u_int32_t *entrypoint, void *loadaddr,
+PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadaddr,
                       u_int32_t *pg_dir, struct task_struct* task,
                       u_int32_t* allocation_point)
 {
@@ -135,7 +135,7 @@ PUBLIC int elf_loader(char *filename, u_int32_t *entrypoint, void *loadaddr,
   return ELF_SUCCESS;
 }
 
-PUBLIC int open_env(char* filename, int flags, mode_t mode)
+PUBLIC int open_env(const char* filename, int flags, mode_t mode)
 {
   if (filename[0] == '/') {
     return ext3_open(filename, flags, mode);
@@ -155,7 +155,7 @@ PUBLIC int open_env(char* filename, int flags, mode_t mode)
   return 0;
 }
 
-PRIVATE char* __create_filepath(char* filename, char* path)
+PRIVATE char* __create_filepath(const char* filename, const char* path)
 {
   char* newfilename = kalloc(PATHNAME_MAX);
   if (newfilename == NULL) {

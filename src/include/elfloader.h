@@ -69,9 +69,9 @@ typedef struct elf_program_header {
 
 #define PATH_ENV_MAX 8
 
-PUBLIC int elf_loader(char *filename, u_int32_t *entrypoint, void *loadaddr,
+PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadaddr,
                       u_int32_t *pg_dir, struct task_struct* task,
                       u_int32_t *allocation_point);
-PUBLIC int open_env(char* filename, int flags, mode_t mode);
+PUBLIC int open_env(const char* filename, int flags, mode_t mode);
 
 #endif

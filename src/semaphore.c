@@ -19,7 +19,7 @@ PUBLIC void binary_up(int *binary)
   while (*binary == 1) {
     //sleep();
   }
-  *binary++;
+  (*binary)++;
   enableInterrupt();
 }
 
@@ -29,6 +29,6 @@ PUBLIC void binary_down(int *binary)
   while (*binary == 0) {
     //sleep();
   }
-  *binary--;
+  (*binary)--;
   enableInterrupt();
 }

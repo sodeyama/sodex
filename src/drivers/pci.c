@@ -17,7 +17,6 @@
 #include <uhci-hcd.h>
 
 PRIVATE void regist_pci_devices();
-PRIVATE int check_vendor(u_int16_t id);
 PRIVATE int check_nic_device(u_int32_t status);
 PRIVATE int check_usb_device(u_int32_t status);
 PRIVATE void regist_nic_device(struct pci_info* pci_info);
@@ -27,14 +26,7 @@ PRIVATE void set_pci_info(u_int32_t status, u_int8_t bus_num,
                           int count);
 PRIVATE int is_multi_function(u_int8_t bus_name, u_int8_t device_num);
 
-PRIVATE int nic_host_count = 0;
 PRIVATE int usb_host_count = 0;
-
-PRIVATE u_int16_t vendor_list[] = {
-  PCI_VENDOR_INTEL,
-  PCI_VENDOR_REALTEK,
-  PCI_VENDOR_CIRRUS
-};
 
 PRIVATE u_int32_t nic_dev_list[] = {
   NIC_REALTEK
@@ -155,25 +147,12 @@ PRIVATE void regist_usb_device(struct pci_info* pci_info)
   usb_host_count++;
 }
 
-PRIVATE int check_vendor(u_int16_t id)
-{
-  int vendor_list_size = sizeof(vendor_list)/sizeof(vendor_list[0]);
-  int i;
-  for (i = 0; i < vendor_list_size; i++) {
-    if (id == vendor_list[i]) {
-      return TRUE;
-    }
-  }
-  return FALSE;
-}
-
 PRIVATE void set_pci_info(u_int32_t status, u_int8_t bus_num,
                           u_int8_t device_num, u_int8_t func_num,
                           int count)
 {
   u_int16_t vendor = status & 0xffff;
   u_int16_t device = status >> 16;
-  u_int32_t base_addr = 0;
   u_int8_t irq = pci_read_config(bus_num, device_num, func_num, PCI_IRQ_LINE, 1);
   pci_info[count].vendor_id = vendor;
   pci_info[count].device_id = device;
@@ -199,7 +178,7 @@ PRIVATE void set_pci_info(u_int32_t status, u_int8_t bus_num,
 PRIVATE int is_multi_function(u_int8_t bus_num, u_int8_t device_num)
 {
   u_int8_t header_type = pci_read_config(bus_num, device_num, 0, PCI_HEADER, 1);
-  if (header_type && (1<<7)) {
+  if (header_type & (1<<7)) {
     return TRUE;
   } else {
     return FALSE;

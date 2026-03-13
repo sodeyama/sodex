@@ -30,8 +30,6 @@ EXTERN volatile u_int32_t kernel_tick;
 
 PRIVATE TSS tss;
 
-PRIVATE void p_print_debug(struct task_struct* prev, struct task_struct* next);
-PRIVATE u_int32_t get_proc_stackmem(u_int32_t *pg_dir);
 PRIVATE void set_prev_context(struct task_struct* prev, u_int16_t cs,
                               u_int16_t ds, u_int32_t eip,
                               u_int32_t eax, u_int32_t ebx, u_int32_t ecx,
@@ -172,14 +170,10 @@ PUBLIC void save_process(int is_usermode, u_int32_t iret_eip,
   u_int32_t prev_eip = prev->context->eip;
   u_int32_t prev_esp = prev->context->esp;
 
-  u_int32_t prev_count = prev->count;
-
   u_int32_t *p_eax = (u_int32_t*)(ebp-4);
   u_int32_t *p_ecx = (u_int32_t*)(ebp-8);
   u_int32_t *p_edx = (u_int32_t*)(ebp-12);
   u_int32_t *p_ebx = (u_int32_t*)(ebp-16);
-  u_int32_t *p_esp = (u_int32_t*)(ebp-20);
-  u_int32_t *p_ebp = (u_int32_t*)(ebp-24);
   u_int32_t *p_esi = (u_int32_t*)(ebp-28);
   u_int32_t *p_edi = (u_int32_t*)(ebp-32);
   u_int32_t *prev_ebp = (u_int32_t*)(ebp);
@@ -389,16 +383,5 @@ PUBLIC void wakeup(struct wait_queue **wq)
     p = p->next;
   }
   *wq = (struct wait_queue *)0;
-}
-
-PRIVATE void p_print_debug(struct task_struct* prev, struct task_struct* next)
-{
-  _kprintf("prev is %x, next is %x\n", prev, next);
-  _kprintf("prev->cr3 is %x, next->cr3 is %x\n",
-		   prev->context->cr3, next->context->cr3);
-  _kprintf("prev->esp is %x, next->esp is %x\n",
-           prev->context->esp, next->context->esp);
-  _kprintf("prev->count is %x, next->count is %x\n",
-           prev->count, next->count);
 }
 

@@ -29,8 +29,8 @@
 #include <socket.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
-PRIVATE int sys_read(int fd, const void* buf, size_t count);
-PRIVATE int __stdin_read(int fd, const void* buf, size_t count);
+PRIVATE int sys_read(int fd, void* buf, size_t count);
+PRIVATE int __stdin_read(int fd, void* buf, size_t count);
 PRIVATE void sys_write(int fd, const void* buf, size_t count);
 PRIVATE void sys_close(int fd);
 PRIVATE int sys_getdentry();
@@ -55,10 +55,8 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
   u_int32_t *ecx = (u_int32_t*)(ebp-8);
   u_int32_t *edx = (u_int32_t*)(ebp-12);
   u_int32_t *ebx = (u_int32_t*)(ebp-16);
-  u_int32_t *esp = (u_int32_t*)(ebp-20);
   u_int32_t *esi = (u_int32_t*)(ebp-28);
   u_int32_t *edi = (u_int32_t*)(ebp-32);
-  u_int32_t *prev_ebp = (u_int32_t*)(ebp);
 
   u_int32_t nr_syscall = *eax;
   u_int32_t p1 = *ebx;
@@ -66,7 +64,6 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
   u_int32_t p3 = *edx;
   u_int32_t p4 = *esi;
   u_int32_t p5 = *edi;
-  u_int32_t p6 = *prev_ebp;
 
 
   int ret = 0;
@@ -183,7 +180,7 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
   *eax = ret;
 }
 
-PRIVATE int sys_read(int fd, const void* buf, size_t count)
+PRIVATE int sys_read(int fd, void* buf, size_t count)
 {
   int ret;
   struct file* fs = current->files->fs_fd[fd];
@@ -195,9 +192,9 @@ PRIVATE int sys_read(int fd, const void* buf, size_t count)
   return ret;
 }
 
-PRIVATE int __stdin_read(int fd, const void* buf, size_t count)
+PRIVATE int __stdin_read(int fd, void* buf, size_t count)
 {
-  char *p;
+  char *out = (char *)buf;
   int total = 0;
   char stdin[KEY_BUF+1];
   memset(stdin, 0, KEY_BUF+1);
@@ -211,18 +208,18 @@ PRIVATE int __stdin_read(int fd, const void* buf, size_t count)
       //_kprintf("not null:%c %s getlen:%x\n", stdin[getlen-1], buf, getlen);
       if (stdin[getlen-1] == KEY_ENTER) {
         //_kputc('\n');
-        memcpy(buf + total, stdin, getlen-1);
+        memcpy(out + total, stdin, getlen-1);
         total += getlen;
         return total;
       } else if (stdin[getlen-1] == KEY_BACK) {
         if (getlen > 0 && total > 0) {
           //_kputc(KEY_BACK);
-          memset(buf + total - 1, 0, 1);
+          memset(out + total - 1, 0, 1);
           total--;
         }
       } else {
         //_kputc(stdin[getlen-1]);
-        memcpy(buf + total, stdin, getlen);
+        memcpy(out + total, stdin, getlen);
         total += getlen;
         memset(stdin, 0, KEY_BUF+1);
       }
@@ -306,6 +303,7 @@ PRIVATE int sys_send(char* buf)
     _kprintf("%x\n", ret);
   }
   */
+  return 0;
 }
 
 PRIVATE void sys_memdump(u_int32_t addr, size_t size)

@@ -38,14 +38,16 @@ PUBLIC int sys_kill(pid_t pid, int signum)
   return 0;
 }
 
-PUBLIC void *signal_dummy(int signum)
+PUBLIC void signal_dummy(int signum)
 {
+  (void)signum;
   // dummy
   _kprintf("signal dummy\n");
 }
 
-PUBLIC void *core_dump(int signum)
+PUBLIC void core_dump(int signum)
 {
+  (void)signum;
   // still don't implement
   _kprintf("core dump\n");
 }

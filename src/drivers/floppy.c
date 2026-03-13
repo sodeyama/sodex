@@ -23,11 +23,11 @@
 
 //#define DEBUG
 
-PRIVATE void fdc_reset();
+PRIVATE void __attribute__((unused)) fdc_reset();
 PRIVATE int  fdc_cmd(const u_int8_t *cmd, const u_int8_t length);
 PRIVATE int  fdc_wait_msrStatus(u_int8_t mask, u_int8_t expected);
 PRIVATE void fdc_motor_on();
-PRIVATE void fdc_motor_off();
+PRIVATE void __attribute__((unused)) fdc_motor_off();
 PRIVATE int  fdc_read_results();
 PRIVATE int  fdc_specify();
 PRIVATE int  fdc_recalibrate();
@@ -78,7 +78,7 @@ PUBLIC void i26h_fdchandler()
   pic_eoi(IRQ_FDC);
 }
 
-PRIVATE void fdc_reset()
+PRIVATE void __attribute__((unused)) fdc_reset()
 {
   out8(FDC_DSR, 0x0);
   out8(FDC_CCR, 0x0);
@@ -91,7 +91,7 @@ PRIVATE void fdc_motor_on()
   out8(FDC_DOR, 0x1c);
 }
 
-PRIVATE void fdc_motor_off()
+PRIVATE void __attribute__((unused)) fdc_motor_off()
 {
   out8(FDC_DOR, 0x0c);
 }
@@ -333,7 +333,7 @@ PRIVATE int fdc_seek(u_int8_t track)
   return TRUE;
 }
 
-PUBLIC char* fdc_rowread(u_int8_t head, u_int8_t track, u_int8_t sector)
+PUBLIC u_int8_t* fdc_rowread(u_int8_t head, u_int8_t track, u_int8_t sector)
 {
   init_dma_r();
 
@@ -414,7 +414,7 @@ PUBLIC int fdc_read(u_int32_t logical_sector, u_int32_t num_sects,
                     void* buf)
 {
   disable_pic_interrupt(IRQ_TIMER);
-  char* tempbuf;
+  u_int8_t* tempbuf;
   u_int8_t head, track, sector;
 
   dma_start();
@@ -425,10 +425,6 @@ PUBLIC int fdc_read(u_int32_t logical_sector, u_int32_t num_sects,
 
   int i;
   for (i = 0; i < num_sects; i++) {
-    int logical = logical_sector+i;
-    //track = logical/(FDC_SECTORS*2);
-    //head = (logical%(FDC_SECTORS*2))/FDC_SECTORS;
-    //sector = (logical%(FDC_SECTORS*2))%FDC_SECTORS+1;
     fdc_trans_sector(logical_sector+i, &head, &track, &sector);
     //_kprintf("logic:%x head:%x track:%x sector:%x\n", logical_sector+i, head, track, sector);
 
@@ -438,8 +434,9 @@ PUBLIC int fdc_read(u_int32_t logical_sector, u_int32_t num_sects,
     if (tempbuf == NULL) {
       _kprintf("fdc_logical_read error: logical sect is %x\n",
                 logical_sector+i);
-      for(;;);
-	  return FALSE;
+      for (;;) {
+      }
+      return FALSE;
     }
 	//_kprintf("buf:%x tempbuf:%x i:%x\n", buf+i*FDC_SECTOR_SIZE, tempbuf, i);
     /*
@@ -461,6 +458,7 @@ PUBLIC int fdc_read(u_int32_t logical_sector, u_int32_t num_sects,
   dma_stop();
   //delay(DELAY_TIMES);
   enable_pic_interrupt(IRQ_TIMER);
+  return TRUE;
 }
 
 PRIVATE void fdc_trans_sector(u_int32_t logical, u_int8_t* head,
@@ -548,4 +546,5 @@ PUBLIC int fdc_write(u_int32_t logical_sector, u_int32_t num_sects,
 
   dma_stop();
   //fdc_motor_off();
+  return TRUE;
 }

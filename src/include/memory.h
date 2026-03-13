@@ -12,12 +12,17 @@
 #define MAX_MHOLES 8192
 #define MAX_PMHOLES 1024
 
-// we need the memory size of 64MB at least
-#define KERNEL_MEMEND  0xc2000000	// 32MB
-#define KERNEL_PMEMBASE 0x2000000	// physical address
-#define KERNEL_PMEMEND	0x4000000	// physical address
+/* Kernel heap: virtual address space for kalloc/kfree */
+#define KERNEL_HEAP_VEND   0xc2000000  /* End of kernel heap (virtual, 32MB from __PAGE_OFFSET) */
+#define KERNEL_MEMEND      KERNEL_HEAP_VEND  /* Legacy alias */
 
-#define MIN_MEMSIZE 32
+/* Process memory: physical address range for palloc/pfree */
+#define KERNEL_PMEMBASE    0x2000000   /* Process physical memory start (32MB) */
+#define KERNEL_PMEMEND     0x4000000   /* Process physical memory end   (64MB) */
+
+/* Minimum allocation size to avoid excessive fragmentation */
+#define KALLOC_MIN_SIZE    32
+#define MIN_MEMSIZE        KALLOC_MIN_SIZE  /* Legacy alias */
 
 #define KFREE_OK                0
 #define KFREE_FAIL_NOT_MHOLE    1

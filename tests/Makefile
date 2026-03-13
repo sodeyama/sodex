@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll
+TESTS = test_lib test_memb test_memory test_vga test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
 
 .PHONY: all clean test
 
@@ -111,6 +111,10 @@ test_kernel_net: test_kernel_net.c
 # Network polling logic tests (Plan 05)
 test_netpoll: test_netpoll.c
 	$(CC) $(CFLAGS) -o $@ test_netpoll.c
+
+# Socket ring buffer, inet functions, checksum tests (Phase 9)
+test_socket: test_socket.c
+	$(CC) $(CFLAGS) -o $@ test_socket.c
 
 clean:
 	rm -f $(TESTS) *.o

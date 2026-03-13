@@ -11,7 +11,7 @@ Linker script and memory map
                 0xc0001000                        . = 0xc0001000
                 0xc0001000                        __text_start = .
 
-.text           0xc0001000     0xdc9d load address 0x00001000
+.text           0xc0001000     0xdd1d load address 0x00001000
  startup.o(.text)
  .text          0xc0001000       0xae startup.o
                 0xc0001000                startup
@@ -38,322 +38,323 @@ Linker script and memory map
                 0xc0001939                sys_brk
  .text          0xc00019b5      0x2d7 chdir.o
                 0xc00019b5                sys_chdir
- .text          0xc0001c8c      0x5ce elfloader.o
+ .text          0xc0001c8c      0x5d3 elfloader.o
                 0xc0001c8c                elf_loader
                 0xc00020f4                open_env
- .text          0xc000225a      0x6c8 execve.o
-                0xc00022ce                sys_fork
-                0xc00022e0                kernel_execve
-                0xc0002315                sys_execve
- .text          0xc0002922     0x210f ext3fs.o
-                0xc0002996                init_ext3fs
-                0xc000393d                get_dentry_from_current
-                0xc0003961                get_dentry_absolutely
-                0xc0003a07                ext3_open
-                0xc0003d7b                ext3_read
-                0xc0004302                ext3_write
-                0xc0004575                ext3_mkdir
-                0xc0004704                ext3_ls
-                0xc00047a5                ext3_flush
-                0xc0004933                ext3_dirty_print
- .text          0xc0004a31      0x1a3 fs.o
-                0xc0004a31                lseek
-                0xc0004ad1                close
-                0xc0004aed                fs_stdio_open
- .text          0xc0004bd4      0x147 gdt.o
-                0xc0004bd4                makeGdt
-                0xc0004c88                getGdt
-                0xc0004cb0                allocSel
-                0xc0004cd7                init_setupgdt
- .text          0xc0004d1b      0xad3 idt.o
-                0xc0004d70                set_intr_gate
-                0xc0004da2                set_trap_gate
-                0xc0004dd4                set_task_gate
-                0xc0004e06                init_setupidthandlers
-                0xc0004fdf                i00h
-                0xc0004ffd                i01h
-                0xc000501b                i02h
-                0xc0005039                i03h
-                0xc0005057                i04h
-                0xc0005075                i05h
-                0xc0005093                i06h
-                0xc00050b1                i07h
-                0xc00050cf                i08h
-                0xc00050ed                i09h
-                0xc000510b                i0Ah
-                0xc0005129                i0Bh
-                0xc0005147                i0Ch
-                0xc0005165                i0Dh
-                0xc00051c8                i0Eh
-                0xc000521e                i10h
-                0xc000523c                i11h
-                0xc000525a                i12h
-                0xc0005278                i13h
-                0xc0005296                i20h_pictimer
-                0xc00052ac                i21h_keyhandler
-                0xc000539f                interrupt_selector
-                0xc00053bb                defaulthandler
-                0xc00054b8                set_intr_bit
-                0xc0005577                enable_pic_interrupt
-                0xc0005641                disable_pic_interrupt
-                0xc0005707                get_interrupt_bit_low
-                0xc0005723                get_interrupt_bit_high
-                0xc0005742                init_setupidt
-                0xc0005787                wait_interrupt
-                0xc000578d                pic_eoi
- .text          0xc00057ee      0x1bc key.o
-                0xc00057ee                init_key
-                0xc0005828                get_keymap
-                0xc0005841                get_shiftkeymap
-                0xc000585a                set_stdin
-                0xc000590a                get_stdin
- .text          0xc00059aa      0xf2f memory.o
-                0xc00059aa                init_mem
-                0xc0005bbb                kfree
-                0xc0005cc6                kalloc
-                0xc0005ea7                afree
-                0xc0005ef0                aalloc
-                0xc00062f4                _kprint_mem
-                0xc0006598                palloc
-                0xc00066df                pfree
-                0xc0006885                get_realaddr
- .text          0xc00068d9      0x3e7 page.o
-                0xc00068d9                init_paging
-                0xc0006926                create_kernel_page
-                0xc000698f                create_process_page
-                0xc0006ab1                set_process_page
- .text          0xc0006cc0       0x8d pit8254.o
-                0xc0006cc0                init_pit
-                0xc0006d13                sys_timer
-                0xc0006d22                kwait
- .text          0xc0006d4d      0x85c process.o
-                0xc0006d6e                init_process
-                0xc0006e76                set_context
-                0xc0006f7d                i20h_do_timer
-                0xc00070a3                save_process
-                0xc0007247                schedule
-                0xc00073d5                sys_exit
-                0xc000741c                sys_waitpid
-                0xc00074bb                to_usermode
-                0xc00074cd                to_kernelmode
-                0xc00074df                is_usermode
- .text          0xc00075a9       0x4d semaphore.o
-                0xc00075a9                binary_up
-                0xc00075d0                binary_down
- .text          0xc00075f6      0x14d signal.o
-                0xc00075f6                sys_signal
-                0xc0007668                sys_kill
-                0xc0007711                signal_dummy
-                0xc000772a                core_dump
- .text          0xc0007743      0x735 syscall.o
-                0xc0007743                init_syscall
-                0xc0007761                i80h_syscall
- .text          0xc0007e78      0x360 /Users/sodeyama/git/sodex/src/drivers/ata.o
-                0xc0007ebc                ata_read
-                0xc0008042                ata_write
-                0xc0008151                ata_init
- .text          0xc00081d8      0x21d /Users/sodeyama/git/sodex/src/drivers/dma.o
-                0xc00081d8                init_dma
-                0xc0008259                dma_start
-                0xc0008271                dma_stop
-                0xc0008289                init_dma_r
-                0xc0008347                init_dma_w
- .text          0xc00083f5      0x9ce /Users/sodeyama/git/sodex/src/drivers/floppy.o
-                0xc00083f5                init_fdc
-                0xc0008447                i26h_fdchandler
-                0xc0008947                fdc_rowread
-                0xc0008a79                fdc_read
-                0xc0008be7                fdc_rowwrite
-                0xc0008d18                fdc_write
- .text          0xc0008dc3      0x1de /Users/sodeyama/git/sodex/src/drivers/mstorage.o
-                0xc0008dc3                mst_data_out
-                0xc0008eb2                mst_data_in
- .text          0xc0008fa1      0x999 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
-                0xc0008fa1                init_ne2000
-                0xc00090fa                i2Bh_ne2000_interrupt
-                0xc0009199                ne2000_send
-                0xc0009290                ne2000_receive
-                0xc0009891                send_test
- .text          0xc000993a      0x63d /Users/sodeyama/git/sodex/src/drivers/pci.o
-                0xc000993a                init_pci
-                0xc0009971                pci_read_config
- .text          0xc0009f77      0x34a /Users/sodeyama/git/sodex/src/drivers/rs232c.o
-                0xc0009f77                init_serial
-                0xc000a013                com1_printf
-                0xc000a149                com1_puts
-                0xc000a178                com1_putc
-                0xc000a197                com1_putb8
-                0xc000a21e                com1_putb16
-                0xc000a260                com1_putb32
-                0xc000a29a                com1_tx
- .text          0xc000a2c1      0x104 /Users/sodeyama/git/sodex/src/drivers/scsi.o
-                0xc000a2c1                scsi_init
-                0xc000a2db                scsi_read
-                0xc000a350                scsi_write
- .text          0xc000a3c5     0x1384 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
-                0xc000a3c5                init_uhci
-                0xc000a9ce                intr_uhcihandler
-                0xc000b4fb                bulk_out
-                0xc000b615                bulk_in
- .text          0xc000b749       0x12 /Users/sodeyama/git/sodex/src/lib/delay.o
-                0xc000b749                delay
- .text          0xc000b75b        0x0 /Users/sodeyama/git/sodex/src/lib/lib.o
- .text          0xc000b75b      0x135 /Users/sodeyama/git/sodex/src/lib/memb.o
-                0xc000b75b                memb_init
-                0xc000b7b0                memb_alloc
-                0xc000b815                memb_free
- .text          0xc000b890      0x20c /Users/sodeyama/git/sodex/src/lib/string.o
-                0xc000b890                strlen
-                0xc000b8b8                strcmp
-                0xc000b8f7                strncmp
-                0xc000b94d                strcpy
-                0xc000b97d                strncpy
-                0xc000b9d3                strchr
-                0xc000ba0a                strrchr
-                0xc000ba4a                pow
-                0xc000ba72                log
- .text          0xc000ba9c        0x6 /Users/sodeyama/git/sodex/src/net/clock-arch.o
-                0xc000ba9c                clock_time
- .text          0xc000baa2       0xe6 /Users/sodeyama/git/sodex/src/net/ether.o
-                0xc000baa2                ether_send
- .text          0xc000bb88       0x24 /Users/sodeyama/git/sodex/src/net/tapdev.o
-                0xc000bb88                tapdev_init
-                0xc000bb8e                tapdev_read
-                0xc000bba6                tapdev_send
- .text          0xc000bbac       0x6b /Users/sodeyama/git/sodex/src/net/timer.o
-                0xc000bbac                timer_set
-                0xc000bbc8                timer_reset
-                0xc000bbe0                timer_restart
-                0xc000bbf3                timer_expired
- .text          0xc000bc17      0x6e0 /Users/sodeyama/git/sodex/src/net/uip_arp.o
-                0xc000bc17                uip_arp_init
-                0xc000bc6c                uip_arp_timer
-                0xc000bee5                uip_arp_arpin
-                0xc000c087                uip_arp_out
- .text          0xc000c2f7       0x23 /Users/sodeyama/git/sodex/src/net/uip-conf.o
-                0xc000c2f7                tcpip_output
-                0xc000c2fd                uip_appcall
-                0xc000c303                uip_log
- .text          0xc000c31a      0x557 /Users/sodeyama/git/sodex/src/net/uip-fw.o
-                0xc000c31a                uip_fw_init
-                0xc000c63e                uip_fw_output
-                0xc000c67b                uip_fw_forward
-                0xc000c810                uip_fw_register
-                0xc000c829                uip_fw_default
-                0xc000c837                uip_fw_periodic
- .text          0xc000c871      0x1b8 /Users/sodeyama/git/sodex/src/net/uip-split.o
-                0xc000c871                uip_split_output
- .text          0xc000ca29     0x1db7 /Users/sodeyama/git/sodex/src/net/uip.o
-                0xc000ca29                uip_setipid
-                0xc000ca43                uip_add32
-                0xc000cbdd                uip_chksum
-                0xc000cc0d                uip_ipchksum
-                0xc000ccdc                uip_tcpchksum
-                0xc000ccf1                uip_udpchksum
-                0xc000cd06                uip_init
-                0xc000cd84                uip_connect
-                0xc000cf1a                uip_unlisten
-                0xc000cf7a                uip_listen
-                0xc000d03e                uip_process
-                0xc000e77d                htons
-                0xc000e79f                uip_send
- .text          0xc000e7e0       0xa5 /Users/sodeyama/git/sodex/src/net/uiplib.o
-                0xc000e7e0                uiplib_ipaddrconv
- .text          0xc000e885      0x1d8 sys_core.o
-                0xc000e885                enableInterrupt
-                0xc000e887                disableInterrupt
-                0xc000e889                is_enableInterrupt
-                0xc000e8a6                out8
-                0xc000e8b3                out16
-                0xc000e8c2                out32
-                0xc000e8cf                in8
-                0xc000e8db                in16
-                0xc000e8e6                in32
-                0xc000e8f0                _poscolor_printc
-                0xc000e91b                lgdt
-                0xc000e926                lidt
-                0xc000e931                ltr
-                0xc000e93d                memset
-                0xc000e953                memcpy
-                0xc000e96b                print_registers
-                0xc000e9e7                switch_to_outer_privilege
-                0xc000ea25                switch_to_same_privilege
- *fill*         0xc000ea5d        0x3 
- .text          0xc000ea60      0x1f6 ihandlers.o
-                0xc000ea60                asm_defaulthandler
-                0xc000ea6c                asm_i00h
-                0xc000ea78                asm_i01h
-                0xc000ea84                asm_i02h
-                0xc000ea90                asm_i03h
-                0xc000ea9c                asm_i04h
-                0xc000eaa8                asm_i05h
-                0xc000eab4                asm_i06h
-                0xc000eac0                asm_i07h
-                0xc000eacc                asm_i08h
-                0xc000ead8                asm_i09h
-                0xc000eae4                asm_i0Ah
-                0xc000eaf0                asm_i0Bh
-                0xc000eafc                asm_i0Ch
-                0xc000eb08                asm_i0Dh
-                0xc000eb1c                asm_i0Eh
-                0xc000eb28                asm_i10h
-                0xc000eb34                asm_i11h
-                0xc000eb40                asm_i12h
-                0xc000eb4c                asm_i13h
-                0xc000eb58                asm_process_switch
-                0xc000ebb4                asm_pictimer
-                0xc000ebbc                asm_i21h
-                0xc000ebcc                asm_fdchandler
-                0xc000ebd8                asm_uhcihandler
-                0xc000ebe4                asm_i2Bh
-                0xc000ebf0                asm_syscall
- .text          0xc000ec56       0x47 page_asm.o
-                0xc000ec56                pg_enable_pse
-                0xc000ec60                pg_disable_pse
-                0xc000ec6a                pg_enable_paging
-                0xc000ec76                pg_disable_paging
-                0xc000ec82                pg_load_cr3
-                0xc000ec92                pg_get_cr3
-                0xc000ec96                pg_flush_tlb
-                0xc000ec9d                        __text_end = .
-                0xc000ec9d                        __rodata_start = .
+ .text          0xc000225f      0x6c6 execve.o
+                0xc00022d3                sys_fork
+                0xc00022e5                kernel_execve
+                0xc000231a                sys_execve
+ .text          0xc0002925     0x210f ext3fs.o
+                0xc0002999                init_ext3fs
+                0xc0003940                get_dentry_from_current
+                0xc0003964                get_dentry_absolutely
+                0xc0003a0a                ext3_open
+                0xc0003d7e                ext3_read
+                0xc0004305                ext3_write
+                0xc0004578                ext3_mkdir
+                0xc0004707                ext3_ls
+                0xc00047a8                ext3_flush
+                0xc0004936                ext3_dirty_print
+ .text          0xc0004a34      0x1a3 fs.o
+                0xc0004a34                lseek
+                0xc0004ad4                close
+                0xc0004af0                fs_stdio_open
+ .text          0xc0004bd7      0x147 gdt.o
+                0xc0004bd7                makeGdt
+                0xc0004c8b                getGdt
+                0xc0004cb3                allocSel
+                0xc0004cda                init_setupgdt
+ .text          0xc0004d1e      0xad3 idt.o
+                0xc0004d73                set_intr_gate
+                0xc0004da5                set_trap_gate
+                0xc0004dd7                set_task_gate
+                0xc0004e09                init_setupidthandlers
+                0xc0004fe2                i00h
+                0xc0005000                i01h
+                0xc000501e                i02h
+                0xc000503c                i03h
+                0xc000505a                i04h
+                0xc0005078                i05h
+                0xc0005096                i06h
+                0xc00050b4                i07h
+                0xc00050d2                i08h
+                0xc00050f0                i09h
+                0xc000510e                i0Ah
+                0xc000512c                i0Bh
+                0xc000514a                i0Ch
+                0xc0005168                i0Dh
+                0xc00051cb                i0Eh
+                0xc0005221                i10h
+                0xc000523f                i11h
+                0xc000525d                i12h
+                0xc000527b                i13h
+                0xc0005299                i20h_pictimer
+                0xc00052af                i21h_keyhandler
+                0xc00053a2                interrupt_selector
+                0xc00053be                defaulthandler
+                0xc00054bb                set_intr_bit
+                0xc000557a                enable_pic_interrupt
+                0xc0005644                disable_pic_interrupt
+                0xc000570a                get_interrupt_bit_low
+                0xc0005726                get_interrupt_bit_high
+                0xc0005745                init_setupidt
+                0xc000578a                wait_interrupt
+                0xc0005790                pic_eoi
+ .text          0xc00057f1      0x1bc key.o
+                0xc00057f1                init_key
+                0xc000582b                get_keymap
+                0xc0005844                get_shiftkeymap
+                0xc000585d                set_stdin
+                0xc000590d                get_stdin
+ .text          0xc00059ad      0xf2f memory.o
+                0xc00059ad                init_mem
+                0xc0005bbe                kfree
+                0xc0005cc9                kalloc
+                0xc0005eaa                afree
+                0xc0005ef3                aalloc
+                0xc00062f7                _kprint_mem
+                0xc000659b                palloc
+                0xc00066e2                pfree
+                0xc0006888                get_realaddr
+ .text          0xc00068dc      0x3e7 page.o
+                0xc00068dc                init_paging
+                0xc0006929                create_kernel_page
+                0xc0006992                create_process_page
+                0xc0006ab4                set_process_page
+ .text          0xc0006cc3       0x8d pit8254.o
+                0xc0006cc3                init_pit
+                0xc0006d16                sys_timer
+                0xc0006d25                kwait
+ .text          0xc0006d50      0x85c process.o
+                0xc0006d71                init_process
+                0xc0006e79                set_context
+                0xc0006f80                i20h_do_timer
+                0xc00070a6                save_process
+                0xc000724a                schedule
+                0xc00073d8                sys_exit
+                0xc000741f                sys_waitpid
+                0xc00074be                to_usermode
+                0xc00074d0                to_kernelmode
+                0xc00074e2                is_usermode
+ .text          0xc00075ac       0x4d semaphore.o
+                0xc00075ac                binary_up
+                0xc00075d3                binary_down
+ .text          0xc00075f9      0x14d signal.o
+                0xc00075f9                sys_signal
+                0xc000766b                sys_kill
+                0xc0007714                signal_dummy
+                0xc000772d                core_dump
+ .text          0xc0007746      0x735 syscall.o
+                0xc0007746                init_syscall
+                0xc0007764                i80h_syscall
+ .text          0xc0007e7b      0x360 /Users/sodeyama/git/sodex/src/drivers/ata.o
+                0xc0007ebf                ata_read
+                0xc0008045                ata_write
+                0xc0008154                ata_init
+ .text          0xc00081db      0x21d /Users/sodeyama/git/sodex/src/drivers/dma.o
+                0xc00081db                init_dma
+                0xc000825c                dma_start
+                0xc0008274                dma_stop
+                0xc000828c                init_dma_r
+                0xc000834a                init_dma_w
+ .text          0xc00083f8      0x9ce /Users/sodeyama/git/sodex/src/drivers/floppy.o
+                0xc00083f8                init_fdc
+                0xc000844a                i26h_fdchandler
+                0xc000894a                fdc_rowread
+                0xc0008a7c                fdc_read
+                0xc0008bea                fdc_rowwrite
+                0xc0008d1b                fdc_write
+ .text          0xc0008dc6      0x1de /Users/sodeyama/git/sodex/src/drivers/mstorage.o
+                0xc0008dc6                mst_data_out
+                0xc0008eb5                mst_data_in
+ .text          0xc0008fa4      0x999 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
+                0xc0008fa4                init_ne2000
+                0xc00090fd                i2Bh_ne2000_interrupt
+                0xc000919c                ne2000_send
+                0xc0009293                ne2000_receive
+                0xc0009894                send_test
+ .text          0xc000993d      0x63d /Users/sodeyama/git/sodex/src/drivers/pci.o
+                0xc000993d                init_pci
+                0xc0009974                pci_read_config
+ .text          0xc0009f7a      0x34a /Users/sodeyama/git/sodex/src/drivers/rs232c.o
+                0xc0009f7a                init_serial
+                0xc000a016                com1_printf
+                0xc000a14c                com1_puts
+                0xc000a17b                com1_putc
+                0xc000a19a                com1_putb8
+                0xc000a221                com1_putb16
+                0xc000a263                com1_putb32
+                0xc000a29d                com1_tx
+ .text          0xc000a2c4      0x104 /Users/sodeyama/git/sodex/src/drivers/scsi.o
+                0xc000a2c4                scsi_init
+                0xc000a2de                scsi_read
+                0xc000a353                scsi_write
+ .text          0xc000a3c8     0x1384 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
+                0xc000a3c8                init_uhci
+                0xc000a9d1                intr_uhcihandler
+                0xc000b4fe                bulk_out
+                0xc000b618                bulk_in
+ .text          0xc000b74c       0x12 /Users/sodeyama/git/sodex/src/lib/delay.o
+                0xc000b74c                delay
+ .text          0xc000b75e       0x78 /Users/sodeyama/git/sodex/src/lib/lib.o
+                0xc000b75e                pow
+                0xc000b78f                logn
+ .text          0xc000b7d6      0x135 /Users/sodeyama/git/sodex/src/lib/memb.o
+                0xc000b7d6                memb_init
+                0xc000b82b                memb_alloc
+                0xc000b890                memb_free
+ .text          0xc000b90b      0x212 /Users/sodeyama/git/sodex/src/lib/string.o
+                0xc000b90b                strlen
+                0xc000b933                strcmp
+                0xc000b972                strncmp
+                0xc000b9c8                strcpy
+                0xc000b9f8                strncpy
+                0xc000ba4e                strchr
+                0xc000ba85                strrchr
+                0xc000bac5                memcmp
+ .text          0xc000bb1d        0x6 /Users/sodeyama/git/sodex/src/net/clock-arch.o
+                0xc000bb1d                clock_time
+ .text          0xc000bb23       0xe6 /Users/sodeyama/git/sodex/src/net/ether.o
+                0xc000bb23                ether_send
+ .text          0xc000bc09       0x24 /Users/sodeyama/git/sodex/src/net/tapdev.o
+                0xc000bc09                tapdev_init
+                0xc000bc0f                tapdev_read
+                0xc000bc27                tapdev_send
+ .text          0xc000bc2d       0x6b /Users/sodeyama/git/sodex/src/net/timer.o
+                0xc000bc2d                timer_set
+                0xc000bc49                timer_reset
+                0xc000bc61                timer_restart
+                0xc000bc74                timer_expired
+ .text          0xc000bc98      0x6e0 /Users/sodeyama/git/sodex/src/net/uip_arp.o
+                0xc000bc98                uip_arp_init
+                0xc000bced                uip_arp_timer
+                0xc000bf66                uip_arp_arpin
+                0xc000c108                uip_arp_out
+ .text          0xc000c378       0x23 /Users/sodeyama/git/sodex/src/net/uip-conf.o
+                0xc000c378                tcpip_output
+                0xc000c37e                uip_appcall
+                0xc000c384                uip_log
+ .text          0xc000c39b      0x557 /Users/sodeyama/git/sodex/src/net/uip-fw.o
+                0xc000c39b                uip_fw_init
+                0xc000c6bf                uip_fw_output
+                0xc000c6fc                uip_fw_forward
+                0xc000c891                uip_fw_register
+                0xc000c8aa                uip_fw_default
+                0xc000c8b8                uip_fw_periodic
+ .text          0xc000c8f2      0x1b8 /Users/sodeyama/git/sodex/src/net/uip-split.o
+                0xc000c8f2                uip_split_output
+ .text          0xc000caaa     0x1db7 /Users/sodeyama/git/sodex/src/net/uip.o
+                0xc000caaa                uip_setipid
+                0xc000cac4                uip_add32
+                0xc000cc5e                uip_chksum
+                0xc000cc8e                uip_ipchksum
+                0xc000cd5d                uip_tcpchksum
+                0xc000cd72                uip_udpchksum
+                0xc000cd87                uip_init
+                0xc000ce05                uip_connect
+                0xc000cf9b                uip_unlisten
+                0xc000cffb                uip_listen
+                0xc000d0bf                uip_process
+                0xc000e7fe                htons
+                0xc000e820                uip_send
+ .text          0xc000e861       0xa5 /Users/sodeyama/git/sodex/src/net/uiplib.o
+                0xc000e861                uiplib_ipaddrconv
+ .text          0xc000e906      0x1d8 sys_core.o
+                0xc000e906                enableInterrupt
+                0xc000e908                disableInterrupt
+                0xc000e90a                is_enableInterrupt
+                0xc000e927                out8
+                0xc000e934                out16
+                0xc000e943                out32
+                0xc000e950                in8
+                0xc000e95c                in16
+                0xc000e967                in32
+                0xc000e971                _poscolor_printc
+                0xc000e99c                lgdt
+                0xc000e9a7                lidt
+                0xc000e9b2                ltr
+                0xc000e9be                memset
+                0xc000e9d4                memcpy
+                0xc000e9ec                print_registers
+                0xc000ea68                switch_to_outer_privilege
+                0xc000eaa6                switch_to_same_privilege
+ *fill*         0xc000eade        0x2 
+ .text          0xc000eae0      0x1f6 ihandlers.o
+                0xc000eae0                asm_defaulthandler
+                0xc000eaec                asm_i00h
+                0xc000eaf8                asm_i01h
+                0xc000eb04                asm_i02h
+                0xc000eb10                asm_i03h
+                0xc000eb1c                asm_i04h
+                0xc000eb28                asm_i05h
+                0xc000eb34                asm_i06h
+                0xc000eb40                asm_i07h
+                0xc000eb4c                asm_i08h
+                0xc000eb58                asm_i09h
+                0xc000eb64                asm_i0Ah
+                0xc000eb70                asm_i0Bh
+                0xc000eb7c                asm_i0Ch
+                0xc000eb88                asm_i0Dh
+                0xc000eb9c                asm_i0Eh
+                0xc000eba8                asm_i10h
+                0xc000ebb4                asm_i11h
+                0xc000ebc0                asm_i12h
+                0xc000ebcc                asm_i13h
+                0xc000ebd8                asm_process_switch
+                0xc000ec34                asm_pictimer
+                0xc000ec3c                asm_i21h
+                0xc000ec4c                asm_fdchandler
+                0xc000ec58                asm_uhcihandler
+                0xc000ec64                asm_i2Bh
+                0xc000ec70                asm_syscall
+ .text          0xc000ecd6       0x47 page_asm.o
+                0xc000ecd6                pg_enable_pse
+                0xc000ece0                pg_disable_pse
+                0xc000ecea                pg_enable_paging
+                0xc000ecf6                pg_disable_paging
+                0xc000ed02                pg_load_cr3
+                0xc000ed12                pg_get_cr3
+                0xc000ed16                pg_flush_tlb
+                0xc000ed1d                        __text_end = .
+                0xc000ed1d                        __rodata_start = .
 
-.rodata         0xc000eca0     0x14b1 load address 0x0000eca0
+.rodata         0xc000ed20     0x14b1 load address 0x0000ed20
  vga.o(.rodata)
- .rodata        0xc000eca0       0x7a vga.o
+ .rodata        0xc000ed20       0x7a vga.o
  *(.rodata)
- *fill*         0xc000ed1a        0x6 
- .rodata        0xc000ed20      0x1d0 kernel.o
- .rodata        0xc000eef0        0x7 chdir.o
- *fill*         0xc000eef7        0x1 
- .rodata        0xc000eef8      0x112 elfloader.o
- *fill*         0xc000f00a        0x2 
- .rodata        0xc000f00c       0xa1 execve.o
- *fill*         0xc000f0ad        0x3 
- .rodata        0xc000f0b0      0x32b ext3fs.o
- *fill*         0xc000f3db        0x1 
- .rodata        0xc000f3dc       0x26 fs.o
- *fill*         0xc000f402        0x2 
- .rodata        0xc000f404      0x254 idt.o
- .rodata        0xc000f658      0x17e memory.o
- *fill*         0xc000f7d6        0x2 
- .rodata        0xc000f7d8       0x31 page.o
- *fill*         0xc000f809        0x3 
- .rodata        0xc000f80c       0xde process.o
- .rodata        0xc000f8ea       0x19 signal.o
- .rodata        0xc000f903       0x22 syscall.o
- *fill*         0xc000f925        0x3 
- .rodata        0xc000f928       0xab /Users/sodeyama/git/sodex/src/drivers/ata.o
- *fill*         0xc000f9d3        0x1 
- .rodata        0xc000f9d4      0x386 /Users/sodeyama/git/sodex/src/drivers/floppy.o
- .rodata        0xc000fd5a       0x32 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
- .rodata        0xc000fd8c       0x70 /Users/sodeyama/git/sodex/src/drivers/pci.o
- .rodata        0xc000fdfc      0x227 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
- .rodata        0xc0010023        0xc /Users/sodeyama/git/sodex/src/net/ether.o
- *fill*         0xc001002f        0x1 
- .rodata        0xc0010030        0xc /Users/sodeyama/git/sodex/src/net/uip_arp.o
- .rodata        0xc001003c      0x115 /Users/sodeyama/git/sodex/src/net/uip.o
-                0xc0010151                        __rodata_end = .
+ *fill*         0xc000ed9a        0x6 
+ .rodata        0xc000eda0      0x1d0 kernel.o
+ .rodata        0xc000ef70        0x7 chdir.o
+ *fill*         0xc000ef77        0x1 
+ .rodata        0xc000ef78      0x112 elfloader.o
+ *fill*         0xc000f08a        0x2 
+ .rodata        0xc000f08c       0xa1 execve.o
+ *fill*         0xc000f12d        0x3 
+ .rodata        0xc000f130      0x32b ext3fs.o
+ *fill*         0xc000f45b        0x1 
+ .rodata        0xc000f45c       0x26 fs.o
+ *fill*         0xc000f482        0x2 
+ .rodata        0xc000f484      0x254 idt.o
+ .rodata        0xc000f6d8      0x17e memory.o
+ *fill*         0xc000f856        0x2 
+ .rodata        0xc000f858       0x31 page.o
+ *fill*         0xc000f889        0x3 
+ .rodata        0xc000f88c       0xde process.o
+ .rodata        0xc000f96a       0x19 signal.o
+ .rodata        0xc000f983       0x22 syscall.o
+ *fill*         0xc000f9a5        0x3 
+ .rodata        0xc000f9a8       0xab /Users/sodeyama/git/sodex/src/drivers/ata.o
+ *fill*         0xc000fa53        0x1 
+ .rodata        0xc000fa54      0x386 /Users/sodeyama/git/sodex/src/drivers/floppy.o
+ .rodata        0xc000fdda       0x32 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
+ .rodata        0xc000fe0c       0x70 /Users/sodeyama/git/sodex/src/drivers/pci.o
+ .rodata        0xc000fe7c      0x227 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
+ .rodata        0xc00100a3        0xc /Users/sodeyama/git/sodex/src/net/ether.o
+ *fill*         0xc00100af        0x1 
+ .rodata        0xc00100b0        0xc /Users/sodeyama/git/sodex/src/net/uip_arp.o
+ .rodata        0xc00100bc      0x115 /Users/sodeyama/git/sodex/src/net/uip.o
+                0xc00101d1                        __rodata_end = .
                 0xc0011000                        . = ALIGN (0x1000)
                 0xc0011000                        __data_start = .
 
@@ -581,93 +582,93 @@ LOAD ihandlers.o
 LOAD page_asm.o
 OUTPUT(/Users/sodeyama/git/sodex/src/bin/kernel.bin binary)
 
-.debug_info     0x00000000    0x12a90
+.debug_info     0x00000000    0x12b0d
  .debug_info    0x00000000      0xe6f kernel.o
  .debug_info    0x00000e6f      0x3a1 vga.o
  .debug_info    0x00001210      0x9c4 brk.o
  .debug_info    0x00001bd4      0xbd0 chdir.o
- .debug_info    0x000027a4     0x10a8 elfloader.o
- .debug_info    0x0000384c      0xec3 execve.o
- .debug_info    0x0000470f     0x1eea ext3fs.o
- .debug_info    0x000065f9      0xa49 fs.o
- .debug_info    0x00007042      0x233 gdt.o
- .debug_info    0x00007275      0x972 idt.o
- .debug_info    0x00007be7      0x293 key.o
- .debug_info    0x00007e7a      0x652 memory.o
- .debug_info    0x000084cc      0x3f7 page.o
- .debug_info    0x000088c3      0x997 pit8254.o
- .debug_info    0x0000925a     0x13f2 process.o
- .debug_info    0x0000a64c       0xae semaphore.o
- .debug_info    0x0000a6fa      0xa5a signal.o
- .debug_info    0x0000b154      0xff5 syscall.o
- .debug_info    0x0000c149      0x26b /Users/sodeyama/git/sodex/src/drivers/ata.o
- .debug_info    0x0000c3b4      0x15a /Users/sodeyama/git/sodex/src/drivers/dma.o
- .debug_info    0x0000c50e     0x10bb /Users/sodeyama/git/sodex/src/drivers/floppy.o
- .debug_info    0x0000d5c9      0x556 /Users/sodeyama/git/sodex/src/drivers/mstorage.o
- .debug_info    0x0000db1f      0x583 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
- .debug_info    0x0000e0a2      0x7fe /Users/sodeyama/git/sodex/src/drivers/pci.o
- .debug_info    0x0000e8a0      0x252 /Users/sodeyama/git/sodex/src/drivers/rs232c.o
- .debug_info    0x0000eaf2      0xb98 /Users/sodeyama/git/sodex/src/drivers/scsi.o
- .debug_info    0x0000f68a      0xfd6 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
- .debug_info    0x00010660       0x82 /Users/sodeyama/git/sodex/src/lib/delay.o
- .debug_info    0x000106e2       0x4e /Users/sodeyama/git/sodex/src/lib/lib.o
- .debug_info    0x00010730      0x172 /Users/sodeyama/git/sodex/src/lib/memb.o
- .debug_info    0x000108a2      0x2a4 /Users/sodeyama/git/sodex/src/lib/string.o
- .debug_info    0x00010b46       0x55 /Users/sodeyama/git/sodex/src/net/clock-arch.o
- .debug_info    0x00010b9b      0x18f /Users/sodeyama/git/sodex/src/net/ether.o
- .debug_info    0x00010d2a      0x13b /Users/sodeyama/git/sodex/src/net/tapdev.o
- .debug_info    0x00010e65      0x110 /Users/sodeyama/git/sodex/src/net/timer.o
- .debug_info    0x00010f75      0x4b9 /Users/sodeyama/git/sodex/src/net/uip_arp.o
- .debug_info    0x0001142e       0xb5 /Users/sodeyama/git/sodex/src/net/uip-conf.o
- .debug_info    0x000114e3      0x618 /Users/sodeyama/git/sodex/src/net/uip-fw.o
- .debug_info    0x00011afb      0x2c3 /Users/sodeyama/git/sodex/src/net/uip-split.o
- .debug_info    0x00011dbe      0xba6 /Users/sodeyama/git/sodex/src/net/uip.o
- .debug_info    0x00012964      0x12c /Users/sodeyama/git/sodex/src/net/uiplib.o
+ .debug_info    0x000027a4     0x10c6 elfloader.o
+ .debug_info    0x0000386a      0xea8 execve.o
+ .debug_info    0x00004712     0x1eea ext3fs.o
+ .debug_info    0x000065fc      0xa49 fs.o
+ .debug_info    0x00007045      0x233 gdt.o
+ .debug_info    0x00007278      0x972 idt.o
+ .debug_info    0x00007bea      0x293 key.o
+ .debug_info    0x00007e7d      0x652 memory.o
+ .debug_info    0x000084cf      0x3f7 page.o
+ .debug_info    0x000088c6      0x997 pit8254.o
+ .debug_info    0x0000925d     0x13f2 process.o
+ .debug_info    0x0000a64f       0xae semaphore.o
+ .debug_info    0x0000a6fd      0xa5a signal.o
+ .debug_info    0x0000b157      0xff5 syscall.o
+ .debug_info    0x0000c14c      0x26b /Users/sodeyama/git/sodex/src/drivers/ata.o
+ .debug_info    0x0000c3b7      0x15a /Users/sodeyama/git/sodex/src/drivers/dma.o
+ .debug_info    0x0000c511     0x10bb /Users/sodeyama/git/sodex/src/drivers/floppy.o
+ .debug_info    0x0000d5cc      0x556 /Users/sodeyama/git/sodex/src/drivers/mstorage.o
+ .debug_info    0x0000db22      0x583 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
+ .debug_info    0x0000e0a5      0x7fe /Users/sodeyama/git/sodex/src/drivers/pci.o
+ .debug_info    0x0000e8a3      0x252 /Users/sodeyama/git/sodex/src/drivers/rs232c.o
+ .debug_info    0x0000eaf5      0xb98 /Users/sodeyama/git/sodex/src/drivers/scsi.o
+ .debug_info    0x0000f68d      0xfd6 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
+ .debug_info    0x00010663       0x82 /Users/sodeyama/git/sodex/src/lib/delay.o
+ .debug_info    0x000106e5       0xdb /Users/sodeyama/git/sodex/src/lib/lib.o
+ .debug_info    0x000107c0      0x172 /Users/sodeyama/git/sodex/src/lib/memb.o
+ .debug_info    0x00010932      0x291 /Users/sodeyama/git/sodex/src/lib/string.o
+ .debug_info    0x00010bc3       0x55 /Users/sodeyama/git/sodex/src/net/clock-arch.o
+ .debug_info    0x00010c18      0x18f /Users/sodeyama/git/sodex/src/net/ether.o
+ .debug_info    0x00010da7      0x13b /Users/sodeyama/git/sodex/src/net/tapdev.o
+ .debug_info    0x00010ee2      0x110 /Users/sodeyama/git/sodex/src/net/timer.o
+ .debug_info    0x00010ff2      0x4b9 /Users/sodeyama/git/sodex/src/net/uip_arp.o
+ .debug_info    0x000114ab       0xb5 /Users/sodeyama/git/sodex/src/net/uip-conf.o
+ .debug_info    0x00011560      0x618 /Users/sodeyama/git/sodex/src/net/uip-fw.o
+ .debug_info    0x00011b78      0x2c3 /Users/sodeyama/git/sodex/src/net/uip-split.o
+ .debug_info    0x00011e3b      0xba6 /Users/sodeyama/git/sodex/src/net/uip.o
+ .debug_info    0x000129e1      0x12c /Users/sodeyama/git/sodex/src/net/uiplib.o
 
-.debug_abbrev   0x00000000     0x4916
+.debug_abbrev   0x00000000     0x4922
  .debug_abbrev  0x00000000      0x28a kernel.o
  .debug_abbrev  0x0000028a      0x167 vga.o
  .debug_abbrev  0x000003f1      0x1bd brk.o
  .debug_abbrev  0x000005ae      0x204 chdir.o
  .debug_abbrev  0x000007b2      0x256 elfloader.o
- .debug_abbrev  0x00000a08      0x2a7 execve.o
- .debug_abbrev  0x00000caf      0x36e ext3fs.o
- .debug_abbrev  0x0000101d      0x1ea fs.o
- .debug_abbrev  0x00001207      0x144 gdt.o
- .debug_abbrev  0x0000134b      0x29c idt.o
- .debug_abbrev  0x000015e7      0x164 key.o
- .debug_abbrev  0x0000174b      0x2b4 memory.o
- .debug_abbrev  0x000019ff      0x1c1 page.o
- .debug_abbrev  0x00001bc0      0x1d5 pit8254.o
- .debug_abbrev  0x00001d95      0x35b process.o
- .debug_abbrev  0x000020f0       0x94 semaphore.o
- .debug_abbrev  0x00002184      0x1f9 signal.o
- .debug_abbrev  0x0000237d      0x30d syscall.o
- .debug_abbrev  0x0000268a      0x145 /Users/sodeyama/git/sodex/src/drivers/ata.o
- .debug_abbrev  0x000027cf       0xf8 /Users/sodeyama/git/sodex/src/drivers/dma.o
- .debug_abbrev  0x000028c7      0x318 /Users/sodeyama/git/sodex/src/drivers/floppy.o
- .debug_abbrev  0x00002bdf      0x1f8 /Users/sodeyama/git/sodex/src/drivers/mstorage.o
- .debug_abbrev  0x00002dd7      0x2a2 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
- .debug_abbrev  0x00003079      0x287 /Users/sodeyama/git/sodex/src/drivers/pci.o
- .debug_abbrev  0x00003300       0xf2 /Users/sodeyama/git/sodex/src/drivers/rs232c.o
- .debug_abbrev  0x000033f2      0x1eb /Users/sodeyama/git/sodex/src/drivers/scsi.o
- .debug_abbrev  0x000035dd      0x34d /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
- .debug_abbrev  0x0000392a       0x69 /Users/sodeyama/git/sodex/src/lib/delay.o
- .debug_abbrev  0x00003993       0x2c /Users/sodeyama/git/sodex/src/lib/lib.o
- .debug_abbrev  0x000039bf      0x112 /Users/sodeyama/git/sodex/src/lib/memb.o
- .debug_abbrev  0x00003ad1       0xf1 /Users/sodeyama/git/sodex/src/lib/string.o
- .debug_abbrev  0x00003bc2       0x4f /Users/sodeyama/git/sodex/src/net/clock-arch.o
- .debug_abbrev  0x00003c11      0x11e /Users/sodeyama/git/sodex/src/net/ether.o
- .debug_abbrev  0x00003d2f       0xe8 /Users/sodeyama/git/sodex/src/net/tapdev.o
- .debug_abbrev  0x00003e17      0x105 /Users/sodeyama/git/sodex/src/net/timer.o
- .debug_abbrev  0x00003f1c      0x1eb /Users/sodeyama/git/sodex/src/net/uip_arp.o
- .debug_abbrev  0x00004107       0xa1 /Users/sodeyama/git/sodex/src/net/uip-conf.o
- .debug_abbrev  0x000041a8      0x22f /Users/sodeyama/git/sodex/src/net/uip-fw.o
- .debug_abbrev  0x000043d7      0x150 /Users/sodeyama/git/sodex/src/net/uip-split.o
- .debug_abbrev  0x00004527      0x33e /Users/sodeyama/git/sodex/src/net/uip.o
- .debug_abbrev  0x00004865       0xb1 /Users/sodeyama/git/sodex/src/net/uiplib.o
+ .debug_abbrev  0x00000a08      0x26d execve.o
+ .debug_abbrev  0x00000c75      0x36e ext3fs.o
+ .debug_abbrev  0x00000fe3      0x1ea fs.o
+ .debug_abbrev  0x000011cd      0x144 gdt.o
+ .debug_abbrev  0x00001311      0x29c idt.o
+ .debug_abbrev  0x000015ad      0x164 key.o
+ .debug_abbrev  0x00001711      0x2b4 memory.o
+ .debug_abbrev  0x000019c5      0x1c1 page.o
+ .debug_abbrev  0x00001b86      0x1d5 pit8254.o
+ .debug_abbrev  0x00001d5b      0x35b process.o
+ .debug_abbrev  0x000020b6       0x94 semaphore.o
+ .debug_abbrev  0x0000214a      0x1f9 signal.o
+ .debug_abbrev  0x00002343      0x30d syscall.o
+ .debug_abbrev  0x00002650      0x145 /Users/sodeyama/git/sodex/src/drivers/ata.o
+ .debug_abbrev  0x00002795       0xf8 /Users/sodeyama/git/sodex/src/drivers/dma.o
+ .debug_abbrev  0x0000288d      0x318 /Users/sodeyama/git/sodex/src/drivers/floppy.o
+ .debug_abbrev  0x00002ba5      0x1f8 /Users/sodeyama/git/sodex/src/drivers/mstorage.o
+ .debug_abbrev  0x00002d9d      0x2a2 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
+ .debug_abbrev  0x0000303f      0x287 /Users/sodeyama/git/sodex/src/drivers/pci.o
+ .debug_abbrev  0x000032c6       0xf2 /Users/sodeyama/git/sodex/src/drivers/rs232c.o
+ .debug_abbrev  0x000033b8      0x1eb /Users/sodeyama/git/sodex/src/drivers/scsi.o
+ .debug_abbrev  0x000035a3      0x34d /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
+ .debug_abbrev  0x000038f0       0x69 /Users/sodeyama/git/sodex/src/lib/delay.o
+ .debug_abbrev  0x00003959       0x8d /Users/sodeyama/git/sodex/src/lib/lib.o
+ .debug_abbrev  0x000039e6      0x112 /Users/sodeyama/git/sodex/src/lib/memb.o
+ .debug_abbrev  0x00003af8       0xd6 /Users/sodeyama/git/sodex/src/lib/string.o
+ .debug_abbrev  0x00003bce       0x4f /Users/sodeyama/git/sodex/src/net/clock-arch.o
+ .debug_abbrev  0x00003c1d      0x11e /Users/sodeyama/git/sodex/src/net/ether.o
+ .debug_abbrev  0x00003d3b       0xe8 /Users/sodeyama/git/sodex/src/net/tapdev.o
+ .debug_abbrev  0x00003e23      0x105 /Users/sodeyama/git/sodex/src/net/timer.o
+ .debug_abbrev  0x00003f28      0x1eb /Users/sodeyama/git/sodex/src/net/uip_arp.o
+ .debug_abbrev  0x00004113       0xa1 /Users/sodeyama/git/sodex/src/net/uip-conf.o
+ .debug_abbrev  0x000041b4      0x22f /Users/sodeyama/git/sodex/src/net/uip-fw.o
+ .debug_abbrev  0x000043e3      0x150 /Users/sodeyama/git/sodex/src/net/uip-split.o
+ .debug_abbrev  0x00004533      0x33e /Users/sodeyama/git/sodex/src/net/uip.o
+ .debug_abbrev  0x00004871       0xb1 /Users/sodeyama/git/sodex/src/net/uiplib.o
 
-.debug_aranges  0x00000000      0x518
+.debug_aranges  0x00000000      0x520
  .debug_aranges
                 0x00000000       0x20 kernel.o
  .debug_aranges
@@ -725,76 +726,76 @@ OUTPUT(/Users/sodeyama/git/sodex/src/bin/kernel.bin binary)
  .debug_aranges
                 0x00000360       0x20 /Users/sodeyama/git/sodex/src/lib/delay.o
  .debug_aranges
-                0x00000380       0x18 /Users/sodeyama/git/sodex/src/lib/lib.o
+                0x00000380       0x20 /Users/sodeyama/git/sodex/src/lib/lib.o
  .debug_aranges
-                0x00000398       0x20 /Users/sodeyama/git/sodex/src/lib/memb.o
+                0x000003a0       0x20 /Users/sodeyama/git/sodex/src/lib/memb.o
  .debug_aranges
-                0x000003b8       0x20 /Users/sodeyama/git/sodex/src/lib/string.o
+                0x000003c0       0x20 /Users/sodeyama/git/sodex/src/lib/string.o
  .debug_aranges
-                0x000003d8       0x20 /Users/sodeyama/git/sodex/src/net/clock-arch.o
+                0x000003e0       0x20 /Users/sodeyama/git/sodex/src/net/clock-arch.o
  .debug_aranges
-                0x000003f8       0x20 /Users/sodeyama/git/sodex/src/net/ether.o
+                0x00000400       0x20 /Users/sodeyama/git/sodex/src/net/ether.o
  .debug_aranges
-                0x00000418       0x20 /Users/sodeyama/git/sodex/src/net/tapdev.o
+                0x00000420       0x20 /Users/sodeyama/git/sodex/src/net/tapdev.o
  .debug_aranges
-                0x00000438       0x20 /Users/sodeyama/git/sodex/src/net/timer.o
+                0x00000440       0x20 /Users/sodeyama/git/sodex/src/net/timer.o
  .debug_aranges
-                0x00000458       0x20 /Users/sodeyama/git/sodex/src/net/uip_arp.o
+                0x00000460       0x20 /Users/sodeyama/git/sodex/src/net/uip_arp.o
  .debug_aranges
-                0x00000478       0x20 /Users/sodeyama/git/sodex/src/net/uip-conf.o
+                0x00000480       0x20 /Users/sodeyama/git/sodex/src/net/uip-conf.o
  .debug_aranges
-                0x00000498       0x20 /Users/sodeyama/git/sodex/src/net/uip-fw.o
+                0x000004a0       0x20 /Users/sodeyama/git/sodex/src/net/uip-fw.o
  .debug_aranges
-                0x000004b8       0x20 /Users/sodeyama/git/sodex/src/net/uip-split.o
+                0x000004c0       0x20 /Users/sodeyama/git/sodex/src/net/uip-split.o
  .debug_aranges
-                0x000004d8       0x20 /Users/sodeyama/git/sodex/src/net/uip.o
+                0x000004e0       0x20 /Users/sodeyama/git/sodex/src/net/uip.o
  .debug_aranges
-                0x000004f8       0x20 /Users/sodeyama/git/sodex/src/net/uiplib.o
+                0x00000500       0x20 /Users/sodeyama/git/sodex/src/net/uiplib.o
 
-.debug_line     0x00000000     0x6300
+.debug_line     0x00000000     0x635d
  .debug_line    0x00000000      0x125 kernel.o
  .debug_line    0x00000125      0x27e vga.o
  .debug_line    0x000003a3       0xa6 brk.o
  .debug_line    0x00000449      0x19a chdir.o
- .debug_line    0x000005e3      0x29f elfloader.o
- .debug_line    0x00000882      0x318 execve.o
- .debug_line    0x00000b9a      0xbc8 ext3fs.o
- .debug_line    0x00001762      0x10e fs.o
- .debug_line    0x00001870       0xc0 gdt.o
- .debug_line    0x00001930      0x334 idt.o
- .debug_line    0x00001c64      0x11e key.o
- .debug_line    0x00001d82      0x5dd memory.o
- .debug_line    0x0000235f      0x23c page.o
- .debug_line    0x0000259b       0x9f pit8254.o
- .debug_line    0x0000263a      0x3da process.o
- .debug_line    0x00002a14       0x8b semaphore.o
- .debug_line    0x00002a9f      0x102 signal.o
- .debug_line    0x00002ba1      0x304 syscall.o
- .debug_line    0x00002ea5      0x19f /Users/sodeyama/git/sodex/src/drivers/ata.o
- .debug_line    0x00003044       0xc5 /Users/sodeyama/git/sodex/src/drivers/dma.o
- .debug_line    0x00003109      0x44b /Users/sodeyama/git/sodex/src/drivers/floppy.o
- .debug_line    0x00003554       0xd7 /Users/sodeyama/git/sodex/src/drivers/mstorage.o
- .debug_line    0x0000362b      0x384 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
- .debug_line    0x000039af      0x2af /Users/sodeyama/git/sodex/src/drivers/pci.o
- .debug_line    0x00003c5e      0x15c /Users/sodeyama/git/sodex/src/drivers/rs232c.o
- .debug_line    0x00003dba       0xf5 /Users/sodeyama/git/sodex/src/drivers/scsi.o
- .debug_line    0x00003eaf      0x6bd /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
- .debug_line    0x0000456c       0x54 /Users/sodeyama/git/sodex/src/lib/delay.o
- .debug_line    0x000045c0       0x31 /Users/sodeyama/git/sodex/src/lib/lib.o
- .debug_line    0x000045f1      0x104 /Users/sodeyama/git/sodex/src/lib/memb.o
- .debug_line    0x000046f5      0x208 /Users/sodeyama/git/sodex/src/lib/string.o
- .debug_line    0x000048fd       0x51 /Users/sodeyama/git/sodex/src/net/clock-arch.o
- .debug_line    0x0000494e       0x9a /Users/sodeyama/git/sodex/src/net/ether.o
- .debug_line    0x000049e8       0x76 /Users/sodeyama/git/sodex/src/net/tapdev.o
- .debug_line    0x00004a5e       0xaf /Users/sodeyama/git/sodex/src/net/timer.o
- .debug_line    0x00004b0d      0x31b /Users/sodeyama/git/sodex/src/net/uip_arp.o
- .debug_line    0x00004e28       0x5e /Users/sodeyama/git/sodex/src/net/uip-conf.o
- .debug_line    0x00004e86      0x3a0 /Users/sodeyama/git/sodex/src/net/uip-fw.o
- .debug_line    0x00005226      0x148 /Users/sodeyama/git/sodex/src/net/uip-split.o
- .debug_line    0x0000536e      0xed4 /Users/sodeyama/git/sodex/src/net/uip.o
- .debug_line    0x00006242       0xbe /Users/sodeyama/git/sodex/src/net/uiplib.o
+ .debug_line    0x000005e3      0x2a1 elfloader.o
+ .debug_line    0x00000884      0x311 execve.o
+ .debug_line    0x00000b95      0xbc8 ext3fs.o
+ .debug_line    0x0000175d      0x10e fs.o
+ .debug_line    0x0000186b       0xc0 gdt.o
+ .debug_line    0x0000192b      0x334 idt.o
+ .debug_line    0x00001c5f      0x11e key.o
+ .debug_line    0x00001d7d      0x5dd memory.o
+ .debug_line    0x0000235a      0x23c page.o
+ .debug_line    0x00002596       0x9f pit8254.o
+ .debug_line    0x00002635      0x3da process.o
+ .debug_line    0x00002a0f       0x8b semaphore.o
+ .debug_line    0x00002a9a      0x102 signal.o
+ .debug_line    0x00002b9c      0x304 syscall.o
+ .debug_line    0x00002ea0      0x19f /Users/sodeyama/git/sodex/src/drivers/ata.o
+ .debug_line    0x0000303f       0xc5 /Users/sodeyama/git/sodex/src/drivers/dma.o
+ .debug_line    0x00003104      0x44b /Users/sodeyama/git/sodex/src/drivers/floppy.o
+ .debug_line    0x0000354f       0xd7 /Users/sodeyama/git/sodex/src/drivers/mstorage.o
+ .debug_line    0x00003626      0x384 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
+ .debug_line    0x000039aa      0x2af /Users/sodeyama/git/sodex/src/drivers/pci.o
+ .debug_line    0x00003c59      0x15c /Users/sodeyama/git/sodex/src/drivers/rs232c.o
+ .debug_line    0x00003db5       0xf5 /Users/sodeyama/git/sodex/src/drivers/scsi.o
+ .debug_line    0x00003eaa      0x6bd /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
+ .debug_line    0x00004567       0x54 /Users/sodeyama/git/sodex/src/lib/delay.o
+ .debug_line    0x000045bb       0x88 /Users/sodeyama/git/sodex/src/lib/lib.o
+ .debug_line    0x00004643      0x104 /Users/sodeyama/git/sodex/src/lib/memb.o
+ .debug_line    0x00004747      0x213 /Users/sodeyama/git/sodex/src/lib/string.o
+ .debug_line    0x0000495a       0x51 /Users/sodeyama/git/sodex/src/net/clock-arch.o
+ .debug_line    0x000049ab       0x9a /Users/sodeyama/git/sodex/src/net/ether.o
+ .debug_line    0x00004a45       0x76 /Users/sodeyama/git/sodex/src/net/tapdev.o
+ .debug_line    0x00004abb       0xaf /Users/sodeyama/git/sodex/src/net/timer.o
+ .debug_line    0x00004b6a      0x31b /Users/sodeyama/git/sodex/src/net/uip_arp.o
+ .debug_line    0x00004e85       0x5e /Users/sodeyama/git/sodex/src/net/uip-conf.o
+ .debug_line    0x00004ee3      0x3a0 /Users/sodeyama/git/sodex/src/net/uip-fw.o
+ .debug_line    0x00005283      0x148 /Users/sodeyama/git/sodex/src/net/uip-split.o
+ .debug_line    0x000053cb      0xed4 /Users/sodeyama/git/sodex/src/net/uip.o
+ .debug_line    0x0000629f       0xbe /Users/sodeyama/git/sodex/src/net/uiplib.o
 
-.debug_str      0x00000000     0xa1e1
+.debug_str      0x00000000     0xa1e6
  .debug_str     0x00000000      0x852 kernel.o
  .debug_str     0x00000852      0x1d0 vga.o
  .debug_str     0x00000a22      0x602 brk.o
@@ -823,19 +824,19 @@ OUTPUT(/Users/sodeyama/git/sodex/src/bin/kernel.bin binary)
  .debug_str     0x00007ced      0x68f /Users/sodeyama/git/sodex/src/drivers/scsi.o
  .debug_str     0x0000837c      0x775 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
  .debug_str     0x00008af1       0xd2 /Users/sodeyama/git/sodex/src/lib/delay.o
- .debug_str     0x00008bc3       0xc2 /Users/sodeyama/git/sodex/src/lib/lib.o
- .debug_str     0x00008c85      0x115 /Users/sodeyama/git/sodex/src/lib/memb.o
- .debug_str     0x00008d9a      0x118 /Users/sodeyama/git/sodex/src/lib/string.o
- .debug_str     0x00008eb2       0x9d /Users/sodeyama/git/sodex/src/net/clock-arch.o
- .debug_str     0x00008f4f      0x16d /Users/sodeyama/git/sodex/src/net/ether.o
- .debug_str     0x000090bc      0x119 /Users/sodeyama/git/sodex/src/net/tapdev.o
- .debug_str     0x000091d5       0xe4 /Users/sodeyama/git/sodex/src/net/timer.o
- .debug_str     0x000092b9      0x2c4 /Users/sodeyama/git/sodex/src/net/uip_arp.o
- .debug_str     0x0000957d       0xec /Users/sodeyama/git/sodex/src/net/uip-conf.o
- .debug_str     0x00009669      0x30a /Users/sodeyama/git/sodex/src/net/uip-fw.o
- .debug_str     0x00009973      0x1f6 /Users/sodeyama/git/sodex/src/net/uip-split.o
- .debug_str     0x00009b69      0x567 /Users/sodeyama/git/sodex/src/net/uip.o
- .debug_str     0x0000a0d0      0x111 /Users/sodeyama/git/sodex/src/net/uiplib.o
+ .debug_str     0x00008bc3       0xc7 /Users/sodeyama/git/sodex/src/lib/lib.o
+ .debug_str     0x00008c8a      0x115 /Users/sodeyama/git/sodex/src/lib/memb.o
+ .debug_str     0x00008d9f      0x118 /Users/sodeyama/git/sodex/src/lib/string.o
+ .debug_str     0x00008eb7       0x9d /Users/sodeyama/git/sodex/src/net/clock-arch.o
+ .debug_str     0x00008f54      0x16d /Users/sodeyama/git/sodex/src/net/ether.o
+ .debug_str     0x000090c1      0x119 /Users/sodeyama/git/sodex/src/net/tapdev.o
+ .debug_str     0x000091da       0xe4 /Users/sodeyama/git/sodex/src/net/timer.o
+ .debug_str     0x000092be      0x2c4 /Users/sodeyama/git/sodex/src/net/uip_arp.o
+ .debug_str     0x00009582       0xec /Users/sodeyama/git/sodex/src/net/uip-conf.o
+ .debug_str     0x0000966e      0x30a /Users/sodeyama/git/sodex/src/net/uip-fw.o
+ .debug_str     0x00009978      0x1f6 /Users/sodeyama/git/sodex/src/net/uip-split.o
+ .debug_str     0x00009b6e      0x567 /Users/sodeyama/git/sodex/src/net/uip.o
+ .debug_str     0x0000a0d5      0x111 /Users/sodeyama/git/sodex/src/net/uiplib.o
 
 .debug_line_str
                 0x00000000     0x2391
@@ -848,55 +849,55 @@ OUTPUT(/Users/sodeyama/git/sodex/src/bin/kernel.bin binary)
  .debug_line_str
                 0x0000030c      0x100 chdir.o
  .debug_line_str
-                0x0000040c      0x134 elfloader.o
+                0x0000040c      0x12e elfloader.o
  .debug_line_str
-                0x00000540      0x13b execve.o
+                0x0000053a      0x13b execve.o
  .debug_line_str
-                0x0000067b      0x121 ext3fs.o
+                0x00000675      0x121 ext3fs.o
  .debug_line_str
-                0x0000079c       0xfd fs.o
+                0x00000796       0xfd fs.o
  .debug_line_str
-                0x00000899       0xb3 gdt.o
+                0x00000893       0xb3 gdt.o
  .debug_line_str
-                0x0000094c       0xd9 idt.o
+                0x00000946       0xd9 idt.o
  .debug_line_str
-                0x00000a25       0xac key.o
+                0x00000a1f       0xac key.o
  .debug_line_str
-                0x00000ad1       0xbe memory.o
+                0x00000acb       0xbe memory.o
  .debug_line_str
-                0x00000b8f       0xb0 page.o
+                0x00000b89       0xb0 page.o
  .debug_line_str
-                0x00000c3f      0x10b pit8254.o
+                0x00000c39      0x10b pit8254.o
  .debug_line_str
-                0x00000d4a      0x147 process.o
+                0x00000d44      0x147 process.o
  .debug_line_str
-                0x00000e91       0x8b semaphore.o
+                0x00000e8b       0x8b semaphore.o
  .debug_line_str
-                0x00000f1c      0x103 signal.o
+                0x00000f16      0x103 signal.o
  .debug_line_str
-                0x0000101f      0x174 syscall.o
+                0x00001019      0x174 syscall.o
  .debug_line_str
-                0x00001193       0xc1 /Users/sodeyama/git/sodex/src/drivers/ata.o
+                0x0000118d       0xc1 /Users/sodeyama/git/sodex/src/drivers/ata.o
  .debug_line_str
-                0x00001254       0xc4 /Users/sodeyama/git/sodex/src/drivers/dma.o
+                0x0000124e       0xc4 /Users/sodeyama/git/sodex/src/drivers/dma.o
  .debug_line_str
-                0x00001318      0x14f /Users/sodeyama/git/sodex/src/drivers/floppy.o
+                0x00001312      0x14f /Users/sodeyama/git/sodex/src/drivers/floppy.o
  .debug_line_str
-                0x00001467       0xea /Users/sodeyama/git/sodex/src/drivers/mstorage.o
+                0x00001461       0xea /Users/sodeyama/git/sodex/src/drivers/mstorage.o
  .debug_line_str
-                0x00001551       0xf1 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
+                0x0000154b       0xf1 /Users/sodeyama/git/sodex/src/drivers/ne2000.o
  .debug_line_str
-                0x00001642       0xe1 /Users/sodeyama/git/sodex/src/drivers/pci.o
+                0x0000163c       0xe1 /Users/sodeyama/git/sodex/src/drivers/pci.o
  .debug_line_str
-                0x00001723       0xcd /Users/sodeyama/git/sodex/src/drivers/rs232c.o
+                0x0000171d       0xcd /Users/sodeyama/git/sodex/src/drivers/rs232c.o
  .debug_line_str
-                0x000017f0      0x128 /Users/sodeyama/git/sodex/src/drivers/scsi.o
+                0x000017ea      0x128 /Users/sodeyama/git/sodex/src/drivers/scsi.o
  .debug_line_str
-                0x00001918      0x104 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
+                0x00001912      0x104 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
  .debug_line_str
-                0x00001a1c       0x8e /Users/sodeyama/git/sodex/src/lib/delay.o
+                0x00001a16       0x8e /Users/sodeyama/git/sodex/src/lib/delay.o
  .debug_line_str
-                0x00001aaa       0x50 /Users/sodeyama/git/sodex/src/lib/lib.o
+                0x00001aa4       0x56 /Users/sodeyama/git/sodex/src/lib/lib.o
  .debug_line_str
                 0x00001afa       0x97 /Users/sodeyama/git/sodex/src/lib/memb.o
  .debug_line_str
@@ -965,7 +966,7 @@ OUTPUT(/Users/sodeyama/git/sodex/src/bin/kernel.bin binary)
  .comment       0x000002e5       0x13 /Users/sodeyama/git/sodex/src/net/uip.o
  .comment       0x000002f8       0x13 /Users/sodeyama/git/sodex/src/net/uiplib.o
 
-.debug_frame    0x00000000     0x2c40
+.debug_frame    0x00000000     0x2c74
  .debug_frame   0x00000000       0x6c kernel.o
  .debug_frame   0x0000006c      0x1d8 vga.o
  .debug_frame   0x00000244       0x34 brk.o
@@ -994,28 +995,27 @@ OUTPUT(/Users/sodeyama/git/sodex/src/bin/kernel.bin binary)
  .debug_frame   0x00001ff8       0x74 /Users/sodeyama/git/sodex/src/drivers/scsi.o
  .debug_frame   0x0000206c      0x380 /Users/sodeyama/git/sodex/src/drivers/uhci-hcd.o
  .debug_frame   0x000023ec       0x34 /Users/sodeyama/git/sodex/src/lib/delay.o
- .debug_frame   0x00002420       0x74 /Users/sodeyama/git/sodex/src/lib/memb.o
- .debug_frame   0x00002494      0x134 /Users/sodeyama/git/sodex/src/lib/string.o
- .debug_frame   0x000025c8       0x34 /Users/sodeyama/git/sodex/src/net/clock-arch.o
- .debug_frame   0x000025fc       0x34 /Users/sodeyama/git/sodex/src/net/ether.o
- .debug_frame   0x00002630       0x74 /Users/sodeyama/git/sodex/src/net/tapdev.o
- .debug_frame   0x000026a4       0x94 /Users/sodeyama/git/sodex/src/net/timer.o
- .debug_frame   0x00002738       0xb8 /Users/sodeyama/git/sodex/src/net/uip_arp.o
- .debug_frame   0x000027f0       0x74 /Users/sodeyama/git/sodex/src/net/uip-conf.o
- .debug_frame   0x00002864      0x154 /Users/sodeyama/git/sodex/src/net/uip-fw.o
- .debug_frame   0x000029b8       0x34 /Users/sodeyama/git/sodex/src/net/uip-split.o
- .debug_frame   0x000029ec      0x220 /Users/sodeyama/git/sodex/src/net/uip.o
- .debug_frame   0x00002c0c       0x34 /Users/sodeyama/git/sodex/src/net/uiplib.o
+ .debug_frame   0x00002420       0x54 /Users/sodeyama/git/sodex/src/lib/lib.o
+ .debug_frame   0x00002474       0x74 /Users/sodeyama/git/sodex/src/lib/memb.o
+ .debug_frame   0x000024e8      0x114 /Users/sodeyama/git/sodex/src/lib/string.o
+ .debug_frame   0x000025fc       0x34 /Users/sodeyama/git/sodex/src/net/clock-arch.o
+ .debug_frame   0x00002630       0x34 /Users/sodeyama/git/sodex/src/net/ether.o
+ .debug_frame   0x00002664       0x74 /Users/sodeyama/git/sodex/src/net/tapdev.o
+ .debug_frame   0x000026d8       0x94 /Users/sodeyama/git/sodex/src/net/timer.o
+ .debug_frame   0x0000276c       0xb8 /Users/sodeyama/git/sodex/src/net/uip_arp.o
+ .debug_frame   0x00002824       0x74 /Users/sodeyama/git/sodex/src/net/uip-conf.o
+ .debug_frame   0x00002898      0x154 /Users/sodeyama/git/sodex/src/net/uip-fw.o
+ .debug_frame   0x000029ec       0x34 /Users/sodeyama/git/sodex/src/net/uip-split.o
+ .debug_frame   0x00002a20      0x220 /Users/sodeyama/git/sodex/src/net/uip.o
+ .debug_frame   0x00002c40       0x34 /Users/sodeyama/git/sodex/src/net/uiplib.o
 
 .debug_rnglists
-                0x00000000       0x7d
+                0x00000000       0x66
  .debug_rnglists
                 0x00000000       0x1c vga.o
  .debug_rnglists
                 0x0000001c       0x17 chdir.o
  .debug_rnglists
-                0x00000033       0x17 execve.o
+                0x00000033       0x17 ext3fs.o
  .debug_rnglists
-                0x0000004a       0x17 ext3fs.o
- .debug_rnglists
-                0x00000061       0x1c /Users/sodeyama/git/sodex/src/drivers/rs232c.o
+                0x0000004a       0x1c /Users/sodeyama/git/sodex/src/drivers/rs232c.o

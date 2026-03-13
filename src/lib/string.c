@@ -1,8 +1,12 @@
 /*
- * Simple string library implementation for Sodex kernel
+ * String and memory utility functions for Sodex kernel
  */
 
+#ifdef TEST_BUILD
+typedef unsigned int size_t;
+#else
 #include <sys/types.h>
+#endif
 
 size_t strlen(const char* s)
 {
@@ -66,22 +70,14 @@ char* strrchr(const char* s, int c)
   return (char*)last;
 }
 
-int pow(int x, int y)
+int memcmp(const void* s1, const void* s2, size_t n)
 {
-  int result = 1;
-  while (y > 0) {
-    result *= x;
-    y--;
+  const unsigned char* p1 = s1;
+  const unsigned char* p2 = s2;
+  while (n--) {
+    if (*p1 != *p2) return *p1 - *p2;
+    p1++;
+    p2++;
   }
-  return result;
-}
-
-int log(int x, int y)
-{
-  int result = 0;
-  while (x >= y) {
-    x /= y;
-    result++;
-  }
-  return result;
+  return 0;
 }

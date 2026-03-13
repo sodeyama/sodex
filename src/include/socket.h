@@ -80,5 +80,7 @@ PUBLIC int  kern_close_socket(int sockfd);
 PUBLIC void socket_icmp_input(u_int8_t *pkt, u_int16_t len);
 
 PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
+PUBLIC int rxbuf_read_direct(int sockfd, u_int8_t *buf, u_int16_t maxlen,
+                             struct sockaddr_in *from);
 
 #endif /* _KERNEL_SOCKET_H */

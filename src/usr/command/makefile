@@ -20,6 +20,7 @@ TEST3   = ${USRDIR}/bin/test3
 KILL    = ${USRDIR}/bin/kill
 REGEX   = ${USRDIR}/bin/regex
 SEND    = ${USRDIR}/bin/send
+PING    = ${USRDIR}/bin/ping
 
 all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
@@ -34,6 +35,7 @@ all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/kill.o -o ${KILL} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/regex.o -o ${REGEX} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/send.o -o ${SEND} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/ping.o -o ${PING} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

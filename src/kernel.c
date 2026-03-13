@@ -33,6 +33,7 @@
 #include <ata.h>
 #include <uip.h>
 #include <uip_arp.h>
+#include <socket.h>
 #ifdef KTEST_BUILD
 PUBLIC void run_kernel_tests(void);
 #endif

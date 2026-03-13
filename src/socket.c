@@ -231,16 +231,15 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
 
     if (total_len > 1500) return -1;
 
-    memset(icmp_sendbuf, 0, total_len);
+    disableInterrupt();
 
-    /* Ethernet header - will be filled by ARP */
-    /* dst MAC: broadcast initially, ARP will resolve */
-    memset(icmp_sendbuf, 0xff, 6);
-    /* src MAC */
-    memcpy(icmp_sendbuf + 6, &uip_ethaddr, 6);
-    /* EtherType: IP */
+    memset(icmp_sendbuf, 0, total_len < 60 ? 60 : total_len);
+
+    /* Ethernet header placeholder */
+    memset(icmp_sendbuf, 0xff, 6);  /* dst: broadcast placeholder */
+    memcpy(icmp_sendbuf + 6, &uip_ethaddr, 6);  /* src: our MAC */
     icmp_sendbuf[12] = 0x08;
-    icmp_sendbuf[13] = 0x00;
+    icmp_sendbuf[13] = 0x00;  /* EtherType: IP */
 
     /* IP header at offset 14 */
     u_int8_t *ip = icmp_sendbuf + 14;
@@ -269,18 +268,19 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
     /* ICMP payload at offset 34 */
     memcpy(icmp_sendbuf + 34, buf, len);
 
-    /* Use uip_arp to resolve destination MAC */
-    /* We need to use ARP cache. For gateway, use default route. */
-    /* Copy to uip_buf for ARP resolution, then send */
-    disableInterrupt();
-    memcpy(uip_buf, icmp_sendbuf, total_len);
+    /* Copy to uip_buf for ARP resolution */
+    memcpy(uip_buf, icmp_sendbuf, total_len < 60 ? 60 : total_len);
     uip_len = total_len;
     uip_arp_out();
-    /* Copy resolved MAC back */
-    memcpy(icmp_sendbuf, uip_buf, 14);
-    ne2000_send(icmp_sendbuf, total_len < 60 ? 60 : total_len);
-    enableInterrupt();
 
+    /* uip_arp_out() either:
+     * 1. Resolved MAC and updated uip_buf ethernet header -> send uip_buf
+     * 2. Replaced uip_buf with ARP request -> send ARP first, then retry
+     */
+    int send_len = uip_len < 60 ? 60 : uip_len;
+    ne2000_send(uip_buf, send_len);
+
+    enableInterrupt();
     return len;
   }
 
@@ -349,6 +349,13 @@ PUBLIC int kern_close_socket(int sockfd)
   memset(sk, 0, sizeof(struct kern_socket));
   sk->state = SOCK_STATE_UNUSED;
   return 0;
+}
+
+PUBLIC int rxbuf_read_direct(int sockfd, u_int8_t *buf, u_int16_t maxlen,
+                             struct sockaddr_in *from)
+{
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
+  return rxbuf_read(&socket_table[sockfd], buf, maxlen, from);
 }
 
 /* Called from netmain.c when an ICMP echo reply is received */

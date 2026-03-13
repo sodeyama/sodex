@@ -78,6 +78,9 @@ PUBLIC int  kern_sendto(int sockfd, void *buf, int len, int flags, struct sockad
 PUBLIC int  kern_recvfrom(int sockfd, void *buf, int len, int flags, struct sockaddr_in *addr);
 PUBLIC int  kern_close_socket(int sockfd);
 PUBLIC void socket_icmp_input(u_int8_t *pkt, u_int16_t len);
+PUBLIC void socket_udp_input(struct uip_udp_conn *udp_conn,
+                             u_int8_t *data, u_int16_t len);
+PUBLIC void socket_tcp_input(int sockfd, u_int8_t *data, u_int16_t len);
 
 PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 PUBLIC int rxbuf_read_direct(int sockfd, u_int8_t *buf, u_int16_t maxlen,

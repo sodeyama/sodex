@@ -75,6 +75,16 @@ PUBLIC void network_poll(void)
         ne2000_send(uip_buf, uip_len);
       }
     }
+
+#if UIP_UDP
+    for (i = 0; i < UIP_UDP_CONNS; i++) {
+      uip_udp_periodic(i);
+      if (uip_len > 0) {
+        uip_arp_out();
+        ne2000_send(uip_buf, uip_len);
+      }
+    }
+#endif
   }
 
   if (timer_expired(&arp_timer)) {

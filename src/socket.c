@@ -15,6 +15,8 @@
 #include <ne2000.h>
 
 EXTERN volatile u_int32_t kernel_tick;
+EXTERN void *uip_sappdata;
+EXTERN u16_t uip_slen;
 
 PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 
@@ -300,7 +302,19 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
       if (sk->local_addr.sin_port)
         uip_udp_bind(sk->udp_conn, sk->local_addr.sin_port);
     }
-    /* TODO: send via uip_udp_send in next periodic */
+    /* Copy data to uip_appdata and trigger send */
+    disableInterrupt();
+    if (len > UIP_APPDATA_SIZE) len = UIP_APPDATA_SIZE;
+    uip_udp_conn = sk->udp_conn;
+    uip_sappdata = uip_appdata = &uip_buf[UIP_LLH_LEN + UIP_IPUDPH_LEN];
+    memcpy(uip_appdata, buf, len);
+    uip_slen = len;
+    uip_process(UIP_UDP_SEND_CONN);
+    if (uip_len > 0) {
+      uip_arp_out();
+      ne2000_send(uip_buf, uip_len);
+    }
+    enableInterrupt();
     return len;
   }
 
@@ -403,4 +417,45 @@ PUBLIC void socket_icmp_input(u_int8_t *pkt, u_int16_t len)
       wakeup(&sk->recv_wq);
     }
   }
+}
+
+/* Called from uip_udp_appcall when UDP data is received */
+PUBLIC void socket_udp_input(struct uip_udp_conn *udp_conn,
+                             u_int8_t *data, u_int16_t len)
+{
+  int i;
+  for (i = 0; i < MAX_SOCKETS; i++) {
+    struct kern_socket *sk = &socket_table[i];
+    if (sk->state != SOCK_STATE_UNUSED &&
+        sk->type == SOCK_DGRAM &&
+        sk->udp_conn == udp_conn) {
+      /* Build source address from uIP packet */
+      struct sockaddr_in from;
+      from.sin_family = AF_INET;
+      /* Source IP and port are in the current uip_buf */
+      EXTERN u_int8_t uip_buf[];
+      from.sin_port = ((u_int16_t)uip_buf[UIP_LLH_LEN + 20] << 8) |
+                       uip_buf[UIP_LLH_LEN + 21]; /* UDP src port (network order) */
+      memcpy(&from.sin_addr, &uip_buf[UIP_LLH_LEN + 12], 4); /* IP src addr */
+      rxbuf_write(sk, data, len, &from);
+      wakeup(&sk->recv_wq);
+      return;
+    }
+  }
+}
+
+/* Called from uip_appcall when TCP data is received */
+PUBLIC void socket_tcp_input(int sockfd, u_int8_t *data, u_int16_t len)
+{
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return;
+  struct kern_socket *sk = &socket_table[sockfd];
+  if (sk->state == SOCK_STATE_UNUSED) return;
+
+  struct sockaddr_in from;
+  from.sin_family = AF_INET;
+  from.sin_port = 0;
+  from.sin_addr = 0;
+
+  rxbuf_write(sk, data, len, &from);
+  wakeup(&sk->recv_wq);
 }

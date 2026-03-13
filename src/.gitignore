@@ -4,6 +4,7 @@
 
 boot.ld
 
-bin/
+bin/*.bin
+bin/*.log
 
 -d

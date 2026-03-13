@@ -112,6 +112,11 @@ DEVICE = USB_DEVICE   # USBブート（デフォルト）
   - `build/obj/drivers/`, `build/obj/lib/`, `build/obj/net/`, `build/obj/usr/`
 - `build/list/`: リンカマップ、リストファイル
 - `build/tools/`: ビルドツール（`kmkfs`, `getsize`）
+- `build/log/`: QEMUログ、シリアル出力ログ（全ログはここに集約）
+  - `serial.log`: QEMU通常実行時のシリアル出力
+  - `qemu_debug.log`: QEMU通常実行時のデバッグログ（割り込み、CPUリセット等）
+  - `test_serial.log`: `make test-qemu`実行時のテストシリアル出力
+  - `test_qemu_debug.log`: `make test-qemu`実行時のQEMUデバッグログ
 - `build/boot.ld`: プリプロセス済みリンカスクリプト
 
 ## 開発ワークフロー
@@ -198,6 +203,13 @@ qemu-system-i386 -fda build/bin/fsboot.bin  # FDDモード用
 - 4KBブロックサイズ（`BLOCK_SIZE = 4096`）
 - カーネルセグメントセレクタ: CS=0x08、DS=0x10
 - ユーザーセグメントセレクタ: CS=0x23、DS=0x2B
+
+### ログ出力ルール
+- **すべてのログは`build/log/`に出力すること** — ソースツリー内（`src/`等）にログファイルを生成してはならない
+- QEMUの`-serial file:...`や`-D`オプションのパスは必ず`build/log/`配下を指定する
+- `start.sh`やMakefile内のQEMU起動コマンドでログを出力する場合も同様
+- `LOGDIR`変数（`makefile.inc`で定義）を使用してパスを参照すること
+- ログファイルは`.gitignore`で除外済み（`build/`全体が対象）
 
 ### 外部ライブラリの制限
 - **標準Cライブラリ不可**: `printf`、`malloc`、`free`、`memcpy`、`strlen`などは自前実装が必要

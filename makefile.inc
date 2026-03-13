@@ -22,6 +22,7 @@ BUILDDIR  = ${BASEDIR}/build
 OBJDIR    = ${BUILDDIR}/obj
 BIN       = ${BUILDDIR}/bin
 LIST      = ${BUILDDIR}/list
+LOGDIR    = ${BUILDDIR}/log
 
 # Toolchain (cross-compiler for i486 kernel)
 AS      = /opt/homebrew/bin/x86_64-elf-as

@@ -49,7 +49,7 @@ ASMOBJS = $(addprefix $(OBJDIR)/,$(ASMSRC:.S=.o))
 EXTRA_CFLAGS ?=
 
 # === Build directory creation (done upfront via shell) ===
-$(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(BUILDDIR)/tools $(OBJDIR)/test)
+$(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/test)
 
 # === Main targets ===
 
@@ -139,10 +139,13 @@ test-qemu: ktest-build
 		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
 		-no-reboot \
 		-monitor none \
+		-serial file:$(LOGDIR)/test_serial.log \
+		-d int,cpu_reset -D $(LOGDIR)/test_qemu_debug.log \
 		2>/dev/null &); \
 	QPID=$$!; sleep 10; kill $$QPID 2>/dev/null; wait $$QPID 2>/dev/null; \
 	echo ""; \
-	echo "=== KERNEL INTEGRATION TESTS DONE ==="
+	echo "=== KERNEL INTEGRATION TESTS DONE ==="; \
+	echo "Logs: $(LOGDIR)/test_serial.log, $(LOGDIR)/test_qemu_debug.log"
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

@@ -31,6 +31,9 @@
 #include <mstorage.h>
 #include <scsi.h>
 #include <ata.h>
+#ifdef KTEST_BUILD
+PUBLIC void run_kernel_tests(void);
+#endif
 
 PRIVATE void mem_test();
 PRIVATE void fdc_test();
@@ -59,6 +62,12 @@ PUBLIC void start_kernel()
   _kputs(" KERNEL: SETUP PIT\n");
   init_mem();
   _kputs(" KERNEL: SETUP KERNEL MEMORY\n");
+
+#ifdef KTEST_BUILD
+  run_kernel_tests();
+  /* not reached */
+#endif
+
   init_key();
   _kputs(" KERNEL: SETUP KEY\n");
 

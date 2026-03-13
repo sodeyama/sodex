@@ -87,8 +87,10 @@ boot.ld: boot.ld.S
 %.o: %.S
 	${AS} ${ASFLAGS} -I $(INCLUDE) -I . -o $@ $<
 
+EXTRA_CFLAGS ?=
+
 %.o: %.c ${INCLUDE}/*.h ${INCLUDE}/sodex/*.h
-	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 remake:
 	make clean; make
@@ -120,10 +122,48 @@ usb:
 	${LD} -m elf_i386 -Ttext 0x0 -o bootusb bootusb.o --oformat binary
 
 
+TESTDIR = ${SRCDIR}/test
+KTEST_OBJS = ${TESTDIR}/ktest.o
+
+# Build and run kernel integration tests in QEMU
+# Usage: make test-qemu
+.PHONY: test-qemu ktest-build
+test-qemu: ktest-build
+	@echo "=== Running kernel integration tests in QEMU ==="
+	@(qemu-system-i386 \
+		-drive file=$(FSBOOT),format=raw \
+		-nographic \
+		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+		-no-reboot \
+		-monitor none \
+		2>/dev/null &); \
+	QPID=$$!; sleep 10; kill $$QPID 2>/dev/null; wait $$QPID 2>/dev/null; \
+	echo ""; \
+	echo "=== KERNEL INTEGRATION TESTS DONE ==="
+
+# Compile ktest.o with KTEST_BUILD
+${TESTDIR}/ktest.o: ${TESTDIR}/ktest.c
+	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+
+# Build kernel with ktest linked in (kernel.c also needs KTEST_BUILD)
+ktest-build:
+	$(MAKE) clean
+	$(MAKE) EXTRA_CFLAGS="-DKTEST_BUILD" ktest-link
+
+ktest-link: ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} $(KTEST_OBJS) boot.ld
+	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
+	$(MAKE) tools
+	$(MAKE) ${ACIENT} ${MIDDLE}
+	@if [ ! -e ${FSBOOT} ];   \
+	  then touch ${FSBOOT};   \
+	fi
+	$(MAKE) ptest
+	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
+
 .PHONY: clean
 clean :
 	cd usr; make clean
 	cd drivers; make clean
 	cd lib; make clean
 	cd net; make clean
-	rm -f ${OBJS} ${ASMOBJS} ${KERNEL} ${ACIENT} ${MIDDLE} ${KMKFS} ${FSBOOT}
+	rm -f ${OBJS} ${ASMOBJS} ${KERNEL} ${ACIENT} ${MIDDLE} ${KMKFS} ${FSBOOT} ${TESTDIR}/*.o

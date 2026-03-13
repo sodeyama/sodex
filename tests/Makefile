@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga
+TESTS = test_lib test_memb test_memory test_vga test_ext3fs
 
 .PHONY: all clean test
 
@@ -73,6 +73,10 @@ test_vga: test_vga.c test_vga_vga.o
 
 test_vga_vga.o: $(SRC)/vga.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
+
+# ext3fs bitmap/parse tests (standalone, no ext3fs.c dependency)
+test_ext3fs: test_ext3fs.c
+	$(CC) $(CFLAGS) -o $@ test_ext3fs.c
 
 clean:
 	rm -f $(TESTS) *.o

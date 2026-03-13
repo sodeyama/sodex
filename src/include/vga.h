@@ -23,6 +23,11 @@
 
 #define VRAM    ((char *)0xc00b8000)
 
+/* VGA text-mode color attributes */
+#define VGA_COLOR_GREEN   0x02
+#define VGA_COLOR_CYAN    0x30
+#define VGA_COLOR_DEFAULT VGA_COLOR_GREEN
+
 PUBLIC void _poscolor_printc(int x, int y, char color, char c);
 PUBLIC void _pos_putc(int x, int y, char c);
 PUBLIC void _kputc(char c);

@@ -34,7 +34,7 @@ PRIVATE int promptY = 0;
 //char gColor = 0x7;
 //char gColor = 0x9a;
 //char gColor = 0x30;
-char gColor = 0x2;
+char gColor = VGA_COLOR_DEFAULT;
 
 PUBLIC void _pos_putc(int x, int y, char c)
 {

@@ -94,7 +94,7 @@ PUBLIC int ne2000_send(void* buf, u_int16_t len)
   out8(io_base+O_TBCR1, (len>>8));
   out8(io_base+O_CR, CR_STA|CR_TXP|CR_RD_SEND);
   enableInterrupt();
-  out8(io_base+O_CR, 0x26);
+  out8(io_base+O_CR, CR_STA|CR_RD_SEND);
   
   //out8(io_base+O_CR, status|CR_PAGE2);
   //u_int8_t st = in8(io_base+I_TPSR);
@@ -225,7 +225,7 @@ PRIVATE void write_remote_dma(u_int16_t addr, void* buf, u_int16_t len)
 
   p = (u_int16_t*)buf;
   u_int8_t status = in8(io_base+I_ISR);
-  status = (status & 0xbf);//(~ISR_RDC));
+  status = (status & ~ISR_RDC);
   //out8(io_base+O_ISR, status);
   out8(io_base+O_RSAR1, addr&0xff);
   out8(io_base+O_RSAR0, (addr>>8));

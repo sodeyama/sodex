@@ -19,11 +19,40 @@
 #include <floppy.h>
 #include <ne2000.h>
 
-#define TYPE_INTR_GATE 0xEE //0x8E // DPL=0, P=1
-#define TYPE_TRAP_GATE 0xEF //0x8F // DPL=0, P=1
-#define TYPE_TASK_GATE 0x85 // DPL=0, P=1
+/* IDT gate types */
+#define TYPE_INTR_GATE 0xEE  /* DPL=3, 32-bit interrupt gate */
+#define TYPE_TRAP_GATE 0xEF  /* DPL=3, 32-bit trap gate */
+#define TYPE_TASK_GATE 0x85  /* DPL=0, task gate */
 
 #define IDTNUM  256
+
+/* 8259A PIC port addresses */
+#define PIC1_CMD   0x20  /* Master PIC command port */
+#define PIC1_DATA  0x21  /* Master PIC data/mask port */
+#define PIC2_CMD   0xA0  /* Slave PIC command port */
+#define PIC2_DATA  0xA1  /* Slave PIC data/mask port */
+
+/* PIC commands */
+#define PIC_EOI_BASE   0x60  /* Specific EOI command base */
+#define PIC_EOI        0x20  /* Non-specific EOI command */
+#define PIC_ICW1_INIT  0x11  /* ICW1: edge triggered, cascade, ICW4 needed */
+
+/* PIC ICW2: interrupt vector base */
+#define PIC_ICW2_MASTER  0x20  /* Master PIC vector offset (IRQ0 = 0x20) */
+#define PIC_ICW2_SLAVE   0x28  /* Slave PIC vector offset (IRQ8 = 0x28) */
+
+/* PIC ICW3 */
+#define PIC_ICW3_MASTER  0x04  /* Slave on IRQ2 */
+#define PIC_ICW3_SLAVE   0x02  /* Cascade identity */
+
+/* PIC ICW4 */
+#define PIC_ICW4_8086    0x01  /* 8086/88 mode */
+
+/* Keyboard controller */
+#define KB_DATA_PORT     0x60  /* PS/2 keyboard data port */
+
+/* IRQ for cascade (slave PIC on master IRQ2) */
+#define IRQ_CASCADE      2
 
 PRIVATE InterruptDescTable interruptDescTable[IDTNUM];
 PRIVATE IDTR idtr;
@@ -284,7 +313,7 @@ PUBLIC void i21h_keyhandler()
   u_int8_t a;
   char c;
 
-  a = in8(0x60);
+  a = in8(KB_DATA_PORT);
   if (a <= 127) {
     c = get_keymap(a);
     if (c == KEY_ENTER) {
@@ -316,8 +345,8 @@ PUBLIC void interrupt_selector(int selector)
 PUBLIC void defaulthandler()
 {
   /* Send EOI to both PICs in case this is a hardware interrupt */
-  out8(0xA0, 0x20);
-  out8(0x20, 0x20);
+  out8(PIC2_CMD, PIC_EOI);
+  out8(PIC1_CMD, PIC_EOI);
 }
 
 PRIVATE void init_pic()
@@ -328,20 +357,20 @@ PRIVATE void init_pic()
   //out8(0x21, 0xFB);
   //out8(0xA1, 0xFF);
 
-  out8(0x21, 0xFF);
-  out8(0xA1, 0xFF);
+  out8(PIC1_DATA, 0xFF);
+  out8(PIC2_DATA, 0xFF);
 
   // 8259A master setting
-  out8(0x20,0x11);
-  out8(0x21,0x20+0);
-  out8(0x21,0x04);
-  out8(0x21,0x01);
+  out8(PIC1_CMD, PIC_ICW1_INIT);
+  out8(PIC1_DATA, PIC_ICW2_MASTER);
+  out8(PIC1_DATA, PIC_ICW3_MASTER);
+  out8(PIC1_DATA, PIC_ICW4_8086);
 
   // 8259A slave setting
-  out8(0xA0,0x11); 
-  out8(0xA1,0x20+8);
-  out8(0xA1,0x02);
-  out8(0xA1,0x01);
+  out8(PIC2_CMD, PIC_ICW1_INIT);
+  out8(PIC2_DATA, PIC_ICW2_SLAVE);
+  out8(PIC2_DATA, PIC_ICW3_SLAVE);
+  out8(PIC2_DATA, PIC_ICW4_8086);
 
   // mask outport at not timer(0) & key(1) & fdc(6) & serial(4)
   set_intr_bit(IRQ_TIMER);
@@ -353,8 +382,8 @@ PRIVATE void init_pic()
 PUBLIC void set_intr_bit(u_int8_t intr_num)
 {
   disableInterrupt();
-  u_int8_t low = in8(0x21);
-  u_int8_t high = in8(0xA1);
+  u_int8_t low = in8(PIC1_DATA);
+  u_int8_t high = in8(PIC2_DATA);
   if (intr_num < 8) {
     low = (low & (~(1<<intr_num)));
   } else if (intr_num < 16) {
@@ -363,8 +392,8 @@ PUBLIC void set_intr_bit(u_int8_t intr_num)
     _kputs("set_intr_bit error. The intr_num must be under 16.\n");
     return;
   }
-  out8(0x21, low);
-  out8(0xA1, high);
+  out8(PIC1_DATA, low);
+  out8(PIC2_DATA, high);
   enableInterrupt();
 }
 
@@ -375,15 +404,15 @@ PUBLIC void enable_pic_interrupt(u_int8_t intr_num)
     u_int8_t bit_low = get_interrupt_bit_low();
     u_int8_t bit_high = get_interrupt_bit_high();
     bit_low &= 0xff & ~(1 << intr_num);
-    out8(0x21, bit_low);
-    out8(0xA1, bit_high);
+    out8(PIC1_DATA, bit_low);
+    out8(PIC2_DATA, bit_high);
     enableInterrupt();
   } else {
     u_int8_t bit_low = get_interrupt_bit_low();
     u_int8_t bit_high = get_interrupt_bit_high();
     bit_low &= 0xff & ~(1 << intr_num);
-    out8(0x21, bit_low);
-    out8(0xA1, bit_high);
+    out8(PIC1_DATA, bit_low);
+    out8(PIC2_DATA, bit_high);
   }
 }
 
@@ -394,27 +423,27 @@ PUBLIC void disable_pic_interrupt(u_int8_t intr_num)
     u_int8_t bit_low = get_interrupt_bit_low();
     u_int8_t bit_high = get_interrupt_bit_high();
     bit_low |= 0xff & (1 << intr_num);
-    out8(0x21, bit_low);
-    out8(0xA1, bit_high);
+    out8(PIC1_DATA, bit_low);
+    out8(PIC2_DATA, bit_high);
     enableInterrupt();
   } else {
     u_int8_t bit_low = get_interrupt_bit_low();
     u_int8_t bit_high = get_interrupt_bit_high();
     bit_low |= 0xff & (1 << intr_num);
-    out8(0x21, bit_low);
-    out8(0xA1, bit_high);
+    out8(PIC1_DATA, bit_low);
+    out8(PIC2_DATA, bit_high);
   }
 }
 
 PUBLIC u_int8_t get_interrupt_bit_low()
 {
-  u_int8_t bit = in8(0x21);
+  u_int8_t bit = in8(PIC1_DATA);
   return bit;
 }
 
 PUBLIC u_int8_t get_interrupt_bit_high()
 {
-  u_int8_t bit = in8(0xA1);
+  u_int8_t bit = in8(PIC2_DATA);
   return bit;
 }
 
@@ -438,11 +467,11 @@ PUBLIC int wait_interrupt(int intno)
 PUBLIC void pic_eoi(int irq)
 {
   if (irq < 8) {
-    out8(0x20, 0x60 + irq);
+    out8(PIC1_CMD, PIC_EOI_BASE + irq);
   } else if (irq < 16) {
     disableInterrupt();
-    out8(0xA0, 0x60 + irq - 8);
-    out8(0x20, 0x62);
+    out8(PIC2_CMD, PIC_EOI_BASE + irq - 8);
+    out8(PIC1_CMD, PIC_EOI_BASE + IRQ_CASCADE);
     enableInterrupt();
   }
 }

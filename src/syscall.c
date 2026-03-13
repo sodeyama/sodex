@@ -26,6 +26,7 @@
 #include <pit8254.h>
 #include <uip.h>
 #include <ether.h>
+#include <socket.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_read(int fd, const void* buf, size_t count);
@@ -136,6 +137,46 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_SEND:
     sys_send(p1);
+    break;
+
+  case SYS_CALL_SOCKET:
+    ret = kern_socket(p1, p2, p3);
+    break;
+
+  case SYS_CALL_BIND:
+    ret = kern_bind(p1, (struct sockaddr_in *)p2);
+    break;
+
+  case SYS_CALL_LISTEN:
+    ret = kern_listen(p1, p2);
+    break;
+
+  case SYS_CALL_ACCEPT:
+    ret = kern_accept(p1, (struct sockaddr_in *)p2);
+    break;
+
+  case SYS_CALL_CONNECT:
+    ret = kern_connect(p1, (struct sockaddr_in *)p2);
+    break;
+
+  case SYS_CALL_SEND_MSG:
+    ret = kern_send(p1, (void *)p2, p3, p4);
+    break;
+
+  case SYS_CALL_RECV:
+    ret = kern_recv(p1, (void *)p2, p3, p4);
+    break;
+
+  case SYS_CALL_SENDTO:
+    ret = kern_sendto(p1, (void *)p2, p3, p4, (struct sockaddr_in *)p5);
+    break;
+
+  case SYS_CALL_RECVFROM:
+    ret = kern_recvfrom(p1, (void *)p2, p3, p4, (struct sockaddr_in *)p5);
+    break;
+
+  case SYS_CALL_CLOSE_SOCK:
+    ret = kern_close_socket(p1);
     break;
   }
 

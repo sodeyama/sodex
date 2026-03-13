@@ -60,4 +60,15 @@
 #define SYS_CALL_MEMDUMP    300
 #define SYS_CALL_SEND       400
 
+#define SYS_CALL_SOCKET     401
+#define SYS_CALL_BIND       402
+#define SYS_CALL_LISTEN     403
+#define SYS_CALL_ACCEPT     404
+#define SYS_CALL_CONNECT    405
+#define SYS_CALL_SEND_MSG   406
+#define SYS_CALL_RECV       407
+#define SYS_CALL_SENDTO     408
+#define SYS_CALL_RECVFROM   409
+#define SYS_CALL_CLOSE_SOCK 410
+
 #endif

@@ -12,7 +12,13 @@ void tcpip_output(void)
   }
 }
 
-void uip_appcall(void) {}
+void uip_appcall(void) {
+  /* TCP socket dispatch - TODO for Phase 7 */
+}
+
+void uip_udp_appcall(void) {
+  /* UDP socket dispatch - TODO for Phase 6 */
+}
 
 void uip_log(char *msg) {
   _kprintf(msg);

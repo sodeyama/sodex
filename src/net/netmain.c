@@ -3,6 +3,7 @@
 #include <uip_arp.h>
 #include <ne2000.h>
 #include <timer.h>
+#include <socket.h>
 
 #define CLOCK_CONF_SECOND 100
 #define PERIODIC_TIMER_INTERVAL  50
@@ -37,6 +38,18 @@ PUBLIC void network_poll(void)
 
       if (eth_hdr->type == htons(UIP_ETHTYPE_IP)) {
         uip_arp_ipin();
+
+        /* Intercept ICMP echo reply for raw sockets */
+        u_int8_t *ip_hdr = &uip_buf[14]; /* after Ethernet header */
+        if (ip_hdr[9] == 1) { /* IPPROTO_ICMP */
+          u_int8_t icmp_type = ip_hdr[(ip_hdr[0] & 0x0f) * 4];
+          if (icmp_type == 0) { /* ICMP_ECHO_REPLY */
+            socket_icmp_input(ip_hdr, uip_len - 14);
+            uip_len = 0;
+            continue;
+          }
+        }
+
         uip_input();
         if (uip_len > 0) {
           uip_arp_out();

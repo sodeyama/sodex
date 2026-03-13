@@ -26,7 +26,7 @@
 #include <execve.h>
 
 EXTERN void network_poll(void);
-
+EXTERN volatile u_int32_t kernel_tick;
 
 PRIVATE TSS tss;
 
@@ -111,6 +111,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
                           u_int32_t ebp)
 {
   pic_eoi(IRQ_TIMER);
+  kernel_tick++;
   save_process(is_usermode, iret_eip, iret_cs, iret_eflags,
                iret_esp, iret_ss, ebp);
   network_poll();
@@ -143,6 +144,10 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
     current = dlist_entry(current->run_list.next,
                           struct task_struct, run_list);
   } else if (state == TASK_RUNNING) {
+  } else if (state == TASK_INTERRUPTIBLE) {
+    // skip sleeping process, move to next
+    current = dlist_entry(current->run_list.next,
+                          struct task_struct, run_list);
   } else {
     _kprintf("The number %x of task state is not implemented\n",
              state);
@@ -311,6 +316,79 @@ PRIVATE int maxsignal(u_int32_t signal)
       return i;
   }
   return -1;
+}
+
+PUBLIC void sleep_on(struct wait_queue **wq)
+{
+  if (current == (struct task_struct *)0)
+    return;
+
+  struct wait_queue entry;
+  entry.task = current;
+  entry.next = *wq;
+  *wq = &entry;
+
+  current->state = TASK_INTERRUPTIBLE;
+
+  /* Yield CPU by enabling interrupts and spinning until woken up */
+  enableInterrupt();
+  while (current->state == TASK_INTERRUPTIBLE) {
+    /* Timer interrupt will call schedule() and skip this process */
+  }
+
+  /* Remove ourselves from wait queue (if still there) */
+  struct wait_queue **pp = wq;
+  while (*pp) {
+    if ((*pp)->task == current) {
+      *pp = (*pp)->next;
+      break;
+    }
+    pp = &((*pp)->next);
+  }
+}
+
+PUBLIC void sleep_on_timeout(struct wait_queue **wq, u_int32_t ticks)
+{
+  if (current == (struct task_struct *)0)
+    return;
+
+  struct wait_queue entry;
+  entry.task = current;
+  entry.next = *wq;
+  *wq = &entry;
+
+  current->state = TASK_INTERRUPTIBLE;
+  u_int32_t deadline = kernel_tick + ticks;
+
+  enableInterrupt();
+  while (current->state == TASK_INTERRUPTIBLE) {
+    if (kernel_tick >= deadline) {
+      /* Timeout: wake ourselves up */
+      current->state = TASK_RUNNING;
+      break;
+    }
+  }
+
+  /* Remove ourselves from wait queue */
+  struct wait_queue **pp = wq;
+  while (*pp) {
+    if ((*pp)->task == current) {
+      *pp = (*pp)->next;
+      break;
+    }
+    pp = &((*pp)->next);
+  }
+}
+
+PUBLIC void wakeup(struct wait_queue **wq)
+{
+  struct wait_queue *p = *wq;
+  while (p) {
+    if (p->task)
+      p->task->state = TASK_RUNNING;
+    p = p->next;
+  }
+  *wq = (struct wait_queue *)0;
 }
 
 PRIVATE void p_print_debug(struct task_struct* prev, struct task_struct* next)

@@ -104,7 +104,7 @@ typedef unsigned short uip_stats_t;
  *
  * \hideinitializer
  */
-#define UIP_CONF_BUFFER_SIZE     420
+#define UIP_CONF_BUFFER_SIZE     1500
 
 /**
  * CPU byte order.
@@ -125,7 +125,7 @@ typedef unsigned short uip_stats_t;
  *
  * \hideinitializer
  */
-#define UIP_CONF_UDP             0
+#define UIP_CONF_UDP             1
 
 /**
  * UDP checksums on or off
@@ -153,11 +153,14 @@ typedef unsigned short uip_stats_t;
 
 
 /* original setting */
-typedef u_int32_t uip_tcp_appstate_t;
+typedef int uip_tcp_appstate_t;
+typedef int uip_udp_appstate_t;
 void tcpip_output(void);
 void uip_appcall(void);
+void uip_udp_appcall(void);
 
 #define UIP_APPCALL uip_appcall
+#define UIP_UDP_APPCALL uip_udp_appcall
 
 
 #endif /* __UIP_CONF_H__ */

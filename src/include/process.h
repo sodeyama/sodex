@@ -29,6 +29,11 @@
 
 #define ERROR_WAITPID       -1
 
+struct wait_queue {
+    struct task_struct *task;
+    struct wait_queue *next;
+};
+
 typedef struct _TSS {
   u_int16_t backlink;  u_int16_t dummy1;
   u_int32_t esp0;
@@ -142,6 +147,11 @@ PUBLIC void to_kernelmode();
 PUBLIC int is_usermode();
 PUBLIC void sys_exit(int status);
 PUBLIC int sys_waitpid(pid_t pid, int *status, int options);
+PUBLIC void sleep_on(struct wait_queue **wq);
+PUBLIC void sleep_on_timeout(struct wait_queue **wq, u_int32_t ticks);
+PUBLIC void wakeup(struct wait_queue **wq);
+
+PUBLIC volatile u_int32_t kernel_tick;
 
 #define SAME_PRIVILEGE 0
 #define OUTER_PRIVILEGE 1

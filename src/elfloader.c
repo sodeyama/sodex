@@ -148,7 +148,14 @@ PUBLIC int open_env(const char* filename, int flags, mode_t mode)
   int i;
   for (i=0; PATH_ENV[i] != NULL; i++) {
     char* newfilename = __create_filepath(filename, PATH_ENV[i]);
-    int fd = ext3_open(newfilename, flags, mode);
+    int fd;
+    int err;
+    if (newfilename == NULL)
+      continue;
+    fd = ext3_open(newfilename, flags, mode);
+    err = kfree(newfilename);
+    if (err)
+      _kprintf("%s:kfree error:%x\n", __func__, err);
     if (fd != 0)
       return fd;
   }
@@ -157,14 +164,20 @@ PUBLIC int open_env(const char* filename, int flags, mode_t mode)
 
 PRIVATE char* __create_filepath(const char* filename, const char* path)
 {
+  size_t path_len;
+  size_t name_len;
   char* newfilename = kalloc(PATHNAME_MAX);
   if (newfilename == NULL) {
     _kprintf("%s kalloc error\n", __func__);
     return NULL;
   }
-  memcpy(newfilename, path, strlen(path));
-  memcpy(newfilename+strlen(path), "/", 1);
-  memcpy(newfilename+strlen(path)+1, filename, strlen(filename));
+  memset(newfilename, 0, PATHNAME_MAX);
+  path_len = strlen(path);
+  name_len = strlen(filename);
+  memcpy(newfilename, path, path_len);
+  memcpy(newfilename + path_len, "/", 1);
+  memcpy(newfilename + path_len + 1, filename, name_len);
+  newfilename[path_len + name_len + 1] = '\0';
 
   return newfilename;
 }

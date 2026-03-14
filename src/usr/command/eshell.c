@@ -157,14 +157,25 @@ static void set_prompt(char* prompt)
 static char* get_path_recursively(ext3_dentry* dentry)
 {
   struct list* head = malloc(sizeof(struct list));
+  int len;
+  if (head == NULL)
+    return "/";
+  memset(head, 0, sizeof(struct list));
   head->next = head;
   head->prev = head;
-  memcpy(head->name, dentry->d_name, dentry->d_namelen);
+  len = clamp_copy_len(dentry->d_namelen, NAME_MAX);
+  memcpy(head->name, dentry->d_name, len);
+  head->name[len] = '\0';
 
   ext3_dentry* pdentry = dentry->d_parent;
   while (pdentry != NULL) {
     struct list* new = malloc(sizeof(struct list));
-    memcpy(new->name, pdentry->d_name, pdentry->d_namelen);
+    if (new == NULL)
+      break;
+    memset(new, 0, sizeof(struct list));
+    len = clamp_copy_len(pdentry->d_namelen, NAME_MAX);
+    memcpy(new->name, pdentry->d_name, len);
+    new->name[len] = '\0';
     LIST_INSERT_BEFORE(new, head);
     pdentry = pdentry->d_parent;
   }

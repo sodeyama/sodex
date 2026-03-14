@@ -35,6 +35,7 @@ PRIVATE u_int32_t get_proc_stackmem(u_int32_t *pg_dir);
 PRIVATE int get_argc(char *const argv[]);
 PRIVATE char** get_argv(char *const argv[]);
 PRIVATE pid_t alloc_pid();
+PRIVATE struct tty *inherit_stdio_tty(struct tty *stdio_tty);
 
 PUBLIC pid_t sys_fork()
 {
@@ -96,6 +97,7 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
                                      char *const envp[],
                                      struct tty *stdio_tty)
 {
+  struct tty *child_tty;
   disable_pic_interrupt(IRQ_TIMER);
   /* set the memory translation using page feature for user process */
   // alloc 4096Byte from kernel memory manager
@@ -119,8 +121,9 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   memset(kern_task, 0, sizeof(struct task_struct));
   kern_task->files = kalloc(sizeof(struct files_struct));
   memset(kern_task->files, 0, sizeof(struct files_struct));
-  if (stdio_tty != NULL)
-    fs_stdio_open_tty(kern_task->files, stdio_tty);
+  child_tty = inherit_stdio_tty(stdio_tty);
+  if (child_tty != NULL)
+    fs_stdio_open_tty(kern_task->files, child_tty);
   else
     fs_stdio_open(kern_task->files);
 
@@ -203,6 +206,23 @@ PRIVATE pid_t alloc_pid()
 {
   static pid_t pid = 0;
   return (pid++);
+}
+
+PRIVATE struct tty *inherit_stdio_tty(struct tty *stdio_tty)
+{
+  struct tty *tty = stdio_tty;
+
+  if (tty != NULL)
+    return tty;
+  if (current == NULL || current->files == NULL)
+    return NULL;
+
+  tty = tty_lookup_file(current->files, STDIN_FILENO);
+  if (tty == NULL)
+    tty = tty_lookup_file(current->files, STDOUT_FILENO);
+  if (tty == NULL)
+    tty = tty_lookup_file(current->files, STDERR_FILENO);
+  return tty;
 }
 
 PRIVATE int get_argc(char *const argv[])

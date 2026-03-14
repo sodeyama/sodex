@@ -29,6 +29,7 @@
 #include <socket.h>
 #include <tty.h>
 #include <fb.h>
+#include <pipe.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_creat(const char* pathname, mode_t mode);
@@ -41,6 +42,8 @@ PRIVATE int sys_mkdir_call(const char* pathname, mode_t mode);
 PRIVATE int sys_unlink_call(const char* pathname);
 PRIVATE int sys_rmdir_call(const char* pathname);
 PRIVATE int sys_rename_call(const char* oldpath, const char* newpath);
+PRIVATE int sys_dup_call(int oldfd);
+PRIVATE int sys_pipe_call(int *fd);
 PRIVATE int sys_getdentry();
 PRIVATE int sys_getpstat();
 PRIVATE int sys_getkeyevent(struct key_event *event);
@@ -216,6 +219,14 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_UNLINK:
     ret = sys_unlink_call((const char *)p1);
+    break;
+
+  case SYS_CALL_DUP:
+    ret = sys_dup_call((int)p1);
+    break;
+
+  case SYS_CALL_PIPE:
+    ret = sys_pipe_call((int *)p1);
     break;
 
   case SYS_CALL_SIGNAL:
@@ -404,6 +415,16 @@ PRIVATE int sys_rmdir_call(const char* pathname)
 PRIVATE int sys_rename_call(const char* oldpath, const char* newpath)
 {
   return ext3_rename(oldpath, newpath);
+}
+
+PRIVATE int sys_dup_call(int oldfd)
+{
+  return files_dup(current->files, oldfd);
+}
+
+PRIVATE int sys_pipe_call(int *fd)
+{
+  return pipe(fd);
 }
 
 PRIVATE int sys_openpty()

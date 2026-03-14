@@ -94,6 +94,23 @@ PUBLIC int files_clone(struct files_struct *dst, struct files_struct *src)
   return TRUE;
 }
 
+PUBLIC int files_close_all(struct files_struct *files)
+{
+  int fd;
+
+  if (files == NULL)
+    return FALSE;
+
+  for (fd = 0; fd < FILEDESC_MAX; fd++) {
+    if (files->fs_fd[fd] != NULL) {
+      file_put(files->fs_fd[fd]);
+      files->fs_fd[fd] = NULL;
+    }
+  }
+  files->fs_freefd = 0;
+  return TRUE;
+}
+
 PUBLIC off_t lseek(int fd, off_t offset, int whence)
 {
   struct file* file = FD_TOFILE(fd, current);

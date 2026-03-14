@@ -254,6 +254,7 @@ PRIVATE void _exit()
 {
   struct task_struct* next = dlist_entry(current->run_list.next,
                                          struct task_struct, run_list);
+  files_close_all(current->files);
   dlist_remove(&(current->run_list));
   current = next;
   schedule();
@@ -384,4 +385,3 @@ PUBLIC void wakeup(struct wait_queue **wq)
   }
   *wq = (struct wait_queue *)0;
 }
-

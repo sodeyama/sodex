@@ -12,6 +12,7 @@
 extern ssize_t write(int fd, const void *buf, size_t count);
 extern int open(const char *pathname, int flags, mode_t mode);
 extern ssize_t read(int fd, void *buf, size_t count);
+extern int close(int fd);
 extern int execve(const char *filename, char *const argv[],
                   char *const envp[]);
 extern void exit(int status);
@@ -21,6 +22,8 @@ extern int creat(const char *pathname, mode_t mode);
 extern int unlink(const char *pathname);
 extern int rmdir(const char *pathname);
 extern int rename(const char *oldpath, const char *newpath);
+extern int dup(int oldfd);
+extern int pipe(int fd[2]);
 extern ext3_dentry* getdentry();
 extern struct task_struct* get_pstat();
 extern int _brk(void* end_data_segment);

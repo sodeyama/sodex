@@ -93,5 +93,6 @@ PUBLIC int files_dup(struct files_struct *files, int oldfd);
 PUBLIC int files_clone(struct files_struct *dst, struct files_struct *src);
 PUBLIC struct file *file_get(struct file *file);
 PUBLIC int file_put(struct file *file);
+PUBLIC int files_close_all(struct files_struct *files);
 
 #endif

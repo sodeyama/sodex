@@ -137,7 +137,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-term test-qemu-fs ktest-build
+.PHONY: test-qemu test-qemu-term test-qemu-fs test-qemu-shell-io ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -149,6 +149,10 @@ test-qemu-term: all
 test-qemu-fs: all
 	@echo "=== Running fs CRUD smoke in QEMU ==="
 	@python3 $(BASEDIR)/src/test/run_qemu_fs_crud_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-shell-io: all
+	@echo "=== Running shell IO smoke in QEMU ==="
+	@python3 $(BASEDIR)/src/test/run_qemu_shell_io_smoke.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

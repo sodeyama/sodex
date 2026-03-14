@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
+#include <fs.h>
 #include <eshell.h>
 #include <winsize.h>
 
@@ -10,6 +11,13 @@ static char* get_path_recursively(ext3_dentry* dentry);
 static int shell_buf_size(void);
 static int refresh_shell_buffer(char **buf, int *buf_size);
 static int clamp_copy_len(int len, int max_len);
+static int find_token(char **argv, const char *token);
+static int wait_command(pid_t pid, char *const argv[]);
+static int swap_fd(int target_fd, int next_fd);
+static void restore_fd(int target_fd, int saved_fd);
+static int run_with_redirection(char **argv, char *input_path,
+                                char *output_path);
+static int run_pipeline(char **left_argv, char **right_argv);
 
 char g_pathname[PATH_MAX];
 
@@ -73,16 +81,32 @@ int main(int argc, char** argv)
     }
     arg_buf[i+1] = NULL;
     
-    if (redirect_check(arg_buf)) {
-      printf("redirect\n");
-    }
-    
-    pid_t cid = execve(arg_buf[0], arg_buf, 0);
-    if (strcmp(arg_buf[0], "test") != 0) {
-      waitpid(cid, NULL, NULL);
+    {
+      int pipe_pos = find_token(arg_buf, "|");
+      int input_pos = find_token(arg_buf, "<");
+      int output_pos = find_token(arg_buf, ">");
+
+      if (pipe_pos > 0 && arg_buf[pipe_pos + 1] != NULL) {
+        char **right_argv = &(arg_buf[pipe_pos + 1]);
+        arg_buf[pipe_pos] = NULL;
+        run_pipeline(arg_buf, right_argv);
+      } else {
+        char *input_path = NULL;
+        char *output_path = NULL;
+
+        if (input_pos > 0 && arg_buf[input_pos + 1] != NULL) {
+          input_path = arg_buf[input_pos + 1];
+          arg_buf[input_pos] = NULL;
+        }
+        if (output_pos > 0 && arg_buf[output_pos + 1] != NULL) {
+          output_path = arg_buf[output_pos + 1];
+          arg_buf[output_pos] = NULL;
+        }
+        run_with_redirection(arg_buf, input_path, output_path);
+      }
     }
 
-    if (strcmp(arg_buf[0], "cd") == 0) { 
+    if (arg_buf[0] != NULL && strcmp(arg_buf[0], "cd") == 0) { 
       set_prompt(prompt);
     }
 
@@ -136,6 +160,127 @@ static int clamp_copy_len(int len, int max_len)
   if (len >= max_len)
     return max_len - 1;
   return len;
+}
+
+static int find_token(char **argv, const char *token)
+{
+  int i;
+
+  if (argv == NULL || token == NULL)
+    return -1;
+  for (i = 0; argv[i] != NULL; i++) {
+    if (strcmp(argv[i], token) == 0)
+      return i;
+  }
+  return -1;
+}
+
+static int wait_command(pid_t pid, char *const argv[])
+{
+  if (pid < 0)
+    return -1;
+  if (argv != NULL && argv[0] != NULL && strcmp(argv[0], "test") != 0)
+    waitpid(pid, NULL, NULL);
+  return 0;
+}
+
+static int swap_fd(int target_fd, int next_fd)
+{
+  int saved_fd;
+  int new_fd;
+
+  saved_fd = dup(target_fd);
+  if (saved_fd < 0)
+    return -1;
+  close(target_fd);
+  new_fd = dup(next_fd);
+  if (new_fd != target_fd)
+    return -1;
+  return saved_fd;
+}
+
+static void restore_fd(int target_fd, int saved_fd)
+{
+  if (saved_fd < 0)
+    return;
+  close(target_fd);
+  dup(saved_fd);
+  close(saved_fd);
+}
+
+static int run_with_redirection(char **argv, char *input_path,
+                                char *output_path)
+{
+  int input_fd = -1;
+  int output_fd = -1;
+  int saved_stdin = -1;
+  int saved_stdout = -1;
+  pid_t pid;
+
+  if (argv == NULL || argv[0] == NULL)
+    return -1;
+
+  if (input_path != NULL) {
+    input_fd = open(input_path, O_RDONLY, 0);
+    if (input_fd < 0)
+      return -1;
+    saved_stdin = swap_fd(STDIN_FILENO, input_fd);
+    close(input_fd);
+    if (saved_stdin < 0)
+      return -1;
+  }
+
+  if (output_path != NULL) {
+    output_fd = open(output_path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    if (output_fd < 0) {
+      restore_fd(STDIN_FILENO, saved_stdin);
+      return -1;
+    }
+    saved_stdout = swap_fd(STDOUT_FILENO, output_fd);
+    close(output_fd);
+    if (saved_stdout < 0) {
+      restore_fd(STDIN_FILENO, saved_stdin);
+      return -1;
+    }
+  }
+
+  pid = execve(argv[0], argv, 0);
+  restore_fd(STDIN_FILENO, saved_stdin);
+  restore_fd(STDOUT_FILENO, saved_stdout);
+  return wait_command(pid, argv);
+}
+
+static int run_pipeline(char **left_argv, char **right_argv)
+{
+  int pipefd[2];
+  int saved_stdout;
+  int saved_stdin;
+  pid_t left_pid;
+  pid_t right_pid;
+
+  if (left_argv == NULL || left_argv[0] == NULL ||
+      right_argv == NULL || right_argv[0] == NULL)
+    return -1;
+  if (pipe(pipefd) < 0)
+    return -1;
+
+  saved_stdout = swap_fd(STDOUT_FILENO, pipefd[1]);
+  close(pipefd[1]);
+  if (saved_stdout < 0) {
+    close(pipefd[0]);
+    return -1;
+  }
+  left_pid = execve(left_argv[0], left_argv, 0);
+  restore_fd(STDOUT_FILENO, saved_stdout);
+  wait_command(left_pid, left_argv);
+
+  saved_stdin = swap_fd(STDIN_FILENO, pipefd[0]);
+  close(pipefd[0]);
+  if (saved_stdin < 0)
+    return -1;
+  right_pid = execve(right_argv[0], right_argv, 0);
+  restore_fd(STDIN_FILENO, saved_stdin);
+  return wait_command(right_pid, right_argv);
 }
 
 static void set_prompt(char* prompt)

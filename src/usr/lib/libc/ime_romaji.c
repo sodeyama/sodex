@@ -109,6 +109,19 @@ void ime_cycle_mode(struct ime_state *state)
     state->mode = IME_MODE_LATIN;
 }
 
+void ime_cycle_mode_reverse(struct ime_state *state)
+{
+  if (state == NULL)
+    return;
+
+  if (state->mode == IME_MODE_LATIN)
+    state->mode = IME_MODE_KATAKANA;
+  else if (state->mode == IME_MODE_HIRAGANA)
+    state->mode = IME_MODE_LATIN;
+  else
+    state->mode = IME_MODE_HIRAGANA;
+}
+
 const char *ime_mode_label(const struct ime_state *state)
 {
   if (state == NULL)

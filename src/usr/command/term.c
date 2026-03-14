@@ -69,7 +69,7 @@ PRIVATE void emit_metric(struct term_app *app, const char *point,
                          u_int32_t last_bytes, u_int32_t last_cells);
 PRIVATE int append_output(char *buf, int len, const char *src, int src_len);
 PRIVATE int flush_ime(struct term_app *app, char *buf, int len);
-PRIVATE int is_ime_toggle_key(const struct key_event *event);
+PRIVATE int ime_toggle_direction(const struct key_event *event);
 PRIVATE void render_ime_overlay(struct term_app *app);
 PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap);
 
@@ -243,17 +243,22 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
                           char *buf, int *needs_redraw)
 {
   int len = 0;
+  int toggle_direction;
 
   if (needs_redraw != NULL)
     *needs_redraw = 0;
   if (event->flags & KEY_EVENT_RELEASE)
     return 0;
 
-  if (is_ime_toggle_key(event) != 0) {
+  toggle_direction = ime_toggle_direction(event);
+  if (toggle_direction != 0) {
     len = flush_ime(app, buf, len);
     if (len < 0)
       return 0;
-    ime_cycle_mode(&app->ime);
+    if (toggle_direction > 0)
+      ime_cycle_mode(&app->ime);
+    else
+      ime_cycle_mode_reverse(&app->ime);
     if (needs_redraw != NULL)
       *needs_redraw = 1;
     return len;
@@ -594,11 +599,18 @@ PRIVATE int flush_ime(struct term_app *app, char *buf, int len)
   return len + emitted;
 }
 
-PRIVATE int is_ime_toggle_key(const struct key_event *event)
+PRIVATE int ime_toggle_direction(const struct key_event *event)
 {
   if (event == NULL)
     return 0;
-  return (event->modifiers & KEY_MOD_CTRL) != 0 && event->ascii == ' ';
+  if ((event->modifiers & KEY_MOD_CTRL) != 0 && event->ascii == ' ')
+    return 1;
+  if (event->scancode == KEY_SCANCODE_HENKAN ||
+      event->scancode == KEY_SCANCODE_KANA)
+    return 1;
+  if (event->scancode == KEY_SCANCODE_MUHENKAN)
+    return -1;
+  return 0;
 }
 
 PRIVATE void render_ime_overlay(struct term_app *app)

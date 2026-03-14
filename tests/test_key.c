@@ -37,6 +37,7 @@ extern char *get_stdin(char *tobuf);
 #define KEY_SCANCODE_COMMA 0x33
 #define KEY_SCANCODE_PERIOD 0x34
 #define KEY_SCANCODE_SLASH 0x35
+#define KEY_SCANCODE_HENKAN 0x79
 #define KEY_SCANCODE_LEFT 0x4B
 
 TEST(key_press_enqueues_event_and_stdin) {
@@ -192,6 +193,19 @@ TEST(extended_key_generates_raw_event_only) {
     ASSERT_NULL(get_stdin(stdin_buf));
 }
 
+TEST(japanese_toggle_key_generates_raw_event_only) {
+    struct key_event event;
+    char stdin_buf[65];
+
+    init_key();
+    ASSERT_EQ(key_handle_scancode(KEY_SCANCODE_HENKAN), 0);
+    ASSERT(key_pop_event(&event));
+    ASSERT_EQ(event.scancode, KEY_SCANCODE_HENKAN);
+    ASSERT_EQ(event.ascii, 0);
+    ASSERT_EQ(event.flags, 0);
+    ASSERT_NULL(get_stdin(stdin_buf));
+}
+
 int main(void)
 {
     printf("=== key event tests ===\n");
@@ -205,6 +219,7 @@ int main(void)
     RUN_TEST(release_event_does_not_enqueue_stdin);
     RUN_TEST(enter_and_backspace_are_preserved_for_compat);
     RUN_TEST(extended_key_generates_raw_event_only);
+    RUN_TEST(japanese_toggle_key_generates_raw_event_only);
 
     TEST_REPORT();
 }

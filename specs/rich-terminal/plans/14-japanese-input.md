@@ -42,7 +42,8 @@ host 側 IME の変換結果を guest へ渡す経路もない。
   - `katakana`
 - 切り替えキーは日本語キーボード専用に固定しない
   - まずは `Ctrl+Space` など US 配列でも押せる fallback を持つ
-  - `半角/全角`、`変換`、`無変換` が取れるようになったら同じ操作へ束ねる
+  - `変換`、`無変換`、`かな` が取れたら同じ操作へ束ねる
+  - `半角/全角` は US 配列の `` ` `` / `~` と衝突しやすいので、fallback を残す
 - preedit は `term` の overlay として描く
   - PTY 本文へ未確定文字列は流さない
   - shell / `vi` は確定済み UTF-8 だけを受け取る
@@ -96,7 +97,7 @@ host 側 IME の変換結果を guest へ渡す経路もない。
 
 ## 検証
 
-- `Ctrl+Space` で IME mode を切り替えられる
+- `Ctrl+Space` または `変換` / `無変換` / `かな` で IME mode を切り替えられる
 - `nihongo` から `にほんご` を確定できる
 - preedit 中の Backspace が romaji / かなの両方で破綻しない
 - shell の 1 行入力で multibyte を含むファイル名や文字列を扱える

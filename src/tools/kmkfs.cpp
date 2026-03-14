@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <vector>
 using namespace std;
 
 #define INIT_TEST
@@ -399,12 +400,15 @@ int create_file(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
     error("we can't carete file on file system because of too large file"
           "which we can't support");
 
-  u_int32_t first_stage = 11+BLOCK_SIZE/4;
-  u_int32_t second_stage = 11+BLOCK_SIZE/4+(BLOCK_SIZE/4)*(BLOCK_SIZE/4);
-  u_int32_t third_stage = 11+BLOCK_SIZE/4+(BLOCK_SIZE/4)*(BLOCK_SIZE/4)
+  const u_int32_t direct_blocks = 12;
+  u_int32_t first_stage = direct_blocks + BLOCK_SIZE/4;
+  u_int32_t second_stage = direct_blocks + BLOCK_SIZE/4
+    + (BLOCK_SIZE/4)*(BLOCK_SIZE/4);
+  u_int32_t third_stage = direct_blocks + BLOCK_SIZE/4
+    + (BLOCK_SIZE/4)*(BLOCK_SIZE/4)
     +(BLOCK_SIZE/4)*(BLOCK_SIZE/4)*(BLOCK_SIZE/4);
 
-  if (ino->i_blocks <= 11) {
+  if (ino->i_blocks <= direct_blocks) {
     int i;
     for (i=0; i<ino->i_blocks; i++) {
       int iblock = alloc_inode_block(sb, gd);
@@ -417,7 +421,7 @@ int create_file(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
 
   } else if (ino->i_blocks <= first_stage) {
     int i;
-    for (i=0; i<=11; i++) {
+    for (i=0; i<(int)direct_blocks; i++) {
       int iblock = alloc_inode_block(sb, gd);
       ino->i_block[i] = iblock;
       ofs.seekp(iblock*BLOCK_SIZE);
@@ -429,9 +433,9 @@ int create_file(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
     u_int32_t first_blocks[BLOCK_SIZE/4]; // 1024
     memset((char*)first_blocks, 0, BLOCK_SIZE);
 
-    for (i=12; i<=ino->i_blocks; i++) {
+    for (i=direct_blocks; i<(int)ino->i_blocks; i++) {
       int iblock = alloc_inode_block(sb, gd);
-      first_blocks[i-12] = iblock;
+      first_blocks[i-direct_blocks] = iblock;
       ofs.seekp(iblock*BLOCK_SIZE, ios::beg);
       ofs.write((char*)(data+i*BLOCK_SIZE), BLOCK_SIZE);
       ofs.flush();
@@ -838,26 +842,16 @@ void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
   struct stat statbuf;
   string dir_path = path, file_path;
   struct dirent *dent;
-  u_int8_t buf[BUF_INIT];
 
   if (dir) {
     while ((dent = readdir(dir))) {
-      memset(buf, 0, BUF_INIT);
       if ( strcmp(dent->d_name, ".") == 0 ||
            strcmp(dent->d_name, "..") == 0)
         continue;
       file_path = path + dent->d_name;
-      ifstream buf_ifs(file_path.c_str(), ios::in|ios::binary);
-      if (!buf_ifs)
-        error("file open error");
 
       lstat(file_path.c_str(), &statbuf);
-      int file_size;
       stat(file_path.c_str(), &statbuf);
-      file_size = statbuf.st_size;
-      buf_ifs.read((char*)buf, BUF_INIT);
-      cout << "The size of this " << dent->d_name << " file is "
-           << file_size << endl;
 
       int file_ino;
       if (S_ISDIR(statbuf.st_mode)) {
@@ -868,10 +862,22 @@ void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
         read_dir(kernel_iofs, inode, sb, gd, inode_bitmap, block_bitmap,
                  file_ino, file_path + "/");
       } else if (S_ISREG(statbuf.st_mode)) {
+        ifstream buf_ifs(file_path.c_str(), ios::in|ios::binary);
+        if (!buf_ifs)
+          error("file open error");
+
+        int file_size = statbuf.st_size;
+        vector<u_int8_t> buf(file_size == 0 ? 1 : file_size);
+        if (file_size > 0)
+          buf_ifs.read((char*)buf.data(), file_size);
+
+        cout << "The size of this " << dent->d_name << " file is "
+             << file_size << endl;
+
         int newino = alloc_inode(sb, gd);
         file_ino = create_file(kernel_iofs, inode, sb, gd,
                                inode_bitmap, block_bitmap,
-                               dent->d_name, buf, file_size, newino);
+                               dent->d_name, buf.data(), file_size, newino);
         insert_dir_data(kernel_iofs, inode, parent_ino,
                         file_ino, FTYPE_FILE, dent->d_name);
       } else {

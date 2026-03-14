@@ -15,6 +15,7 @@
 8. pipe / redirection と shell I/O 合成
 9. フルスクリーン editor と保存導線
 10. UTF-8 と多言語表示
+11. 日本語直接入力と IME
 
 ## M0: 互換を壊さない基盤化
 
@@ -119,6 +120,17 @@
 | [x] | RT-52 | UTF-8 の host/QEMU smoke test を追加し、既定フォント描画と日本語ファイル導線を回帰検知できるようにする | RT-51, RT-29 | UTF-8 表示、既定フォント読み込み、保存の回帰を自動検知できる |
 | [x] | RT-53 | `UDEV Gothic` の OFL 1.1 文書と attribution の同梱導線を追加する | RT-48 | ライセンス文書を欠かさず配布できる |
 
+## M10: 日本語直接入力
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | RT-54 | `term` の入力変換を raw key と text commit に分離し、IME を差し込める形へ整理する | RT-15, RT-51 | 矢印、Ctrl、`Esc` と printable key の扱いを分けられる |
+| [x] | RT-55 | `term` に `latin` / `hiragana` / `katakana` の mode 状態と切り替えキーを追加する | RT-54 | US 配列でも IME を ON/OFF でき、将来の `半角/全角` 系キーを同じ操作へ束ねられる |
+| [x] | RT-56 | romaji からかなへの変換器と preedit buffer を pure logic として実装する | RT-55, RT-46 | 未確定入力、確定、Backspace が UTF-8 を壊さず動く |
+| [x] | RT-57 | `term` に IME overlay を追加し、確定 UTF-8 を PTY へ流す経路を shell / `vi` で通す | RT-56, RT-51 | 日本語直接入力が `vi` と shell に届き、状態表示も見える |
+| [x] | RT-58 | TTY canonical 編集と echo を UTF-8 文字境界対応にする | RT-57, RT-46 | multibyte 入力後の Backspace が 1 文字単位で動く |
+| [x] | RT-59 | IME の host/QEMU test を追加し、切り替え、日本語入力、保存を回帰検知できるようにする | RT-57, RT-58, RT-52 | 日本語直接入力の主要導線を自動検知できる |
+
 ## 先送りする項目
 
 - 複数 terminal セッション
@@ -126,3 +138,4 @@
 - マウス入力
 - ウィンドウシステム
 - `vi` の undo/redo、検索、複数バッファ、visual mode
+- 日本語 IME の辞書変換、候補 UI、予測変換

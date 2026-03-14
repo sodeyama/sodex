@@ -5,6 +5,7 @@
 #include <console.h>
 #include <debug.h>
 #include <fb.h>
+#include <ime.h>
 #include <key.h>
 #include <terminal_surface.h>
 #include <tty.h>
@@ -15,6 +16,8 @@
 #define TERM_LONG_OUTPUT_THRESHOLD 256
 #define TERM_PTY_READ_CHUNK 512
 #define TERM_PTY_READ_BATCH 8192
+#define TERM_INPUT_BUF 64
+#define TERM_IME_STATUS_COLS 16
 
 struct term_metrics {
   u_int32_t full_redraws;
@@ -43,6 +46,7 @@ struct term_app {
   char scrollback[TERM_SCROLLBACK_SIZE];
   int scroll_head;
   int scroll_len;
+  struct ime_state ime;
 };
 
 PRIVATE struct term_app term_state;
@@ -50,8 +54,9 @@ PRIVATE struct term_app term_state;
 PRIVATE int term_init(struct term_app *app);
 PRIVATE int sync_viewport(struct term_app *app);
 PRIVATE int pump_master(struct term_app *app);
-PRIVATE int pump_keys(int master_fd);
-PRIVATE int translate_key(struct key_event *event, char *buf);
+PRIVATE int pump_keys(struct term_app *app);
+PRIVATE int translate_key(struct term_app *app, struct key_event *event,
+                          char *buf, int *needs_redraw);
 PRIVATE void render_surface(struct term_app *app, int force);
 PRIVATE char render_color(const struct term_cell *cell);
 PRIVATE char render_char(const struct term_cell *cell);
@@ -62,6 +67,11 @@ PRIVATE char *metric_append_text(char *dst, const char *text);
 PRIVATE char *metric_append_uint(char *dst, u_int32_t value);
 PRIVATE void emit_metric(struct term_app *app, const char *point,
                          u_int32_t last_bytes, u_int32_t last_cells);
+PRIVATE int append_output(char *buf, int len, const char *src, int src_len);
+PRIVATE int flush_ime(struct term_app *app, char *buf, int len);
+PRIVATE int is_ime_toggle_key(const struct key_event *event);
+PRIVATE void render_ime_overlay(struct term_app *app);
+PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap);
 
 int main(int argc, char** argv)
 {
@@ -106,7 +116,7 @@ int main(int argc, char** argv)
   while (TRUE) {
     int resized = sync_viewport(app);
     int output = pump_master(app);
-    int input = pump_keys(app->master_fd);
+    int input = pump_keys(app);
 
     if (resized > 0 || output > 0 || terminal_surface_has_damage(&app->surface)) {
       render_surface(app, FALSE);
@@ -153,6 +163,7 @@ PRIVATE int term_init(struct term_app *app)
   app->cursor_valid = 0;
   app->last_scroll_count = 0;
   app->long_output_base = 0;
+  ime_init(&app->ime);
   blank = app->parser.default_pen;
   blank.ch = ' ';
   terminal_surface_reset(&app->surface, &blank);
@@ -208,59 +219,98 @@ PRIVATE int pump_master(struct term_app *app)
   return total;
 }
 
-PRIVATE int pump_keys(int master_fd)
+PRIVATE int pump_keys(struct term_app *app)
 {
   struct key_event event;
   int total = 0;
 
   while (getkeyevent(&event) > 0) {
-    char buf[4];
-    int len = translate_key(&event, buf);
+    char buf[TERM_INPUT_BUF];
+    int needs_redraw = 0;
+    int len = translate_key(app, &event, buf, &needs_redraw);
     if (len > 0) {
-      write(master_fd, buf, len);
+      write(app->master_fd, buf, len);
       total += len;
     }
+    if (needs_redraw != 0 && len == 0)
+      total++;
   }
 
   return total;
 }
 
-PRIVATE int translate_key(struct key_event *event, char *buf)
+PRIVATE int translate_key(struct term_app *app, struct key_event *event,
+                          char *buf, int *needs_redraw)
 {
+  int len = 0;
+
+  if (needs_redraw != NULL)
+    *needs_redraw = 0;
   if (event->flags & KEY_EVENT_RELEASE)
     return 0;
 
+  if (is_ime_toggle_key(event) != 0) {
+    len = flush_ime(app, buf, len);
+    if (len < 0)
+      return 0;
+    ime_cycle_mode(&app->ime);
+    if (needs_redraw != NULL)
+      *needs_redraw = 1;
+    return len;
+  }
+
   if (event->flags & KEY_EVENT_EXTENDED) {
+    len = flush_ime(app, buf, len);
+    if (len < 0)
+      return 0;
     switch (event->scancode) {
     case KEY_SCANCODE_UP:
-      memcpy(buf, "\x1b[A", 3);
-      return 3;
+      return append_output(buf, len, "\x1b[A", 3);
     case KEY_SCANCODE_DOWN:
-      memcpy(buf, "\x1b[B", 3);
-      return 3;
+      return append_output(buf, len, "\x1b[B", 3);
     case KEY_SCANCODE_RIGHT:
-      memcpy(buf, "\x1b[C", 3);
-      return 3;
+      return append_output(buf, len, "\x1b[C", 3);
     case KEY_SCANCODE_LEFT:
-      memcpy(buf, "\x1b[D", 3);
-      return 3;
+      return append_output(buf, len, "\x1b[D", 3);
     default:
-      return 0;
+      return len;
     }
   }
 
   if (event->ascii == 0)
     return 0;
 
+  if (event->ascii == KEY_BACK && app->ime.preedit_len > 0) {
+    ime_backspace(&app->ime);
+    if (needs_redraw != NULL)
+      *needs_redraw = 1;
+    return 0;
+  }
+
   if ((event->modifiers & KEY_MOD_CTRL) != 0 &&
       event->ascii >= 'A' && event->ascii <= 'Z') {
-    buf[0] = event->ascii - 'A' + 1;
-    return 1;
+    len = flush_ime(app, buf, len);
+    if (len < 0)
+      return 0;
+    buf[len] = event->ascii - 'A' + 1;
+    return len + 1;
   }
   if ((event->modifiers & KEY_MOD_CTRL) != 0 &&
       event->ascii >= 'a' && event->ascii <= 'z') {
-    buf[0] = event->ascii - 'a' + 1;
-    return 1;
+    len = flush_ime(app, buf, len);
+    if (len < 0)
+      return 0;
+    buf[len] = event->ascii - 'a' + 1;
+    return len + 1;
+  }
+
+  if (app->ime.mode != IME_MODE_LATIN) {
+    len = ime_feed_ascii(&app->ime, (char)event->ascii, buf, TERM_INPUT_BUF);
+    if (needs_redraw != NULL)
+      *needs_redraw = 1;
+    if (len < 0)
+      return 0;
+    return len;
   }
 
   buf[0] = event->ascii;
@@ -327,6 +377,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
     app->last_cursor_col = app->surface.cursor_col;
     app->last_cursor_row = app->surface.cursor_row;
     app->cursor_valid = 1;
+    render_ime_overlay(app);
     app->metrics.render_cells += rendered;
     if (force != FALSE || dirty_before == total_cells)
       app->metrics.full_redraws++;
@@ -386,6 +437,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
   if (force != FALSE || dirty_before == total_cells)
     emit_metric(app, "full_redraw", 0, rendered);
   terminal_surface_clear_damage(&app->surface);
+  render_ime_overlay(app);
   console_set_cursor(app->surface.cursor_col, app->surface.cursor_row);
 }
 
@@ -519,4 +571,106 @@ PRIVATE void emit_metric(struct term_app *app, const char *point,
   p = metric_append_uint(p, last_cells);
   *p++ = '\n';
   debug_write(buf, (size_t)(p - buf));
+}
+
+PRIVATE int append_output(char *buf, int len, const char *src, int src_len)
+{
+  if (len < 0 || len + src_len > TERM_INPUT_BUF)
+    return -1;
+  memcpy(buf + len, src, (size_t)src_len);
+  return len + src_len;
+}
+
+PRIVATE int flush_ime(struct term_app *app, char *buf, int len)
+{
+  int emitted;
+
+  if (app->ime.preedit_len <= 0)
+    return len;
+
+  emitted = ime_flush(&app->ime, buf + len, TERM_INPUT_BUF - len);
+  if (emitted < 0)
+    return -1;
+  return len + emitted;
+}
+
+PRIVATE int is_ime_toggle_key(const struct key_event *event)
+{
+  if (event == NULL)
+    return 0;
+  return (event->modifiers & KEY_MOD_CTRL) != 0 && event->ascii == ' ';
+}
+
+PRIVATE void render_ime_overlay(struct term_app *app)
+{
+  struct term_cell cell;
+  char text[TERM_IME_STATUS_COLS + 1];
+  int width;
+  int start_col;
+  int i;
+  int text_len;
+
+  if (app == NULL || app->surface.rows <= 0 || app->surface.cols <= 0)
+    return;
+
+  build_ime_overlay_text(app, text, sizeof(text));
+  width = TERM_IME_STATUS_COLS;
+  if (width > app->surface.cols)
+    width = app->surface.cols;
+  start_col = app->surface.cols - width;
+  text_len = (int)strlen(text);
+
+  memset(&cell, 0, sizeof(cell));
+  cell.fg = TERM_COLOR_BLACK;
+  cell.bg = TERM_COLOR_LIGHT_GRAY;
+  cell.width = 1;
+
+  if (app->use_framebuffer != 0) {
+    for (i = 0; i < width; i++) {
+      cell.ch = (u_int32_t)((i < text_len) ? text[i] : ' ');
+      cell_renderer_draw_cell(&app->renderer, start_col + i, 0, &cell, FALSE);
+    }
+    return;
+  }
+
+  for (i = 0; i < width; i++) {
+    char ch = (i < text_len) ? text[i] : ' ';
+    console_putc_at(start_col + i, 0, render_color(&cell), ch);
+  }
+}
+
+PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
+{
+  const char *mode;
+  const char *preedit;
+  int pos = 0;
+  int tail_len;
+
+  if (text == NULL || cap <= 0)
+    return;
+
+  memset(text, ' ', (size_t)(cap - 1));
+  text[cap - 1] = '\0';
+
+  mode = ime_mode_label(&app->ime);
+  preedit = ime_preedit(&app->ime);
+
+  if (cap > 4) {
+    memcpy(text + pos, "IME ", 4);
+    pos += 4;
+  }
+  while (pos < cap - 1 && *mode != '\0') {
+    text[pos++] = *mode;
+    mode++;
+  }
+  if (*preedit == '\0' || pos >= cap - 2)
+    return;
+
+  text[pos++] = ' ';
+  tail_len = (int)strlen(preedit);
+  while (tail_len > cap - 1 - pos) {
+    preedit++;
+    tail_len--;
+  }
+  memcpy(text + pos, preedit, (size_t)tail_len);
 }

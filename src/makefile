@@ -161,7 +161,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi ktest-build
+.PHONY: test-qemu test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -181,6 +181,10 @@ test-qemu-shell-io: all
 test-qemu-vi: all
 	@echo "=== Running vi smoke in QEMU ==="
 	@python3 $(BASEDIR)/src/test/run_qemu_vi_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-ime: all
+	@echo "=== Running IME smoke in QEMU ==="
+	@python3 $(BASEDIR)/src/test/run_qemu_ime_smoke.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

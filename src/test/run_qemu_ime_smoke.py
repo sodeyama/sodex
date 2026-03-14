@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vi による保存導線を QEMU で smoke する。"""
+"""日本語 IME の shell / vi 導線を QEMU で smoke する。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 45
+IME_FILE_TEXT = "にほんご アイウエオ ABC".encode("utf-8")
+SHELL_FILENAME = "あいうえ"
 
 
 def read_ppm(path: pathlib.Path) -> tuple[int, int, bytes]:
@@ -105,6 +107,9 @@ class QemuMonitor:
         self.command(f"sendkey {key}", pause=0.05)
         time.sleep(delay)
 
+    def send_ctrl_space(self) -> None:
+        self.send_key("ctrl-spc")
+
     def send_text(self, text: str) -> None:
         keymap = {
             " ": "spc",
@@ -116,6 +121,9 @@ class QemuMonitor:
             "\n": "ret",
         }
         for ch in text:
+            if "A" <= ch <= "Z":
+                self.send_key(f"shift-{ch.lower()}")
+                continue
             self.send_key(keymap.get(ch, ch))
 
     def close(self) -> None:
@@ -187,30 +195,34 @@ def read_dir_entries(image: bytes, ino: int) -> dict[str, tuple[int, int]]:
         file_type = data[offset + 7]
         if inode_num == 0 or rec_len == 0:
             break
-        name = data[offset + 8:offset + 8 + name_len].decode("ascii", errors="ignore")
+        name = data[offset + 8:offset + 8 + name_len].decode("utf-8", errors="replace")
         result[name] = (inode_num, file_type)
         offset += rec_len
     return result
 
 
-def assert_vi_state(fsboot: pathlib.Path) -> None:
+def assert_ime_state(fsboot: pathlib.Path) -> None:
     image = fsboot.read_bytes()
     root_entries = read_dir_entries(image, SODEX_ROOT_INO)
-    memo_entry = root_entries.get("memo.txt")
-    shell_entry = root_entries.get("aftervi.txt")
-    if memo_entry is None:
-        raise AssertionError("memo.txt was not created")
-    if shell_entry is None:
-        raise AssertionError("aftervi.txt was not created after returning to shell")
+    ime_entry = root_entries.get("ime.txt")
+    marker_entry = root_entries.get("afterime.txt")
+    shell_entry = root_entries.get(SHELL_FILENAME)
 
-    content = read_file(image, memo_entry[0]).decode("ascii", errors="ignore")
-    if content != "hello\nworld":
-        raise AssertionError(f"memo.txt content mismatch: {content!r}")
+    if ime_entry is None:
+        raise AssertionError("ime.txt was not created")
+    if marker_entry is None:
+        raise AssertionError("afterime.txt was not created after returning to shell")
+    if shell_entry is None:
+        raise AssertionError(f"{SHELL_FILENAME!r} was not created from shell input")
+
+    content = read_file(image, ime_entry[0])
+    if content != IME_FILE_TEXT:
+        raise AssertionError(f"ime.txt content mismatch: {content!r}")
 
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: run_qemu_vi_smoke.py <fsboot> <logdir>", file=sys.stderr)
+        print("usage: run_qemu_ime_smoke.py <fsboot> <logdir>", file=sys.stderr)
         return 2
 
     fsboot = pathlib.Path(sys.argv[1]).resolve()
@@ -219,10 +231,10 @@ def main() -> int:
     reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
-    monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_v_{os.getpid()}.sock"
-    serial_log = logdir / f"vi_serial_{os.getpid()}.log"
-    qemu_log = logdir / f"vi_qemu_{os.getpid()}.log"
-    prompt_ppm = logdir / f"vi_prompt_{os.getpid()}.ppm"
+    monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_i_{os.getpid()}.sock"
+    serial_log = logdir / f"ime_serial_{os.getpid()}.log"
+    qemu_log = logdir / f"ime_qemu_{os.getpid()}.log"
+    prompt_ppm = logdir / f"ime_prompt_{os.getpid()}.ppm"
 
     for path in (monitor_sock, serial_log, qemu_log, prompt_ppm):
         if path.exists():
@@ -256,26 +268,39 @@ def main() -> int:
         wait_for_metric(serial_log, "full_redraw", timeout)
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)
 
-        monitor.send_text("vi memo.txt\n")
+        monitor.send_text("touch ")
+        monitor.send_ctrl_space()
+        monitor.send_text("aiue\n")
         time.sleep(1.0)
-        monitor.send_text("ihello\nworld")
-        time.sleep(0.8)
+        monitor.send_ctrl_space()
+        monitor.send_ctrl_space()
+
+        monitor.send_text("vi ime.txt\n")
+        time.sleep(1.0)
+        monitor.send_text("i")
+        monitor.send_ctrl_space()
+        monitor.send_text("nihongo ")
+        monitor.send_ctrl_space()
+        monitor.send_text("aiueo")
+        monitor.send_ctrl_space()
+        monitor.send_text(" ABC")
+        time.sleep(0.5)
         monitor.send_key("esc")
         time.sleep(0.5)
         monitor.send_text(":wq\n")
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
-        monitor.send_text("touch aftervi.txt\n")
+        time.sleep(1.0)
+        monitor.send_text("touch afterime.txt\n")
         time.sleep(1.0)
 
         monitor.command("quit", pause=0.1)
         qemu.wait(timeout=5)
-        assert_vi_state(fsboot)
+        assert_ime_state(fsboot)
 
-        print("=== VI QEMU SMOKE DONE ===")
-        print(f"Artifacts: {serial_log}, {qemu_log}")
+        print("=== IME QEMU SMOKE DONE ===")
+        print(f"Artifacts: {serial_log}, {qemu_log}, {prompt_ppm}")
         return 0
     except Exception as exc:
-        print(f"vi smoke failed: {exc}", file=sys.stderr)
+        print(f"ime smoke failed: {exc}", file=sys.stderr)
         return 1
     finally:
         if monitor is not None:

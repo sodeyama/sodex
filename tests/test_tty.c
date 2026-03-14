@@ -102,6 +102,60 @@ TEST(canonical_backspace_echo_erases_on_master) {
     ASSERT_EQ(buf[4], '\n');
 }
 
+TEST(canonical_utf8_backspace_erases_whole_character) {
+    struct tty *tty;
+    char buf[32];
+    char slave_buf[16];
+    const char a_utf8[] = { (char)0xe3, (char)0x81, (char)0x82 };
+    const char i_utf8[] = { (char)0xe3, (char)0x81, (char)0x84 };
+    const char u_utf8[] = { (char)0xe3, (char)0x81, (char)0x86 };
+    const char e_utf8[] = { (char)0xe3, (char)0x81, (char)0x88 };
+
+    init_tty();
+    tty = tty_alloc_pty();
+    ASSERT_NOT_NULL(tty);
+
+    ASSERT_EQ(tty_master_write(tty, a_utf8, sizeof(a_utf8)), (ssize_t)sizeof(a_utf8));
+    ASSERT_EQ(tty_master_write(tty, i_utf8, sizeof(i_utf8)), (ssize_t)sizeof(i_utf8));
+    ASSERT_EQ(tty_master_write(tty, u_utf8, sizeof(u_utf8)), (ssize_t)sizeof(u_utf8));
+    ASSERT_EQ(tty_master_write(tty, "\b", 1), 1);
+    ASSERT_EQ(tty_master_write(tty, e_utf8, sizeof(e_utf8)), (ssize_t)sizeof(e_utf8));
+    ASSERT_EQ(tty_master_write(tty, "\r", 1), 1);
+
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 10);
+    ASSERT_EQ((unsigned char)slave_buf[0], 0xe3);
+    ASSERT_EQ((unsigned char)slave_buf[1], 0x81);
+    ASSERT_EQ((unsigned char)slave_buf[2], 0x82);
+    ASSERT_EQ((unsigned char)slave_buf[3], 0xe3);
+    ASSERT_EQ((unsigned char)slave_buf[4], 0x81);
+    ASSERT_EQ((unsigned char)slave_buf[5], 0x84);
+    ASSERT_EQ((unsigned char)slave_buf[6], 0xe3);
+    ASSERT_EQ((unsigned char)slave_buf[7], 0x81);
+    ASSERT_EQ((unsigned char)slave_buf[8], 0x88);
+    ASSERT_EQ(slave_buf[9], '\0');
+
+    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 19);
+    ASSERT_EQ((unsigned char)buf[0], 0xe3);
+    ASSERT_EQ((unsigned char)buf[1], 0x81);
+    ASSERT_EQ((unsigned char)buf[2], 0x82);
+    ASSERT_EQ((unsigned char)buf[3], 0xe3);
+    ASSERT_EQ((unsigned char)buf[4], 0x81);
+    ASSERT_EQ((unsigned char)buf[5], 0x84);
+    ASSERT_EQ((unsigned char)buf[6], 0xe3);
+    ASSERT_EQ((unsigned char)buf[7], 0x81);
+    ASSERT_EQ((unsigned char)buf[8], 0x86);
+    ASSERT_EQ(buf[9], '\b');
+    ASSERT_EQ(buf[10], ' ');
+    ASSERT_EQ(buf[11], '\b');
+    ASSERT_EQ(buf[12], '\b');
+    ASSERT_EQ(buf[13], ' ');
+    ASSERT_EQ(buf[14], '\b');
+    ASSERT_EQ((unsigned char)buf[15], 0xe3);
+    ASSERT_EQ((unsigned char)buf[16], 0x81);
+    ASSERT_EQ((unsigned char)buf[17], 0x88);
+    ASSERT_EQ(buf[18], '\n');
+}
+
 TEST(slave_output_is_visible_from_master) {
     struct tty *tty;
     char buf[8];
@@ -141,7 +195,7 @@ TEST(pty_winsize_can_be_updated) {
     struct winsize winsize;
 
     init_tty();
-    tty = tty_alloc_pty();
+    tty = tty_get_console();
     ASSERT_NOT_NULL(tty);
 
     ASSERT_EQ(tty_set_winsize(tty, 132, 43), 0);
@@ -178,6 +232,7 @@ int main(void)
 
     RUN_TEST(canonical_input_waits_for_enter);
     RUN_TEST(canonical_backspace_echo_erases_on_master);
+    RUN_TEST(canonical_utf8_backspace_erases_whole_character);
     RUN_TEST(slave_output_is_visible_from_master);
     RUN_TEST(input_mode_switches_between_console_and_raw);
     RUN_TEST(pty_winsize_can_be_updated);

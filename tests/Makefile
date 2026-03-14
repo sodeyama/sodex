@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji
 
 .PHONY: all clean test
 
@@ -199,6 +199,16 @@ test_wcwidth: test_wcwidth.c test_wcwidth_wcwidth.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_wcwidth.c test_wcwidth_wcwidth.o
 
 test_wcwidth_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# IME romaji conversion tests
+test_ime_romaji: test_ime_romaji.c test_ime_romaji_ime.o test_ime_romaji_utf8.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_ime_romaji.c test_ime_romaji_ime.o test_ime_romaji_utf8.o
+
+test_ime_romaji_ime.o: $(SRC)/usr/lib/libc/ime_romaji.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_ime_romaji_utf8.o: $(SRC)/usr/lib/libc/utf8.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:

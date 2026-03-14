@@ -10,6 +10,7 @@ import pathlib
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 DEFAULT_TIMEOUT = 45
@@ -155,7 +156,7 @@ def main() -> int:
     logdir.mkdir(parents=True, exist_ok=True)
     serial_log = logdir / f"term_smoke_serial_{os.getpid()}.log"
     qemu_log = logdir / f"term_smoke_qemu_{os.getpid()}.log"
-    monitor_sock = logdir / f"term_smoke_monitor_{os.getpid()}.sock"
+    monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_t_{os.getpid()}.sock"
     boot_ppm = logdir / f"term_smoke_boot_{os.getpid()}.ppm"
     scroll_ppm = logdir / f"term_smoke_scroll_{os.getpid()}.ppm"
     long_ppm = logdir / f"term_smoke_long_{os.getpid()}.ppm"

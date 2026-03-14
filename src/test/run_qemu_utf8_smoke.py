@@ -11,6 +11,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 
 BLOCK_SIZE = 4096
@@ -293,7 +294,7 @@ def main() -> int:
                  wide_glyphs[0x3048], wide_glyphs[0x304A]]
 
     logdir.mkdir(parents=True, exist_ok=True)
-    monitor_sock = logdir / f"utf8_monitor_{os.getpid()}.sock"
+    monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_u8_{os.getpid()}.sock"
     serial_log = logdir / f"utf8_serial_{os.getpid()}.log"
     qemu_log = logdir / f"utf8_qemu_{os.getpid()}.log"
     prompt_ppm = logdir / f"utf8_prompt_{os.getpid()}.ppm"

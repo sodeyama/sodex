@@ -68,11 +68,13 @@ PRIVATE int tty_ring_push(struct tty_ring *ring, char c);
 PRIVATE int tty_ring_pop(struct tty_ring *ring, char *c);
 PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag);
 PRIVATE void tty_emit_output(struct tty *tty, char c);
-PRIVATE void tty_echo_erase(struct tty *tty);
+PRIVATE void tty_echo_erase(struct tty *tty, int width);
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c);
 PRIVATE void tty_receive_char(struct tty *tty, char c);
 PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,
                                   struct tty *tty);
+PRIVATE int tty_utf8_prev_char_start(const char *data, int len, int index);
+PRIVATE int tty_utf8_char_width(const char *data, int len);
 
 PRIVATE const struct file_ops g_tty_slave_file_ops = {
   tty_slave_file_read,
@@ -404,6 +406,66 @@ PRIVATE int tty_ring_pop(struct tty_ring *ring, char *c)
   return TRUE;
 }
 
+PRIVATE int tty_utf8_prev_char_start(const char *data, int len, int index)
+{
+  if (data == NULL || len <= 0 || index <= 0)
+    return 0;
+  if (index > len)
+    index = len;
+  index--;
+  while (index > 0 &&
+         (((unsigned char)data[index]) & 0xc0U) == 0x80U) {
+    index--;
+  }
+  return index;
+}
+
+PRIVATE int tty_utf8_char_width(const char *data, int len)
+{
+  unsigned char first;
+  u_int32_t codepoint;
+
+  if (data == NULL || len <= 0)
+    return 1;
+
+  first = (unsigned char)data[0];
+  if (first < 0x80U) {
+    if (first < 0x20U || first == 0x7fU)
+      return 1;
+    return 1;
+  }
+
+  codepoint = 0xfffdU;
+  if ((first & 0xe0U) == 0xc0U && len >= 2 &&
+      (((unsigned char)data[1]) & 0xc0U) == 0x80U) {
+    codepoint = ((u_int32_t)(first & 0x1fU) << 6) |
+                ((u_int32_t)(unsigned char)data[1] & 0x3fU);
+  } else if ((first & 0xf0U) == 0xe0U && len >= 3 &&
+             (((unsigned char)data[1]) & 0xc0U) == 0x80U &&
+             (((unsigned char)data[2]) & 0xc0U) == 0x80U) {
+    codepoint = ((u_int32_t)(first & 0x0fU) << 12) |
+                (((u_int32_t)(unsigned char)data[1] & 0x3fU) << 6) |
+                ((u_int32_t)(unsigned char)data[2] & 0x3fU);
+  } else if ((first & 0xf8U) == 0xf0U && len >= 4 &&
+             (((unsigned char)data[1]) & 0xc0U) == 0x80U &&
+             (((unsigned char)data[2]) & 0xc0U) == 0x80U &&
+             (((unsigned char)data[3]) & 0xc0U) == 0x80U) {
+    codepoint = ((u_int32_t)(first & 0x07U) << 18) |
+                (((u_int32_t)(unsigned char)data[1] & 0x3fU) << 12) |
+                (((u_int32_t)(unsigned char)data[2] & 0x3fU) << 6) |
+                ((u_int32_t)(unsigned char)data[3] & 0x3fU);
+  }
+
+  if ((codepoint >= 0x3000U && codepoint <= 0x303eU) ||
+      (codepoint >= 0x3041U && codepoint <= 0x3096U) ||
+      (codepoint >= 0x3099U && codepoint <= 0x30ffU) ||
+      (codepoint >= 0x3400U && codepoint <= 0x9fffU) ||
+      (codepoint >= 0xff01U && codepoint <= 0xff60U) ||
+      (codepoint >= 0xffe0U && codepoint <= 0xffe6U))
+    return 2;
+  return 1;
+}
+
 PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag)
 {
   u_int8_t flags = 0;
@@ -425,19 +487,20 @@ PRIVATE void tty_emit_output(struct tty *tty, char c)
   }
 }
 
-PRIVATE void tty_echo_erase(struct tty *tty)
+PRIVATE void tty_echo_erase(struct tty *tty, int width)
 {
+  int i;
+
   if (tty == NULL)
     return;
+  if (width <= 0)
+    width = 1;
 
-  if (tty->has_master == TRUE) {
+  for (i = 0; i < width; i++) {
     tty_emit_output(tty, KEY_BACK);
     tty_emit_output(tty, ' ');
     tty_emit_output(tty, KEY_BACK);
-    return;
   }
-
-  tty_emit_output(tty, KEY_BACK);
 }
 
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c)
@@ -457,9 +520,14 @@ PRIVATE void tty_receive_char(struct tty *tty, char c)
 
   if (c == KEY_BACK) {
     if (tty->canon_len > 0) {
-      tty->canon_len--;
+      int prev_len = tty_utf8_prev_char_start(tty->canon_buf, tty->canon_len,
+                                              tty->canon_len);
+      int width = tty_utf8_char_width(tty->canon_buf + prev_len,
+                                      tty->canon_len - prev_len);
+
+      tty->canon_len = prev_len;
       if (tty->flags & TTY_FLAG_ECHO)
-        tty_echo_erase(tty);
+        tty_echo_erase(tty, width);
     }
     return;
   }

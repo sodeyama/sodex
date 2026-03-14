@@ -6,6 +6,7 @@
 #include <terminal_surface.h>
 #include <tty.h>
 #include <vt_parser.h>
+#include <winsize.h>
 
 struct term_app {
   int master_fd;
@@ -45,6 +46,12 @@ int main(int argc, char** argv)
 
   console_clear();
   render_surface(&app, TRUE);
+  {
+    struct winsize winsize;
+    winsize.cols = app.surface.cols;
+    winsize.rows = app.surface.rows;
+    set_winsize(app.master_fd, &winsize);
+  }
 
   shell_argv[0] = "eshell";
   shell_argv[1] = NULL;

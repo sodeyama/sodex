@@ -3,9 +3,12 @@
 #include <string.h>
 #include <malloc.h>
 #include <eshell.h>
+#include <winsize.h>
 
 static void set_prompt(char* prompt);
 static char* get_path_recursively(ext3_dentry* dentry);
+static int shell_buf_size(void);
+static int clamp_copy_len(int len, int max_len);
 
 char g_pathname[PATH_MAX];
 
@@ -15,16 +18,28 @@ int main(int argc, char** argv)
   char *arg_buf[ARGV_MAX_NUMS];
   memset(arg_tmpbuf, 0, ARGV_MAX_LEN*ARGV_MAX_NUMS);
   memset(arg_buf, 0, 4*ARGV_MAX_NUMS);
-  char buf[BUF_SIZE];
+  char *buf;
   char prompt[PROMPT_BUF];
+  int input_buf_size;
+  int input_len;
   memset(prompt, 0, PROMPT_BUF);
   set_prompt(prompt);
+  input_buf_size = shell_buf_size();
+  buf = malloc(input_buf_size);
+  if (buf == NULL)
+    return 1;
+  memset(buf, 0, input_buf_size);
 
   int read_len;
   while (TRUE) {
     write(1, prompt, strlen(prompt));
-    read_len = read(0, buf, BUF_SIZE);
+    read_len = read(0, buf, input_buf_size);
     if (read_len == 1)
+      continue;
+    input_len = read_len;
+    if (input_len > 0 && buf[input_len - 1] == '\0')
+      input_len--;
+    if (input_len <= 0)
       continue;
 
     char *p = buf;
@@ -32,17 +47,21 @@ int main(int argc, char** argv)
     int i=0;
     while (TRUE) {
       p = strchr(prev_p, ' ');
-      if (p == NULL) {
-        memcpy(arg_tmpbuf[i], prev_p, buf+read_len-prev_p);
-        arg_tmpbuf[i][buf+read_len-prev_p] = 0;
+      if (p == NULL || p >= buf + input_len || i >= ARGV_MAX_NUMS - 1) {
+        int len = clamp_copy_len((buf + input_len) - prev_p, ARGV_MAX_LEN);
+        memcpy(arg_tmpbuf[i], prev_p, len);
+        arg_tmpbuf[i][len] = 0;
         arg_buf[i] = arg_tmpbuf[i];
         break;
       }
-      memcpy(arg_tmpbuf[i], prev_p, p-prev_p);
-      arg_tmpbuf[i][p-prev_p] = 0;
+      {
+        int len = clamp_copy_len(p - prev_p, ARGV_MAX_LEN);
+        memcpy(arg_tmpbuf[i], prev_p, len);
+        arg_tmpbuf[i][len] = 0;
+      }
       arg_buf[i] = arg_tmpbuf[i];
 
-      if (p >= buf + read_len) {
+      if (p >= buf + input_len) {
         printf("p is over\n");
         break;
       }
@@ -64,7 +83,7 @@ int main(int argc, char** argv)
       set_prompt(prompt);
     }
 
-    memset(buf, 0, BUF_SIZE);
+    memset(buf, 0, input_buf_size);
     memset(arg_tmpbuf, 0, ARGV_MAX_LEN*ARGV_MAX_NUMS);
     memset(arg_buf, 0, 4*ARGV_MAX_NUMS);
   }
@@ -73,15 +92,44 @@ int main(int argc, char** argv)
   return 0;
 }
 
+static int shell_buf_size(void)
+{
+  struct winsize winsize;
+  int size = BUF_SIZE;
+
+  if (get_winsize(0, &winsize) == 0 && winsize.cols > 0) {
+    size = winsize.cols + 1;
+  }
+  if (size < BUF_SIZE)
+    size = BUF_SIZE;
+  if (size > 255)
+    size = 255;
+  return size;
+}
+
+static int clamp_copy_len(int len, int max_len)
+{
+  if (len < 0)
+    return 0;
+  if (len >= max_len)
+    return max_len - 1;
+  return len;
+}
+
 static void set_prompt(char* prompt)
 {
   const int PREFIX = 6;
   ext3_dentry* dentry = (ext3_dentry*)getdentry();
+  int pathname_len;
+  int copy_len;
+
+  memset(prompt, 0, PROMPT_BUF);
   memcpy(prompt, "sodex ", PREFIX);
   char* pathname = get_path_recursively(dentry);
-  int pathname_len = strlen(pathname);
-  memcpy(prompt+PREFIX, pathname, pathname_len);
-  memcpy(prompt+PREFIX+pathname_len, "> ", 3);
+  pathname_len = strlen(pathname);
+  copy_len = clamp_copy_len(pathname_len, PROMPT_BUF - PREFIX - 2);
+  memcpy(prompt+PREFIX, pathname, copy_len);
+  memcpy(prompt+PREFIX+copy_len, "> ", 3);
 }
 
 static char* get_path_recursively(ext3_dentry* dentry)
@@ -100,7 +148,7 @@ static char* get_path_recursively(ext3_dentry* dentry)
   }
 
   char* p = g_pathname;
-  memset(p, 0, 32);
+  memset(p, 0, PATH_MAX);
   struct list* plist = head->prev;
   do {
     if (strcmp(plist->name, "/") == 0) {
@@ -146,5 +194,3 @@ int pipe_check(const char** arg_buf)
   else
     return FALSE;
 }
-
-

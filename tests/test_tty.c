@@ -23,8 +23,15 @@ struct tty {
     void *master_wait;
 };
 
+struct winsize {
+    u_int16_t cols;
+    u_int16_t rows;
+};
+
 extern void init_tty(void);
 extern struct tty *tty_alloc_pty(void);
+extern int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows);
+extern int tty_get_winsize(struct tty *tty, struct winsize *winsize);
 extern int tty_set_input_mode(int mode);
 extern int tty_get_input_mode(void);
 extern ssize_t tty_master_write(struct tty *tty, const void *buf, size_t count);
@@ -90,6 +97,20 @@ TEST(input_mode_switches_between_console_and_raw) {
     ASSERT_EQ(tty_get_input_mode(), 0);
 }
 
+TEST(pty_winsize_can_be_updated) {
+    struct tty *tty;
+    struct winsize winsize;
+
+    init_tty();
+    tty = tty_alloc_pty();
+    ASSERT_NOT_NULL(tty);
+
+    ASSERT_EQ(tty_set_winsize(tty, 132, 43), 0);
+    ASSERT_EQ(tty_get_winsize(tty, &winsize), 0);
+    ASSERT_EQ(winsize.cols, 132);
+    ASSERT_EQ(winsize.rows, 43);
+}
+
 int main(void)
 {
     printf("=== tty / pty tests ===\n");
@@ -98,6 +119,7 @@ int main(void)
     RUN_TEST(canonical_echo_flows_to_master);
     RUN_TEST(slave_output_is_visible_from_master);
     RUN_TEST(input_mode_switches_between_console_and_raw);
+    RUN_TEST(pty_winsize_can_be_updated);
 
     TEST_REPORT();
 }

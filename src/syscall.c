@@ -46,6 +46,8 @@ PRIVATE int sys_console_rows(void);
 PRIVATE void sys_console_putc_at(int x, int y, char color, char c);
 PRIVATE void sys_console_set_cursor(int x, int y);
 PRIVATE void sys_console_clear(void);
+PRIVATE int sys_get_winsize(int fd, struct winsize *winsize);
+PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -157,6 +159,14 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_CONSOLE_CLEAR:
     sys_console_clear();
+    break;
+
+  case SYS_CALL_GET_WINSIZE:
+    ret = sys_get_winsize((int)p1, (struct winsize *)p2);
+    break;
+
+  case SYS_CALL_SET_WINSIZE:
+    ret = sys_set_winsize((int)p1, (const struct winsize *)p2);
     break;
 
   case SYS_CALL_BRK:
@@ -389,6 +399,23 @@ PRIVATE void sys_console_set_cursor(int x, int y)
 PRIVATE void sys_console_clear(void)
 {
   clr_screen();
+}
+
+PRIVATE int sys_get_winsize(int fd, struct winsize *winsize)
+{
+  struct tty *tty = tty_lookup_file(current->files, fd);
+  return tty_get_winsize(tty, winsize);
+}
+
+PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize)
+{
+  struct tty *tty;
+
+  if (winsize == NULL)
+    return -1;
+
+  tty = tty_lookup_file(current->files, fd);
+  return tty_set_winsize(tty, winsize->cols, winsize->rows);
 }
 
 PRIVATE int sys_send(char* buf)

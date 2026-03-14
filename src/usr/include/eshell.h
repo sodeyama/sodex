@@ -4,9 +4,9 @@
 #include <sys/types.h>
 
 #define BUF_SIZE 64
-#define PROMPT_BUF 64
 #define NAME_MAX 16
 #define PATH_MAX 128
+#define PROMPT_BUF (PATH_MAX + 16)
 
 struct list {
   struct list* next;

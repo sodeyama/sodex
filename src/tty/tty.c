@@ -169,6 +169,23 @@ PUBLIC struct tty *tty_lookup_master(struct files_struct* files, int fd)
   return (struct tty *)file->private_data;
 }
 
+PUBLIC struct tty *tty_lookup_file(struct files_struct* files, int fd)
+{
+  struct file *file;
+
+  if (fd < 0 || fd >= FILEDESC_MAX)
+    return NULL;
+
+  file = files->fs_fd[fd];
+  if (file == NULL)
+    return NULL;
+  if (file->f_stdioflag != FLAG_TTY_MASTER &&
+      file->f_stdioflag != FLAG_TTY_SLAVE)
+    return NULL;
+
+  return (struct tty *)file->private_data;
+}
+
 PUBLIC int tty_set_input_mode(int mode)
 {
   if (mode != INPUT_MODE_CONSOLE && mode != INPUT_MODE_RAW)
@@ -181,6 +198,26 @@ PUBLIC int tty_set_input_mode(int mode)
 PUBLIC int tty_get_input_mode(void)
 {
   return g_input_mode;
+}
+
+PUBLIC int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows)
+{
+  if (tty == NULL || cols == 0 || rows == 0)
+    return -1;
+
+  tty->cols = cols;
+  tty->rows = rows;
+  return 0;
+}
+
+PUBLIC int tty_get_winsize(struct tty *tty, struct winsize *winsize)
+{
+  if (tty == NULL || winsize == NULL)
+    return -1;
+
+  winsize->cols = tty->cols;
+  winsize->rows = tty->rows;
+  return 0;
 }
 
 PUBLIC void tty_feed_console_char(char c)

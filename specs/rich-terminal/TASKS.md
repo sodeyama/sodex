@@ -59,7 +59,7 @@
 | [ ] | RT-21 | VT parser 状態機械を実装し、通常文字と CSI を分離する | RT-19 | escape sequence を安全に解釈できる |
 | [ ] | RT-22 | `clear`、色、カーソル移動、消去、保存/復元の主要シーケンスを実装する | RT-21 | `clear` と `ls --color` が通る |
 | [ ] | RT-23 | 初期 winsize 伝播を `term` → shell に渡す | RT-18 | 120 列以上でも prompt が破綻しにくい |
-| [ ] | RT-24 | `src/usr/init.c` を `term` 起動中心へ切り替え、旧 `eshell` を fallback 化する | RT-20, RT-22, RT-23 | boot 後の既定 terminal が `term` になる |
+| [x] | RT-24 | `src/usr/init.c` を `term` 起動中心へ切り替え、旧 `eshell` を fallback 化する | RT-20, RT-22, RT-23 | boot 後の既定 terminal が `term` になる |
 | [ ] | RT-25 | resize 通知と再描画を実装し、`eshell` の固定長前提を減らす | RT-23, RT-24 | 画面サイズ変更後も再計算と再描画ができる |
 
 ## M5: テストと性能固定化

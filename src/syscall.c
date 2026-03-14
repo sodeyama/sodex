@@ -30,12 +30,13 @@
 #include <tty.h>
 #include <fb.h>
 #include <pipe.h>
+#include <termios.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_creat(const char* pathname, mode_t mode);
 PRIVATE int sys_read(int fd, void* buf, size_t count);
 PRIVATE int __stdin_read(int fd, void* buf, size_t count);
-PRIVATE void sys_write(int fd, const void* buf, size_t count);
+PRIVATE int sys_write(int fd, const void* buf, size_t count);
 PRIVATE void sys_close(int fd);
 PRIVATE int sys_lseek(int fd, off_t offset, int whence);
 PRIVATE int sys_mkdir_call(const char* pathname, mode_t mode);
@@ -60,6 +61,9 @@ PRIVATE int sys_get_winsize(int fd, struct winsize *winsize);
 PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize);
 PRIVATE int sys_get_fb_info(struct fb_info *info);
 PRIVATE int sys_debug_write(const char *buf, size_t len);
+PRIVATE int sys_tcgetattr(int fd, struct termios *termios);
+PRIVATE int sys_tcsetattr(int fd, int optional_actions,
+                          const struct termios *termios);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -106,7 +110,7 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
     break;
 
   case SYS_CALL_WRITE:
-    sys_write(p1, p2, p3);
+    ret = sys_write(p1, p2, p3);
     break;
 
   case SYS_CALL_OPEN:
@@ -195,6 +199,14 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_DEBUG_WRITE:
     ret = sys_debug_write((const char *)p1, (size_t)p2);
+    break;
+
+  case SYS_CALL_TCGETATTR:
+    ret = sys_tcgetattr((int)p1, (struct termios *)p2);
+    break;
+
+  case SYS_CALL_TCSETATTR:
+    ret = sys_tcsetattr((int)p1, (int)p2, (const struct termios *)p3);
     break;
 
   case SYS_CALL_BRK:
@@ -343,31 +355,29 @@ PRIVATE int __stdin_read(int fd, void* buf, size_t count)
   }
 }
 
-PRIVATE void sys_write(int fd, const void* buf, size_t count)
+PRIVATE int sys_write(int fd, const void* buf, size_t count)
 {
   struct file* fs = current->files->fs_fd[fd];
   if (fs == NULL)
-    return;
+    return -1;
 
-  if (fs->f_ops != NULL && fs->f_ops->write != NULL) {
-    fs->f_ops->write(fs, buf, count);
-    return;
-  }
+  if (fs->f_ops != NULL && fs->f_ops->write != NULL)
+    return (int)fs->f_ops->write(fs, buf, count);
 
   if (fs->f_stdioflag == FLAG_STDOUT) {
     int i;
     for (i=0; i<count; i++)
       _kputc(((char*)buf)[i]);
+    return (int)count;
   } else if (fs->f_stdioflag == FLAG_STDERR) {
     int i;
     for (i=0; i<count; i++)
       _kputc(((char*)buf)[i]);
+    return (int)count;
   } else if (fs->f_stdioflag == FLAG_FILE) {
-    ext3_write(fd, buf, count);
-    _kprintf("FLAG_FILE\n");
+    return (int)ext3_write(fd, buf, count);
   } else {
-    _kprintf("sys_write else\n");
-    // error
+    return -1;
   }
 }
 
@@ -526,6 +536,24 @@ PRIVATE int sys_get_fb_info(struct fb_info *info)
   info->base = kernel_info->base;
   info->size = kernel_info->size;
   return 0;
+}
+
+PRIVATE int sys_tcgetattr(int fd, struct termios *termios)
+{
+  struct tty *tty = tty_lookup_file(current->files, fd);
+  return tty_get_termios(tty, termios);
+}
+
+PRIVATE int sys_tcsetattr(int fd, int optional_actions,
+                          const struct termios *termios)
+{
+  struct tty *tty;
+
+  if (optional_actions != TCSANOW)
+    return -1;
+
+  tty = tty_lookup_file(current->files, fd);
+  return tty_set_termios(tty, termios);
 }
 
 PRIVATE int sys_debug_write(const char *buf, size_t len)

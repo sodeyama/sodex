@@ -4,6 +4,7 @@
 #include <sodex/const.h>
 #include <sys/types.h>
 #include <fs.h>
+#include "termios.h"
 #include <winsize.h>
 
 struct wait_queue;
@@ -48,6 +49,8 @@ PUBLIC struct tty *tty_lookup_file(struct files_struct* files, int fd);
 PUBLIC int tty_set_input_mode(int mode);
 PUBLIC int tty_get_input_mode(void);
 PUBLIC void tty_feed_console_char(char c);
+PUBLIC int tty_get_termios(struct tty *tty, struct termios *termios);
+PUBLIC int tty_set_termios(struct tty *tty, const struct termios *termios);
 PUBLIC int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows);
 PUBLIC int tty_get_winsize(struct tty *tty, struct winsize *winsize);
 PUBLIC ssize_t tty_slave_read(struct tty *tty, void *buf, size_t count,

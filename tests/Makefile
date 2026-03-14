@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer
 
 .PHONY: all clean test
 
@@ -163,6 +163,13 @@ test_netpoll: test_netpoll.c
 # Socket ring buffer, inet functions, checksum tests (Phase 9)
 test_socket: test_socket.c
 	$(CC) $(CFLAGS) -o $@ test_socket.c
+
+# vi buffer tests
+test_vi_buffer: test_vi_buffer.c test_vi_buffer_vi_buffer.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vi_buffer.c test_vi_buffer_vi_buffer.o
+
+test_vi_buffer_vi_buffer.o: $(SRC)/usr/lib/libc/vi_buffer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:
 	rm -f $(TESTS) *.o

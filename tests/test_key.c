@@ -25,6 +25,7 @@ extern char *get_stdin(char *tobuf);
 #define KEY_EVENT_EXTENDED 0x02
 #define KEY_MOD_SHIFT 0x01
 #define KEY_SCANCODE_A 0x1E
+#define KEY_SCANCODE_SEMICOLON 0x27
 #define KEY_SCANCODE_LEFT 0x4B
 
 TEST(key_press_enqueues_event_and_stdin) {
@@ -55,6 +56,26 @@ TEST(shift_changes_ascii_and_modifier) {
     ASSERT_EQ(event.ascii, 'A');
     ASSERT_EQ(event.modifiers, KEY_MOD_SHIFT);
     ASSERT_STR_EQ(get_stdin(stdin_buf), "A");
+}
+
+TEST(shift_semicolon_generates_colon) {
+    struct key_event event;
+    char stdin_buf[65];
+
+    init_key();
+    ASSERT_EQ(key_handle_scancode(KEY_SCANCODE_SEMICOLON), ';');
+    ASSERT(key_pop_event(&event));
+    ASSERT_EQ(event.ascii, ';');
+
+    ASSERT_EQ(key_handle_scancode(KEY_SCANCODE_LEFT_SHIFT), 0);
+    ASSERT(key_pop_event(&event));
+    ASSERT_EQ(event.modifiers, KEY_MOD_SHIFT);
+
+    ASSERT_EQ(key_handle_scancode(KEY_SCANCODE_SEMICOLON), ':');
+    ASSERT(key_pop_event(&event));
+    ASSERT_EQ(event.ascii, ':');
+    ASSERT_EQ(event.modifiers, KEY_MOD_SHIFT);
+    ASSERT_STR_EQ(get_stdin(stdin_buf), ";:");
 }
 
 TEST(release_event_does_not_enqueue_stdin) {
@@ -101,6 +122,7 @@ int main(void)
 
     RUN_TEST(key_press_enqueues_event_and_stdin);
     RUN_TEST(shift_changes_ascii_and_modifier);
+    RUN_TEST(shift_semicolon_generates_colon);
     RUN_TEST(release_event_does_not_enqueue_stdin);
     RUN_TEST(enter_and_backspace_are_preserved_for_compat);
     RUN_TEST(extended_key_generates_raw_event_only);

@@ -66,6 +66,7 @@ PRIVATE void tty_reset(struct tty *tty, int has_master);
 PRIVATE int tty_ring_empty(struct tty_ring *ring);
 PRIVATE int tty_ring_push(struct tty_ring *ring, char c);
 PRIVATE int tty_ring_pop(struct tty_ring *ring, char *c);
+PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag);
 PRIVATE void tty_emit_output(struct tty *tty, char c);
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c);
 PRIVATE void tty_receive_char(struct tty *tty, char c);
@@ -205,6 +206,29 @@ PUBLIC int tty_set_input_mode(int mode)
 PUBLIC int tty_get_input_mode(void)
 {
   return g_input_mode;
+}
+
+PUBLIC int tty_get_termios(struct tty *tty, struct termios *termios)
+{
+  if (tty == NULL || termios == NULL)
+    return -1;
+
+  termios->c_lflag = 0;
+  if (tty->flags & TTY_FLAG_ICANON)
+    termios->c_lflag |= ICANON;
+  if (tty->flags & TTY_FLAG_ECHO)
+    termios->c_lflag |= ECHO;
+  return 0;
+}
+
+PUBLIC int tty_set_termios(struct tty *tty, const struct termios *termios)
+{
+  if (tty == NULL || termios == NULL)
+    return -1;
+
+  tty->flags = tty_termios_flags(termios->c_lflag);
+  tty->canon_len = 0;
+  return 0;
 }
 
 PUBLIC int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows)
@@ -375,6 +399,17 @@ PRIVATE int tty_ring_pop(struct tty_ring *ring, char *c)
   *c = ring->data[ring->head];
   ring->head = (ring->head + 1) % TTY_RING_SIZE;
   return TRUE;
+}
+
+PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag)
+{
+  u_int8_t flags = 0;
+
+  if (lflag & ICANON)
+    flags |= TTY_FLAG_ICANON;
+  if (lflag & ECHO)
+    flags |= TTY_FLAG_ECHO;
+  return flags;
 }
 
 PRIVATE void tty_emit_output(struct tty *tty, char c)

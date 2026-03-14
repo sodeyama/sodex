@@ -28,12 +28,33 @@ struct winsize {
     u_int16_t rows;
 };
 
+struct termios {
+    unsigned int c_lflag;
+};
+
+struct files_struct;
+struct file;
+
+#define ICANON 0x0001
+#define ECHO   0x0002
+
+int files_alloc_fd(struct files_struct *files, struct file *file) {
+    static int next_fd = 0;
+    (void)files;
+    (void)file;
+    return next_fd++;
+}
+
 extern void init_tty(void);
+extern struct tty *tty_get_console(void);
 extern struct tty *tty_alloc_pty(void);
 extern int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows);
 extern int tty_get_winsize(struct tty *tty, struct winsize *winsize);
 extern int tty_set_input_mode(int mode);
 extern int tty_get_input_mode(void);
+extern int tty_get_termios(struct tty *tty, struct termios *termios);
+extern int tty_set_termios(struct tty *tty, const struct termios *termios);
+extern void tty_feed_console_char(char c);
 extern ssize_t tty_master_write(struct tty *tty, const void *buf, size_t count);
 extern ssize_t tty_master_read(struct tty *tty, void *buf, size_t count);
 extern ssize_t tty_slave_read(struct tty *tty, void *buf, size_t count, int block);
@@ -111,6 +132,28 @@ TEST(pty_winsize_can_be_updated) {
     ASSERT_EQ(winsize.rows, 43);
 }
 
+TEST(termios_can_switch_console_tty_to_raw_noecho) {
+    struct tty *tty;
+    struct termios termios;
+    char slave_buf[8];
+
+    init_tty();
+    tty = tty_get_console();
+    ASSERT_NOT_NULL(tty);
+
+    ASSERT_EQ(tty_get_termios(tty, &termios), 0);
+    ASSERT_EQ(termios.c_lflag, ICANON | ECHO);
+
+    termios.c_lflag = 0;
+    ASSERT_EQ(tty_set_termios(tty, &termios), 0);
+    ASSERT_EQ(tty_set_input_mode(0), 0);
+    tty_feed_console_char('a');
+    tty_feed_console_char('b');
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 2);
+    ASSERT_EQ(slave_buf[0], 'a');
+    ASSERT_EQ(slave_buf[1], 'b');
+}
+
 int main(void)
 {
     printf("=== tty / pty tests ===\n");
@@ -120,6 +163,7 @@ int main(void)
     RUN_TEST(slave_output_is_visible_from_master);
     RUN_TEST(input_mode_switches_between_console_and_raw);
     RUN_TEST(pty_winsize_can_be_updated);
+    RUN_TEST(termios_can_switch_console_tty_to_raw_noecho);
 
     TEST_REPORT();
 }

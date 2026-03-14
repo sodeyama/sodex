@@ -15,6 +15,7 @@ struct term_app {
 };
 
 PRIVATE int term_init(struct term_app *app);
+PRIVATE int sync_viewport(struct term_app *app);
 PRIVATE int pump_master(struct term_app *app);
 PRIVATE int pump_keys(int master_fd);
 PRIVATE int translate_key(struct key_event *event, char *buf);
@@ -62,10 +63,11 @@ int main(int argc, char** argv)
   }
 
   while (TRUE) {
+    int resized = sync_viewport(&app);
     int output = pump_master(&app);
     int input = pump_keys(app.master_fd);
 
-    if (output > 0 || terminal_surface_has_damage(&app.surface)) {
+    if (resized > 0 || output > 0 || terminal_surface_has_damage(&app.surface)) {
       render_surface(&app, FALSE);
     }
 
@@ -98,6 +100,31 @@ PRIVATE int term_init(struct term_app *app)
   terminal_surface_reset(&app->surface, &blank);
   terminal_surface_mark_all_dirty(&app->surface);
   return 0;
+}
+
+PRIVATE int sync_viewport(struct term_app *app)
+{
+  struct term_cell blank;
+  struct winsize winsize;
+  int cols = console_cols();
+  int rows = console_rows();
+
+  if (cols <= 0 || rows <= 0)
+    return 0;
+  if (cols == app->surface.cols && rows == app->surface.rows)
+    return 0;
+
+  blank = app->parser.default_pen;
+  blank.ch = ' ';
+  if (terminal_surface_resize(&app->surface, cols, rows, &blank) < 0)
+    return 0;
+
+  console_clear();
+  terminal_surface_mark_all_dirty(&app->surface);
+  winsize.cols = cols;
+  winsize.rows = rows;
+  set_winsize(app->master_fd, &winsize);
+  return 1;
 }
 
 PRIVATE int pump_master(struct term_app *app)

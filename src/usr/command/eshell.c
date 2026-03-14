@@ -8,6 +8,7 @@
 static void set_prompt(char* prompt);
 static char* get_path_recursively(ext3_dentry* dentry);
 static int shell_buf_size(void);
+static int refresh_shell_buffer(char **buf, int *buf_size);
 static int clamp_copy_len(int len, int max_len);
 
 char g_pathname[PATH_MAX];
@@ -32,6 +33,8 @@ int main(int argc, char** argv)
 
   int read_len;
   while (TRUE) {
+    if (refresh_shell_buffer(&buf, &input_buf_size) < 0)
+      break;
     write(1, prompt, strlen(prompt));
     read_len = read(0, buf, input_buf_size);
     if (read_len == 1)
@@ -105,6 +108,25 @@ static int shell_buf_size(void)
   if (size > 255)
     size = 255;
   return size;
+}
+
+static int refresh_shell_buffer(char **buf, int *buf_size)
+{
+  char *next_buf;
+  int next_size = shell_buf_size();
+
+  if (next_size == *buf_size)
+    return 0;
+
+  next_buf = malloc(next_size);
+  if (next_buf == NULL)
+    return -1;
+
+  memset(next_buf, 0, next_size);
+  free(*buf);
+  *buf = next_buf;
+  *buf_size = next_size;
+  return 1;
 }
 
 static int clamp_copy_len(int len, int max_len)

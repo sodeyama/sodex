@@ -258,7 +258,8 @@ def main() -> int:
         monitor.command("quit", pause=0.1)
         qemu.wait(timeout=5)
         assert_shell_io_state(fsboot)
-        if "PF:" in serial_log.read_text(errors="replace"):
+        serial_text = serial_log.read_text(errors="replace")
+        if "PF:" in serial_text or "PageFault" in serial_text:
             raise AssertionError("page fault was detected during shell io smoke")
 
         print("=== SHELL IO QEMU SMOKE DONE ===")

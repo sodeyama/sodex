@@ -31,7 +31,7 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
   if (current == NULL)
     current = task;
   int fd = open_env(filename, O_RDWR, 0);
-  if (fd == 0) {
+  if (fd == FS_OPEN_FAIL) {
     _kprintf("%s: file open error for '%s'\n", __func__, filename);
     return ELF_FAIL;
   }
@@ -156,10 +156,10 @@ PUBLIC int open_env(const char* filename, int flags, mode_t mode)
     err = kfree(newfilename);
     if (err)
       _kprintf("%s:kfree error:%x\n", __func__, err);
-    if (fd != 0)
+    if (fd != FS_OPEN_FAIL)
       return fd;
   }
-  return 0;
+  return FS_OPEN_FAIL;
 }
 
 PRIVATE char* __create_filepath(const char* filename, const char* path)

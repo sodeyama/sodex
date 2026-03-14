@@ -163,6 +163,7 @@ void terminal_surface_reset(struct terminal_surface *surface,
   surface->cursor_row = 0;
   surface->saved_col = 0;
   surface->saved_row = 0;
+  surface->scroll_count = 0;
   terminal_surface_clear(surface, fill);
 }
 
@@ -319,6 +320,7 @@ void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
     return;
 
   if (lines >= surface->rows) {
+    surface->scroll_count += lines;
     terminal_surface_clear(surface, fill);
     return;
   }
@@ -340,6 +342,7 @@ void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
     }
   }
   surface->dirty_count = surface->cols * surface->rows;
+  surface->scroll_count += lines;
 }
 
 void terminal_surface_put_cell(struct terminal_surface *surface,

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <cell_renderer.h>
 #include <console.h>
+#include <debug.h>
 #include <fb.h>
 #include <key.h>
 #include <terminal_surface.h>
@@ -11,6 +12,18 @@
 #include <winsize.h>
 
 #define TERM_SCROLLBACK_SIZE 32768
+#define TERM_LONG_OUTPUT_THRESHOLD 256
+
+struct term_metrics {
+  u_int32_t full_redraws;
+  u_int32_t partial_redraws;
+  u_int32_t scroll_events;
+  u_int32_t scroll_lines;
+  u_int32_t pty_bytes;
+  u_int32_t render_cells;
+  u_int32_t max_dirty_cells;
+  u_int32_t long_output_marks;
+};
 
 struct term_app {
   int master_fd;
@@ -18,10 +31,13 @@ struct term_app {
   int cursor_valid;
   int last_cursor_col;
   int last_cursor_row;
+  int last_scroll_count;
+  u_int32_t long_output_base;
   struct fb_info fb;
   struct cell_renderer renderer;
   struct terminal_surface surface;
   struct vt_parser parser;
+  struct term_metrics metrics;
   char scrollback[TERM_SCROLLBACK_SIZE];
   int scroll_head;
   int scroll_len;
@@ -40,6 +56,10 @@ PRIVATE char render_char(const struct term_cell *cell);
 PRIVATE void reset_surface(struct term_app *app);
 PRIVATE void append_scrollback(struct term_app *app, const char *buf, int len);
 PRIVATE void replay_scrollback(struct term_app *app);
+PRIVATE char *metric_append_text(char *dst, const char *text);
+PRIVATE char *metric_append_uint(char *dst, u_int32_t value);
+PRIVATE void emit_metric(struct term_app *app, const char *point,
+                         u_int32_t last_bytes, u_int32_t last_cells);
 
 int main(int argc, char** argv)
 {
@@ -129,6 +149,8 @@ PRIVATE int term_init(struct term_app *app)
   app->scroll_head = 0;
   app->scroll_len = 0;
   app->cursor_valid = 0;
+  app->last_scroll_count = 0;
+  app->long_output_base = 0;
   blank = app->parser.default_pen;
   blank.ch = ' ';
   terminal_surface_reset(&app->surface, &blank);
@@ -175,6 +197,7 @@ PRIVATE int pump_master(struct term_app *app)
 
     append_scrollback(app, buf, len);
     vt_parser_feed(&app->parser, buf, len);
+    app->metrics.pty_bytes += (u_int32_t)len;
     total += len;
     if (len < sizeof(buf))
       break;
@@ -244,8 +267,15 @@ PRIVATE int translate_key(struct key_event *event, char *buf)
 
 PRIVATE void render_surface(struct term_app *app, int force)
 {
+  int total_cells = app->surface.cols * app->surface.rows;
+  int dirty_before = force != FALSE ? total_cells : app->surface.dirty_count;
+  u_int32_t rendered = 0;
+  int scroll_delta;
   int row;
   int col;
+
+  if (dirty_before > (int)app->metrics.max_dirty_cells)
+    app->metrics.max_dirty_cells = (u_int32_t)dirty_before;
 
   if (app->use_framebuffer != 0) {
     const struct term_cell *cell;
@@ -263,6 +293,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
         if (cell == NULL)
           continue;
         cell_renderer_draw_cell(&app->renderer, col, row, cell, FALSE);
+        rendered++;
       }
     }
 
@@ -277,6 +308,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
                                 app->last_cursor_col,
                                 app->last_cursor_row,
                                 cell, FALSE);
+        rendered++;
       }
     }
 
@@ -288,10 +320,30 @@ PRIVATE void render_surface(struct term_app *app, int force)
                               app->surface.cursor_col,
                               app->surface.cursor_row,
                               cell, TRUE);
+      rendered++;
     }
     app->last_cursor_col = app->surface.cursor_col;
     app->last_cursor_row = app->surface.cursor_row;
     app->cursor_valid = 1;
+    app->metrics.render_cells += rendered;
+    if (force != FALSE || dirty_before == total_cells)
+      app->metrics.full_redraws++;
+    else
+      app->metrics.partial_redraws++;
+    scroll_delta = app->surface.scroll_count - app->last_scroll_count;
+    if (scroll_delta > 0) {
+      app->metrics.scroll_events++;
+      app->metrics.scroll_lines += (u_int32_t)scroll_delta;
+      app->last_scroll_count = app->surface.scroll_count;
+      emit_metric(app, "scroll", 0, rendered);
+    }
+    if (app->metrics.pty_bytes - app->long_output_base >= TERM_LONG_OUTPUT_THRESHOLD) {
+      app->metrics.long_output_marks++;
+      app->long_output_base = app->metrics.pty_bytes;
+      emit_metric(app, "long_output", 0, rendered);
+    }
+    if (force != FALSE || dirty_before == total_cells)
+      emit_metric(app, "full_redraw", 0, rendered);
     terminal_surface_clear_damage(&app->surface);
     return;
   }
@@ -308,9 +360,29 @@ PRIVATE void render_surface(struct term_app *app, int force)
       if (cell == NULL)
         continue;
       console_putc_at(col, row, render_color(cell), render_char(cell));
+      rendered++;
     }
   }
 
+  app->metrics.render_cells += rendered;
+  if (force != FALSE || dirty_before == total_cells)
+    app->metrics.full_redraws++;
+  else
+    app->metrics.partial_redraws++;
+  scroll_delta = app->surface.scroll_count - app->last_scroll_count;
+  if (scroll_delta > 0) {
+    app->metrics.scroll_events++;
+    app->metrics.scroll_lines += (u_int32_t)scroll_delta;
+    app->last_scroll_count = app->surface.scroll_count;
+    emit_metric(app, "scroll", 0, rendered);
+  }
+  if (app->metrics.pty_bytes - app->long_output_base >= TERM_LONG_OUTPUT_THRESHOLD) {
+    app->metrics.long_output_marks++;
+    app->long_output_base = app->metrics.pty_bytes;
+    emit_metric(app, "long_output", 0, rendered);
+  }
+  if (force != FALSE || dirty_before == total_cells)
+    emit_metric(app, "full_redraw", 0, rendered);
   terminal_surface_clear_damage(&app->surface);
   console_set_cursor(app->surface.cursor_col, app->surface.cursor_row);
 }
@@ -374,5 +446,73 @@ PRIVATE void replay_scrollback(struct term_app *app)
     char ch = app->scrollback[(app->scroll_head + i) % TERM_SCROLLBACK_SIZE];
     vt_parser_feed(&app->parser, &ch, 1);
   }
+  app->last_scroll_count = app->surface.scroll_count;
   terminal_surface_mark_all_dirty(&app->surface);
+}
+
+PRIVATE char *metric_append_text(char *dst, const char *text)
+{
+  while (*text != '\0') {
+    *dst = *text;
+    dst++;
+    text++;
+  }
+  return dst;
+}
+
+PRIVATE char *metric_append_uint(char *dst, u_int32_t value)
+{
+  char tmp[16];
+  int i = 0;
+
+  if (value == 0) {
+    *dst = '0';
+    return dst + 1;
+  }
+
+  while (value > 0 && i < (int)sizeof(tmp)) {
+    tmp[i++] = (char)('0' + (value % 10));
+    value /= 10;
+  }
+  while (i > 0) {
+    i--;
+    *dst = tmp[i];
+    dst++;
+  }
+  return dst;
+}
+
+PRIVATE void emit_metric(struct term_app *app, const char *point,
+                         u_int32_t last_bytes, u_int32_t last_cells)
+{
+  char buf[256];
+  char *p = buf;
+
+  if (app->use_framebuffer == 0)
+    return;
+
+  p = metric_append_text(p, "TERM_METRIC point=");
+  p = metric_append_text(p, point);
+  p = metric_append_text(p, " full=");
+  p = metric_append_uint(p, app->metrics.full_redraws);
+  p = metric_append_text(p, " partial=");
+  p = metric_append_uint(p, app->metrics.partial_redraws);
+  p = metric_append_text(p, " scroll_events=");
+  p = metric_append_uint(p, app->metrics.scroll_events);
+  p = metric_append_text(p, " scroll_lines=");
+  p = metric_append_uint(p, app->metrics.scroll_lines);
+  p = metric_append_text(p, " pty_bytes=");
+  p = metric_append_uint(p, app->metrics.pty_bytes);
+  p = metric_append_text(p, " render_cells=");
+  p = metric_append_uint(p, app->metrics.render_cells);
+  p = metric_append_text(p, " max_dirty=");
+  p = metric_append_uint(p, app->metrics.max_dirty_cells);
+  p = metric_append_text(p, " long_output_marks=");
+  p = metric_append_uint(p, app->metrics.long_output_marks);
+  p = metric_append_text(p, " last_bytes=");
+  p = metric_append_uint(p, last_bytes);
+  p = metric_append_text(p, " last_cells=");
+  p = metric_append_uint(p, last_cells);
+  *p++ = '\n';
+  debug_write(buf, (size_t)(p - buf));
 }

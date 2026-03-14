@@ -50,6 +50,7 @@ PRIVATE void sys_console_clear(void);
 PRIVATE int sys_get_winsize(int fd, struct winsize *winsize);
 PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize);
 PRIVATE int sys_get_fb_info(struct fb_info *info);
+PRIVATE int sys_debug_write(const char *buf, size_t len);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -173,6 +174,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_GET_FB_INFO:
     ret = sys_get_fb_info((struct fb_info *)p1);
+    break;
+
+  case SYS_CALL_DEBUG_WRITE:
+    ret = sys_debug_write((const char *)p1, (size_t)p2);
     break;
 
   case SYS_CALL_BRK:
@@ -440,6 +445,21 @@ PRIVATE int sys_get_fb_info(struct fb_info *info)
   info->base = kernel_info->base;
   info->size = kernel_info->size;
   return 0;
+}
+
+PRIVATE int sys_debug_write(const char *buf, size_t len)
+{
+  size_t i;
+
+  if (buf == NULL)
+    return -1;
+
+  for (i = 0; i < len; i++) {
+    if (buf[i] == '\n')
+      com1_putc('\r');
+    com1_putc(buf[i]);
+  }
+  return (int)len;
 }
 
 PRIVATE int sys_send(char* buf)

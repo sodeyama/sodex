@@ -67,10 +67,10 @@
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
 | [x] | RT-26 | `tests/Makefile` に surface、VT、key、TTY の host test を追加する | RT-09, RT-12, RT-21 | pure logic の回帰テストが一括実行できる |
-| [ ] | RT-27 | VT fixture と期待 surface 比較のテストデータを用意する | RT-22, RT-26 | parser 退行を fixture で検知できる |
-| [ ] | RT-28 | graphics terminal 向け QEMU smoke test を追加する | RT-24 | boot から shell 表示まで自動確認できる |
-| [ ] | RT-29 | framebuffer dump または比較用スクリーンショット経路を用意する | RT-28 | 見た目差分を機械的に確認できる |
-| [ ] | RT-30 | 全面再描画、1 行スクロール、長文出力の計測ポイントを入れる | RT-20, RT-28 | 描画ボトルネックを数値で比較できる |
+| [x] | RT-27 | VT fixture と期待 surface 比較のテストデータを用意する | RT-22, RT-26 | parser 退行を fixture で検知できる |
+| [x] | RT-28 | graphics terminal 向け QEMU smoke test を追加する | RT-24 | boot から shell 表示まで自動確認できる |
+| [x] | RT-29 | framebuffer dump または比較用スクリーンショット経路を用意する | RT-28 | 見た目差分を機械的に確認できる |
+| [x] | RT-30 | 全面再描画、1 行スクロール、長文出力の計測ポイントを入れる | RT-20, RT-28 | 描画ボトルネックを数値で比較できる |
 
 ## 先送りする項目
 

@@ -42,6 +42,7 @@ struct terminal_surface {
   struct term_cell *cells;
   unsigned char *dirty;
   int dirty_count;
+  int scroll_count;
 };
 
 int terminal_surface_init(struct terminal_surface *surface, int cols, int rows);

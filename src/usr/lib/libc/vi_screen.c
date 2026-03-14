@@ -2,6 +2,10 @@
 #include <string.h>
 #include <vi.h>
 
+#define VI_SCREEN_WRITE_BUFFER 8192
+
+static void vi_screen_flush(void);
+static void vi_screen_append(const char *text, int len);
 static void vi_screen_write(const char *text);
 static void vi_screen_write_n(const char *text, int len);
 static char *vi_screen_append_uint(char *p, int value);
@@ -9,17 +13,50 @@ static void vi_screen_move_cursor(int row, int col);
 static void vi_screen_write_status(enum vi_mode mode, const char *path,
                                    const char *status, int dirty, int cols);
 static const char *vi_screen_mode_name(enum vi_mode mode);
+static char vi_screen_buffer[VI_SCREEN_WRITE_BUFFER];
+static int vi_screen_buffer_len = 0;
+
+static void vi_screen_flush(void)
+{
+  if (vi_screen_buffer_len > 0) {
+    write(1, vi_screen_buffer, (size_t)vi_screen_buffer_len);
+    vi_screen_buffer_len = 0;
+  }
+}
+
+static void vi_screen_append(const char *text, int len)
+{
+  int remaining;
+
+  if (text == NULL || len <= 0)
+    return;
+
+  remaining = len;
+  while (remaining > 0) {
+    int chunk = VI_SCREEN_WRITE_BUFFER - vi_screen_buffer_len;
+    if (chunk <= 0) {
+      vi_screen_flush();
+      chunk = VI_SCREEN_WRITE_BUFFER;
+    }
+    if (chunk > remaining)
+      chunk = remaining;
+    memcpy(vi_screen_buffer + vi_screen_buffer_len, text, (size_t)chunk);
+    vi_screen_buffer_len += chunk;
+    text += chunk;
+    remaining -= chunk;
+  }
+}
 
 static void vi_screen_write(const char *text)
 {
   if (text != NULL)
-    write(1, text, strlen(text));
+    vi_screen_append(text, strlen(text));
 }
 
 static void vi_screen_write_n(const char *text, int len)
 {
   if (text != NULL && len > 0)
-    write(1, text, (size_t)len);
+    vi_screen_append(text, len);
 }
 
 static char *vi_screen_append_uint(char *p, int value)
@@ -186,9 +223,11 @@ void vi_screen_redraw(const struct vi_buffer *buffer, enum vi_mode mode,
   }
 
   vi_screen_move_cursor(cursor_row, cursor_col);
+  vi_screen_flush();
 }
 
 void vi_screen_restore(void)
 {
   vi_screen_write("\x1b[0m\x1b[2J\x1b[H");
+  vi_screen_flush();
 }

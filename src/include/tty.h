@@ -12,7 +12,7 @@ struct wait_queue;
 #define TTY_FLAG_ICANON 0x01
 #define TTY_FLAG_ECHO   0x02
 
-#define TTY_RING_SIZE   256
+#define TTY_RING_SIZE   8192
 #define TTY_CANON_SIZE  256
 #define TTY_POOL_MAX    4
 

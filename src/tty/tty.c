@@ -383,6 +383,8 @@ PRIVATE int tty_ring_empty(struct tty_ring *ring)
 PRIVATE int tty_ring_push(struct tty_ring *ring, char c)
 {
   int next = (ring->tail + 1) % TTY_RING_SIZE;
+
+  /* vi の全画面再描画を落とさないよう、リングは十分大きく持つ。 */
   if (next == ring->head) {
     ring->head = (ring->head + 1) % TTY_RING_SIZE;
   }

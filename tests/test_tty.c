@@ -1,10 +1,15 @@
 #include "test_framework.h"
+#include <string.h>
 
 typedef unsigned short u_int16_t;
 typedef unsigned char u_int8_t;
 
+#define TEST_TTY_RING_SIZE 8192
+#define TEST_TTY_CANON_SIZE 256
+#define TEST_TTY_LONG_OUTPUT 6000
+
 struct tty_ring {
-    char data[256];
+    char data[TEST_TTY_RING_SIZE];
     int head;
     int tail;
 };
@@ -17,7 +22,7 @@ struct tty {
     u_int16_t rows;
     struct tty_ring slave_rx;
     struct tty_ring master_rx;
-    char canon_buf[256];
+    char canon_buf[TEST_TTY_CANON_SIZE];
     int canon_len;
     void *slave_wait;
     void *master_wait;
@@ -98,6 +103,9 @@ TEST(canonical_echo_flows_to_master) {
 TEST(slave_output_is_visible_from_master) {
     struct tty *tty;
     char buf[8];
+    char long_out[TEST_TTY_LONG_OUTPUT];
+    char long_in[TEST_TTY_LONG_OUTPUT];
+    int i;
 
     init_tty();
     tty = tty_alloc_pty();
@@ -108,6 +116,14 @@ TEST(slave_output_is_visible_from_master) {
     ASSERT_EQ(buf[0], 'l');
     ASSERT_EQ(buf[1], 's');
     ASSERT_EQ(buf[2], '\n');
+
+    for (i = 0; i < TEST_TTY_LONG_OUTPUT; i++) {
+        long_out[i] = (char)('a' + (i % 26));
+    }
+
+    ASSERT_EQ(tty_slave_write(tty, long_out, sizeof(long_out)), sizeof(long_out));
+    ASSERT_EQ(tty_master_read(tty, long_in, sizeof(long_in)), sizeof(long_in));
+    ASSERT_EQ(memcmp(long_in, long_out, sizeof(long_out)), 0);
 }
 
 TEST(input_mode_switches_between_console_and_raw) {

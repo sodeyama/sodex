@@ -13,6 +13,8 @@
 
 #define TERM_SCROLLBACK_SIZE 32768
 #define TERM_LONG_OUTPUT_THRESHOLD 256
+#define TERM_PTY_READ_CHUNK 512
+#define TERM_PTY_READ_BATCH 8192
 
 struct term_metrics {
   u_int32_t full_redraws;
@@ -187,7 +189,7 @@ PRIVATE int sync_viewport(struct term_app *app)
 
 PRIVATE int pump_master(struct term_app *app)
 {
-  char buf[128];
+  char buf[TERM_PTY_READ_CHUNK];
   int total = 0;
 
   while (TRUE) {
@@ -199,7 +201,7 @@ PRIVATE int pump_master(struct term_app *app)
     vt_parser_feed(&app->parser, buf, len);
     app->metrics.pty_bytes += (u_int32_t)len;
     total += len;
-    if (len < sizeof(buf))
+    if (total >= TERM_PTY_READ_BATCH)
       break;
   }
 

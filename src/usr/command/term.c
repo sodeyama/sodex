@@ -8,10 +8,15 @@
 #include <vt_parser.h>
 #include <winsize.h>
 
+#define TERM_SCROLLBACK_SIZE 32768
+
 struct term_app {
   int master_fd;
   struct terminal_surface surface;
   struct vt_parser parser;
+  char scrollback[TERM_SCROLLBACK_SIZE];
+  int scroll_head;
+  int scroll_len;
 };
 
 PRIVATE int term_init(struct term_app *app);
@@ -22,6 +27,9 @@ PRIVATE int translate_key(struct key_event *event, char *buf);
 PRIVATE void render_surface(struct term_app *app, int force);
 PRIVATE char render_color(const struct term_cell *cell);
 PRIVATE char render_char(const struct term_cell *cell);
+PRIVATE void reset_surface(struct term_app *app);
+PRIVATE void append_scrollback(struct term_app *app, const char *buf, int len);
+PRIVATE void replay_scrollback(struct term_app *app);
 
 int main(int argc, char** argv)
 {
@@ -95,6 +103,8 @@ PRIVATE int term_init(struct term_app *app)
     return -1;
 
   vt_parser_init(&app->parser, &app->surface);
+  app->scroll_head = 0;
+  app->scroll_len = 0;
   blank = app->parser.default_pen;
   blank.ch = ' ';
   terminal_surface_reset(&app->surface, &blank);
@@ -120,7 +130,7 @@ PRIVATE int sync_viewport(struct term_app *app)
     return 0;
 
   console_clear();
-  terminal_surface_mark_all_dirty(&app->surface);
+  replay_scrollback(app);
   winsize.cols = cols;
   winsize.rows = rows;
   set_winsize(app->master_fd, &winsize);
@@ -137,6 +147,7 @@ PRIVATE int pump_master(struct term_app *app)
     if (len <= 0)
       break;
 
+    append_scrollback(app, buf, len);
     vt_parser_feed(&app->parser, buf, len);
     total += len;
     if (len < sizeof(buf))
@@ -252,4 +263,40 @@ PRIVATE char render_char(const struct term_cell *cell)
   if (cell->ch == 0)
     return ' ';
   return cell->ch;
+}
+
+PRIVATE void reset_surface(struct term_app *app)
+{
+  struct term_cell blank = app->parser.default_pen;
+  blank.ch = ' ';
+  vt_parser_reset(&app->parser);
+  terminal_surface_reset(&app->surface, &blank);
+}
+
+PRIVATE void append_scrollback(struct term_app *app, const char *buf, int len)
+{
+  int i;
+
+  for (i = 0; i < len; i++) {
+    if (app->scroll_len < TERM_SCROLLBACK_SIZE) {
+      int tail = (app->scroll_head + app->scroll_len) % TERM_SCROLLBACK_SIZE;
+      app->scrollback[tail] = buf[i];
+      app->scroll_len++;
+    } else {
+      app->scrollback[app->scroll_head] = buf[i];
+      app->scroll_head = (app->scroll_head + 1) % TERM_SCROLLBACK_SIZE;
+    }
+  }
+}
+
+PRIVATE void replay_scrollback(struct term_app *app)
+{
+  int i;
+
+  reset_surface(app);
+  for (i = 0; i < app->scroll_len; i++) {
+    char ch = app->scrollback[(app->scroll_head + i) % TERM_SCROLLBACK_SIZE];
+    vt_parser_feed(&app->parser, &ch, 1);
+  }
+  terminal_surface_mark_all_dirty(&app->surface);
 }

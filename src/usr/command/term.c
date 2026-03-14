@@ -409,9 +409,11 @@ PRIVATE char render_color(const struct term_cell *cell)
 
 PRIVATE char render_char(const struct term_cell *cell)
 {
-  if (cell->ch == 0)
+  if (cell->ch == 0 || (cell->attr & TERM_ATTR_CONTINUATION) != 0)
     return ' ';
-  return cell->ch;
+  if (cell->ch < 0x20 || cell->ch > 0x7e)
+    return '?';
+  return (char)cell->ch;
 }
 
 PRIVATE void reset_surface(struct term_app *app)

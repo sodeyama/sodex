@@ -61,9 +61,18 @@ def crop_sha256(ppm_path: pathlib.Path, x: int, y: int, width: int, height: int)
 
 class QemuMonitor:
     def __init__(self, sock_path: pathlib.Path) -> None:
+        deadline = time.time() + 15.0
+
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(1.0)
-        self.sock.connect(str(sock_path))
+        while True:
+            try:
+                self.sock.connect(str(sock_path))
+                break
+            except OSError:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(0.1)
         time.sleep(0.2)
         try:
             self.sock.recv(4096)
@@ -144,12 +153,12 @@ def main() -> int:
     reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
-    serial_log = logdir / "term_smoke_serial.log"
-    qemu_log = logdir / "term_smoke_qemu.log"
-    monitor_sock = logdir / "term_smoke_monitor.sock"
-    boot_ppm = logdir / "term_smoke_boot.ppm"
-    scroll_ppm = logdir / "term_smoke_scroll.ppm"
-    long_ppm = logdir / "term_smoke_long.ppm"
+    serial_log = logdir / f"term_smoke_serial_{os.getpid()}.log"
+    qemu_log = logdir / f"term_smoke_qemu_{os.getpid()}.log"
+    monitor_sock = logdir / f"term_smoke_monitor_{os.getpid()}.sock"
+    boot_ppm = logdir / f"term_smoke_boot_{os.getpid()}.ppm"
+    scroll_ppm = logdir / f"term_smoke_scroll_{os.getpid()}.ppm"
+    long_ppm = logdir / f"term_smoke_long_{os.getpid()}.ppm"
 
     for path in (serial_log, qemu_log, monitor_sock, boot_ppm, scroll_ppm, long_ppm):
         if path.exists():

@@ -77,6 +77,25 @@ TEST(cursor_move_save_restore_and_erase_line) {
     terminal_surface_free(&surface);
 }
 
+TEST(utf8_wide_text_uses_two_cells) {
+    struct terminal_surface surface;
+    struct vt_parser parser;
+    const char data[] = {(char)0xe3, (char)0x81, (char)0x82, 'B'};
+
+    ASSERT_EQ(terminal_surface_init(&surface, 4, 1), 0);
+    vt_parser_init(&parser, &surface);
+
+    vt_parser_feed(&parser, data, sizeof(data));
+
+    ASSERT_EQ(terminal_surface_cell(&surface, 0, 0)->ch, 0x3042);
+    ASSERT_EQ(terminal_surface_cell(&surface, 0, 0)->width, 2);
+    ASSERT(terminal_surface_cell(&surface, 1, 0)->attr & TERM_ATTR_CONTINUATION);
+    ASSERT_EQ(terminal_surface_cell(&surface, 2, 0)->ch, 'B');
+    ASSERT_EQ(surface.cursor_col, 3);
+
+    terminal_surface_free(&surface);
+}
+
 int main(void)
 {
     printf("=== vt parser tests ===\n");
@@ -85,6 +104,7 @@ int main(void)
     RUN_TEST(clear_and_home_sequence);
     RUN_TEST(sgr_changes_colors_and_resets);
     RUN_TEST(cursor_move_save_restore_and_erase_line);
+    RUN_TEST(utf8_wide_text_uses_two_cells);
 
     TEST_REPORT();
 }

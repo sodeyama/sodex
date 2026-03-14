@@ -22,14 +22,16 @@
 
 #define TERM_ATTR_BOLD    0x01
 #define TERM_ATTR_REVERSE 0x02
+#define TERM_ATTR_CONTINUATION 0x04
 
 #define TERM_TAB_WIDTH 8
 
 struct term_cell {
-  char ch;
+  u_int32_t ch;
   unsigned char fg;
   unsigned char bg;
   unsigned char attr;
+  unsigned char width;
 };
 
 struct terminal_surface {
@@ -74,6 +76,9 @@ void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
 void terminal_surface_put_cell(struct terminal_surface *surface,
                                int col, int row,
                                const struct term_cell *cell);
+void terminal_surface_write_codepoint(struct terminal_surface *surface,
+                                      u_int32_t codepoint, int width,
+                                      const struct term_cell *style);
 void terminal_surface_write_char(struct terminal_surface *surface,
                                  char ch, const struct term_cell *style);
 void terminal_surface_newline(struct terminal_surface *surface,

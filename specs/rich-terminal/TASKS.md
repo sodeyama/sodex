@@ -14,6 +14,7 @@
 7. file/folder CRUD と基本コマンド
 8. pipe / redirection と shell I/O 合成
 9. フルスクリーン editor と保存導線
+10. UTF-8 と多言語表示
 
 ## M0: 互換を壊さない基盤化
 
@@ -105,9 +106,21 @@
 | [x] | RT-44 | `:w`, `:q`, `:wq` を実装し、Plan 10/11 の基盤上で保存する | RT-43, RT-40 | `vi memo.txt` から保存し、`cat memo.txt` で確認できる |
 | [x] | RT-45 | `vi` の host/QEMU smoke test を追加する | RT-44, RT-28 | 新規ファイル作成フローを回帰検知できる |
 
+## M9: UTF-8 と多言語表示
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | RT-46 | UTF-8 decoder / encoder と不正シーケンス処理を pure logic として追加する | RT-27 | byte stream を Unicode scalar value へ安定変換できる |
+| [ ] | RT-47 | 表示幅計算と terminal surface の wide char 対応を実装する | RT-46 | 幅 0 / 1 / 2 の文字でカーソルと折り返しが破綻しない |
+| [ ] | RT-48 | `UDEV Gothic` から subset 済み bitmap を生成する `mkfontpack` と build 導線を追加する | RT-10, RT-47 | `font_default` 生成物を build 時に作れる |
+| [ ] | RT-49 | kernel に font registry と既定フォント読み込みを追加し、boot 時に `font_default` を読むようにする | RT-48 | early console と framebuffer backend が同じ既定フォントを使う |
+| [ ] | RT-50 | `term` 側の glyph lookup と fallback を kernel 既定フォント前提へ切り替える | RT-47, RT-49 | `term` が `UDEV Gothic` 由来半角 glyph と日本語 glyph を描画できる |
+| [ ] | RT-51 | `term`、`cat`、`vi` を UTF-8 / wide char 前提で再描画・編集できるようにする | RT-47, RT-50, RT-45 | 日本語を含む UTF-8 ファイルを表示・編集・保存できる |
+| [ ] | RT-52 | UTF-8 の host/QEMU smoke test を追加し、既定フォント描画と日本語ファイル導線を回帰検知できるようにする | RT-51, RT-29 | UTF-8 表示、既定フォント読み込み、保存の回帰を自動検知できる |
+| [ ] | RT-53 | `UDEV Gothic` の OFL 1.1 文書と attribution の同梱導線を追加する | RT-48 | ライセンス文書を欠かさず配布できる |
+
 ## 先送りする項目
 
-- UTF-8 完全対応
 - 複数 terminal セッション
 - タブ補完や高度な line editing
 - マウス入力

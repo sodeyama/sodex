@@ -22,7 +22,6 @@
 #include <io.h>
 #include <key.h>
 #include <chdir.h>
-#include <rs232c.h>
 #include <pit8254.h>
 #include <uip.h>
 #include <ether.h>
@@ -31,6 +30,7 @@
 #include <fb.h>
 #include <pipe.h>
 #include <termios.h>
+#include <rs232c.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_creat(const char* pathname, mode_t mode);
@@ -93,7 +93,6 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
   u_int32_t p3 = *edx;
   u_int32_t p4 = *esi;
   u_int32_t p5 = *edi;
-
 
   int ret = 0;
   switch (nr_syscall) {

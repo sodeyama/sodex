@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <terminal_surface.h>
+#include <utf8.h>
 
 #define VT_PARSER_MAX_PARAMS 8
 
@@ -14,6 +15,7 @@ struct vt_parser {
   int params[VT_PARSER_MAX_PARAMS];
   int param_count;
   int param_active;
+  struct utf8_decoder decoder;
 };
 
 void vt_parser_init(struct vt_parser *parser, struct terminal_surface *surface);

@@ -37,6 +37,7 @@ TEST(put_cell_marks_only_changed_damage) {
     cell.fg = TERM_COLOR_RED;
     cell.bg = TERM_COLOR_BLACK;
     cell.attr = 0;
+    cell.width = 1;
     terminal_surface_put_cell(&surface, 2, 1, &cell);
 
     ASSERT_EQ(surface.dirty_count, 1);
@@ -58,6 +59,7 @@ TEST(resize_preserves_overlap_and_marks_full_redraw) {
     cell.fg = TERM_COLOR_GREEN;
     cell.bg = TERM_COLOR_BLACK;
     cell.attr = 0;
+    cell.width = 1;
     terminal_surface_put_cell(&surface, 0, 0, &cell);
     cell.ch = 'B';
     terminal_surface_put_cell(&surface, 1, 1, &cell);
@@ -70,6 +72,23 @@ TEST(resize_preserves_overlap_and_marks_full_redraw) {
     terminal_surface_free(&surface);
 }
 
+TEST(write_wide_codepoint_occupies_two_cells) {
+    struct terminal_surface surface;
+
+    ASSERT_EQ(terminal_surface_init(&surface, 4, 2), 0);
+    terminal_surface_clear_damage(&surface);
+
+    terminal_surface_write_codepoint(&surface, 0x3042, 2, NULL);
+
+    ASSERT_EQ(terminal_surface_cell(&surface, 0, 0)->ch, 0x3042);
+    ASSERT_EQ(terminal_surface_cell(&surface, 0, 0)->width, 2);
+    ASSERT(terminal_surface_cell(&surface, 1, 0)->attr & TERM_ATTR_CONTINUATION);
+    ASSERT_EQ(surface.cursor_col, 2);
+    ASSERT_EQ(surface.cursor_row, 0);
+
+    terminal_surface_free(&surface);
+}
+
 int main(void)
 {
     printf("=== terminal surface tests ===\n");
@@ -77,6 +96,7 @@ int main(void)
     RUN_TEST(write_char_wraps_and_scrolls);
     RUN_TEST(put_cell_marks_only_changed_damage);
     RUN_TEST(resize_preserves_overlap_and_marks_full_redraw);
+    RUN_TEST(write_wide_codepoint_occupies_two_cells);
 
     TEST_REPORT();
 }

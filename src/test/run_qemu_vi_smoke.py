@@ -66,7 +66,7 @@ def crop_matches(ppm_path: pathlib.Path, reference: dict[str, int | str]) -> boo
 
 class QemuMonitor:
     def __init__(self, sock_path: pathlib.Path) -> None:
-        deadline = time.time() + 5.0
+        deadline = time.time() + 15.0
 
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(1.0)
@@ -218,10 +218,10 @@ def main() -> int:
     reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
-    monitor_sock = logdir / "vi_monitor.sock"
-    serial_log = logdir / "vi_serial.log"
-    qemu_log = logdir / "vi_qemu.log"
-    prompt_ppm = logdir / "vi_prompt.ppm"
+    monitor_sock = logdir / f"vi_monitor_{os.getpid()}.sock"
+    serial_log = logdir / f"vi_serial_{os.getpid()}.log"
+    qemu_log = logdir / f"vi_qemu_{os.getpid()}.log"
+    prompt_ppm = logdir / f"vi_prompt_{os.getpid()}.ppm"
 
     for path in (monitor_sock, serial_log, qemu_log, prompt_ppm):
         if path.exists():

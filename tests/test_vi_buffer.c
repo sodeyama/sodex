@@ -36,6 +36,28 @@ TEST(backspace_merges_lines) {
     vi_buffer_free(&buffer);
 }
 
+TEST(utf8_cursor_and_backspace_follow_codepoint_boundary) {
+    struct vi_buffer buffer;
+    const char text[] = {'A', (char)0xe3, (char)0x81, (char)0x82, 'B'};
+
+    ASSERT_EQ(vi_buffer_init(&buffer), 0);
+    ASSERT_EQ(vi_buffer_load(&buffer, text, sizeof(text)), 0);
+
+    buffer.cursor_col = vi_buffer_line_length(&buffer, 0);
+    vi_buffer_move_left(&buffer);
+    ASSERT_EQ(buffer.cursor_col, 4);
+    vi_buffer_move_left(&buffer);
+    ASSERT_EQ(buffer.cursor_col, 1);
+    ASSERT_EQ(vi_buffer_cursor_display_col(&buffer), 1);
+
+    buffer.cursor_col = 4;
+    ASSERT_EQ(vi_buffer_backspace(&buffer), 0);
+    ASSERT_EQ(vi_buffer_line_length(&buffer, 0), 2);
+    ASSERT_STR_EQ(vi_buffer_line_data(&buffer, 0), "AB");
+
+    vi_buffer_free(&buffer);
+}
+
 TEST(command_parser_accepts_minimum_commands) {
     ASSERT_EQ(vi_parse_command("w"), VI_COMMAND_WRITE);
     ASSERT_EQ(vi_parse_command("q"), VI_COMMAND_QUIT);
@@ -49,6 +71,7 @@ int main(void)
 
     RUN_TEST(insert_and_split_lines);
     RUN_TEST(backspace_merges_lines);
+    RUN_TEST(utf8_cursor_and_backspace_follow_codepoint_boundary);
     RUN_TEST(command_parser_accepts_minimum_commands);
 
     TEST_REPORT();

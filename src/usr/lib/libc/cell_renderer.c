@@ -1,5 +1,5 @@
 #include <cell_renderer.h>
-#include <font8x16.h>
+#include <font_default.h>
 #include <string.h>
 
 static u_int32_t renderer_palette_color(unsigned char index);
@@ -9,6 +9,12 @@ static void renderer_resolve_colors(const struct term_cell *cell,
                                     u_int32_t *bg);
 static void renderer_putpixel(struct cell_renderer *renderer,
                               int x, int y, u_int32_t color);
+static void renderer_fill_rect(struct cell_renderer *renderer,
+                               int x, int y, int width, int height,
+                               u_int32_t color);
+static void renderer_draw_placeholder(struct cell_renderer *renderer,
+                                      int cell_x, int cell_y, int cell_width,
+                                      u_int32_t fg, u_int32_t bg);
 
 static const u_int32_t renderer_palette[16] = {
   0x000000, 0x0000aa, 0x00aa00, 0x00aaaa,
@@ -69,6 +75,40 @@ static void renderer_putpixel(struct cell_renderer *renderer,
   *(u_int32_t *)pixel = color;
 }
 
+static void renderer_fill_rect(struct cell_renderer *renderer,
+                               int x, int y, int width, int height,
+                               u_int32_t color)
+{
+  int px;
+  int py;
+
+  for (py = 0; py < height; py++) {
+    for (px = 0; px < width; px++) {
+      renderer_putpixel(renderer, x + px, y + py, color);
+    }
+  }
+}
+
+static void renderer_draw_placeholder(struct cell_renderer *renderer,
+                                      int cell_x, int cell_y, int cell_width,
+                                      u_int32_t fg, u_int32_t bg)
+{
+  int x;
+  int y;
+  int cell_height;
+
+  cell_height = font_default_cell_height();
+  renderer_fill_rect(renderer, cell_x, cell_y, cell_width, cell_height, bg);
+  for (x = 0; x < cell_width; x++) {
+    renderer_putpixel(renderer, cell_x + x, cell_y, fg);
+    renderer_putpixel(renderer, cell_x + x, cell_y + cell_height - 1, fg);
+  }
+  for (y = 0; y < cell_height; y++) {
+    renderer_putpixel(renderer, cell_x, cell_y + y, fg);
+    renderer_putpixel(renderer, cell_x + cell_width - 1, cell_y + y, fg);
+  }
+}
+
 int cell_renderer_init(struct cell_renderer *renderer,
                        const struct fb_info *info)
 {
@@ -84,8 +124,8 @@ int cell_renderer_init(struct cell_renderer *renderer,
   renderer->fb.bpp = info->bpp;
   renderer->fb.base = info->base;
   renderer->fb.size = info->size;
-  renderer->cols = info->width / FONT8X16_WIDTH;
-  renderer->rows = info->height / FONT8X16_HEIGHT;
+  renderer->cols = info->width / font_default_cell_width();
+  renderer->rows = info->height / font_default_cell_height();
   if (renderer->cols <= 0 || renderer->rows <= 0)
     return -1;
 
@@ -112,13 +152,17 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
                              int cursor)
 {
   const unsigned char *glyph;
+  const unsigned int *wide_glyph;
   u_int32_t fg;
   u_int32_t bg;
-  unsigned char ch;
+  u_int32_t ch;
+  int width;
   int x;
   int y;
   int cell_x;
   int cell_y;
+  int cell_width;
+  int cell_height;
 
   if (renderer == 0 || renderer->fb.base == 0)
     return;
@@ -126,19 +170,46 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
     return;
 
   renderer_resolve_colors(cell, cursor, &fg, &bg);
-  cell_x = col * FONT8X16_WIDTH;
-  cell_y = row * FONT8X16_HEIGHT;
+  cell_width = font_default_cell_width();
+  cell_height = font_default_cell_height();
+  cell_x = col * cell_width;
+  cell_y = row * cell_height;
+  width = 1;
   ch = ' ';
-  if (cell != 0 && cell->ch != 0)
-    ch = (unsigned char)cell->ch;
-  glyph = font8x16_glyph(ch);
+  wide_glyph = 0;
+  if (cell != 0) {
+    if ((cell->attr & TERM_ATTR_CONTINUATION) != 0) {
+      renderer_fill_rect(renderer, cell_x, cell_y,
+                         cell_width, cell_height, bg);
+      return;
+    }
+    if (cell->ch != 0)
+      ch = cell->ch;
+    if (cell->width > 0)
+      width = cell->width;
+  }
 
-  for (y = 0; y < FONT8X16_HEIGHT; y++) {
-    for (x = 0; x < FONT8X16_WIDTH; x++) {
-      if ((glyph[y] & (1 << (7 - x))) != 0)
+  if (width == 1 && ch >= 32 && ch <= 126)
+    glyph = font_default_narrow_glyph(ch);
+  else
+    glyph = 0;
+  if (width == 2)
+    wide_glyph = font_default_wide_glyph(ch);
+
+  for (y = 0; y < cell_height; y++) {
+    for (x = 0; x < font_default_pixels_for_cells(width); x++) {
+      if (glyph != 0 && x < cell_width &&
+          (glyph[y] & (1 << (cell_width - 1 - x))) != 0)
+        renderer_putpixel(renderer, cell_x + x, cell_y + y, fg);
+      else if (wide_glyph != 0 &&
+               (wide_glyph[y] & (1U << (font_default_pixels_for_cells(width) - 1 - x))) != 0)
         renderer_putpixel(renderer, cell_x + x, cell_y + y, fg);
       else
         renderer_putpixel(renderer, cell_x + x, cell_y + y, bg);
     }
   }
+
+  if (glyph == 0 && wide_glyph == 0)
+    renderer_draw_placeholder(renderer, cell_x, cell_y,
+                              font_default_pixels_for_cells(width), fg, bg);
 }

@@ -35,6 +35,7 @@
 #include <uip_arp.h>
 #include <socket.h>
 #include <tty.h>
+#include <font_registry.h>
 #ifdef KTEST_BUILD
 PUBLIC void run_kernel_tests(void);
 #endif
@@ -112,6 +113,7 @@ PUBLIC void start_kernel()
   _kputs(" KERNEL: SETUP PAGING\n");
   _kputs(" KERNEL: SETUP PCI\n");
   init_pci();
+  font_registry_init();
   if (screen_try_enable_graphics())
     _kputs(" KERNEL: SETUP GRAPHICS\n");
   else

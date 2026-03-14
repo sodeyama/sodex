@@ -12,6 +12,7 @@ static int shell_buf_size(void);
 static int refresh_shell_buffer(char **buf, int *buf_size);
 static int clamp_copy_len(int len, int max_len);
 static int find_token(char **argv, const char *token);
+static void print_command_not_found(char *const argv[]);
 static int wait_command(pid_t pid, char *const argv[]);
 static int swap_fd(int target_fd, int next_fd);
 static void restore_fd(int target_fd, int saved_fd);
@@ -177,11 +178,20 @@ static int find_token(char **argv, const char *token)
 
 static int wait_command(pid_t pid, char *const argv[])
 {
-  if (pid < 0)
+  if (pid < 0) {
+    print_command_not_found(argv);
     return -1;
+  }
   if (argv != NULL && argv[0] != NULL && strcmp(argv[0], "test") != 0)
     waitpid(pid, NULL, NULL);
   return 0;
+}
+
+static void print_command_not_found(char *const argv[])
+{
+  if (argv == NULL || argv[0] == NULL)
+    return;
+  printf("eshell: command not found: %s\n", argv[0]);
 }
 
 static int swap_fd(int target_fd, int next_fd)

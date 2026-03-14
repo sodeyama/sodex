@@ -47,6 +47,9 @@ void vi_buffer_move_up(struct vi_buffer *buffer);
 void vi_buffer_move_down(struct vi_buffer *buffer);
 const char *vi_buffer_line_data(const struct vi_buffer *buffer, int row);
 int vi_buffer_line_length(const struct vi_buffer *buffer, int row);
+int vi_buffer_line_display_width(const struct vi_buffer *buffer, int row);
+int vi_buffer_line_bytes_for_width(const struct vi_buffer *buffer, int row, int cols);
+int vi_buffer_cursor_display_col(const struct vi_buffer *buffer);
 void vi_buffer_clear_dirty(struct vi_buffer *buffer);
 enum vi_command_kind vi_parse_command(const char *command);
 

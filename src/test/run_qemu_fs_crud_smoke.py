@@ -68,9 +68,18 @@ def crop_matches(ppm_path: pathlib.Path, reference: dict[str, int | str]) -> boo
 
 class QemuMonitor:
     def __init__(self, sock_path: pathlib.Path) -> None:
+        deadline = time.time() + 15.0
+
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(1.0)
-        self.sock.connect(str(sock_path))
+        while True:
+            try:
+                self.sock.connect(str(sock_path))
+                break
+            except OSError:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(0.1)
         time.sleep(0.2)
         try:
             self.sock.recv(4096)
@@ -207,10 +216,10 @@ def main() -> int:
     reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
-    monitor_sock = logdir / "fs_crud_monitor.sock"
-    serial_log = logdir / "fs_crud_serial.log"
-    qemu_log = logdir / "fs_crud_qemu.log"
-    prompt_ppm = logdir / "fs_crud_prompt.ppm"
+    monitor_sock = logdir / f"fs_crud_monitor_{os.getpid()}.sock"
+    serial_log = logdir / f"fs_crud_serial_{os.getpid()}.log"
+    qemu_log = logdir / f"fs_crud_qemu_{os.getpid()}.log"
+    prompt_ppm = logdir / f"fs_crud_prompt_{os.getpid()}.ppm"
 
     for path in (monitor_sock, serial_log, qemu_log, prompt_ppm):
         if path.exists():

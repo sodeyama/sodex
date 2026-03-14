@@ -15,6 +15,8 @@ INIT2   = ${INITDIR}/bin/ptest2
 # Tools
 KMKFS   = ${BUILDDIR}/tools/kmkfs
 GETSIZE = ${BUILDDIR}/tools/getsize
+UDEV_GOTHIC_TTF = ${BASEDIR}/third_party/fonts/UDEVGothic-Regular.ttf
+UDEV_GOTHIC_UTF8_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6,65e5,672c,8a9e
 
 # Test process
 PTEST   = ${INITDIR}/bin/ptest
@@ -55,11 +57,31 @@ $(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/
 
 # === Main targets ===
 
-.PHONY: all usr-build
+.PHONY: all usr-build regen-font8x16 regen-font16x16 regen-fonts
 all : usr-build ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
+
+regen-font8x16:
+	python3 ${TOOLDIR}/mkfontpack.py \
+		--font-path ${UDEV_GOTHIC_TTF} \
+		--font-size 13 \
+		--output-header ${INCLUDE}/font8x16_data.h \
+		--source-name UDEVGothic-Regular.ttf
+
+regen-font16x16:
+	python3 ${TOOLDIR}/mkfontpack.py \
+		--font-path ${UDEV_GOTHIC_TTF} \
+		--output-header ${INCLUDE}/font16x16_data.h \
+		--cell-width 16 \
+		--cell-height 16 \
+		--font-size 14 \
+		--codepoint-ranges ${UDEV_GOTHIC_UTF8_RANGES} \
+		--symbol-name font16x16_glyphs \
+		--source-name UDEVGothic-Regular.ttf
+
+regen-fonts: regen-font8x16 regen-font16x16
 
 usr-build:
 	cd usr; make

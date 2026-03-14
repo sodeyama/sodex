@@ -58,8 +58,7 @@ PUBLIC pid_t sys_execve(const char *filename, char *const argv[],
 
   struct task_struct* kern_task = __execve(filename, argv, envp, NULL);
   if (kern_task == NULL) {
-    if (strcmp(filename,"") != 0)
-      _kprintf("command not found\n");
+    enable_pic_interrupt(IRQ_TIMER);
     return -1;
   }
   dlist_insert_after(&(kern_task->run_list), &(current->run_list));

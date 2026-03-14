@@ -112,24 +112,10 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
   pg_load_cr3(old_cr3);
 
   *entrypoint = header->entry;
-
-  task->files->fs_fd[fd] = kalloc(sizeof(struct file));
-  if (task->files->fs_fd[fd] == NULL) {
-    _kprintf("%s: elf_header kalloc error\n", __func__);
-    return ELF_FAIL;
-  }
-
-  memset(task->files->fs_fd[fd], 0, sizeof(struct file));
-  task->files->fs_freefd++;
-
   /*
-  struct file* pfile = task->files->fs_fd[fd];
-  pfile->f_dentry = FD_TODENTRY(fd, current);
-  pfile->f_dentry->d_elfhdr = header;
-  pfile->f_dentry->d_elfscthdr = (void**)sect_header;
-  pfile->f_dentry->d_elfprghdr = (void**)prg_header;
-  */
-
+   * 実行中イメージの fd は子 task 側に残しておく。
+   * ここで close すると、exec 直後の user task が不安定になる。
+   */
   kfree(elf_buf);
 
   return ELF_SUCCESS;

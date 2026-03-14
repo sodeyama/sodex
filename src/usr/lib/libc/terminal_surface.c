@@ -13,6 +13,9 @@ static int terminal_surface_index(const struct terminal_surface *surface,
                                   int col, int row);
 static struct term_cell terminal_surface_blank_cell(const struct term_cell *fill);
 static void terminal_surface_mark_dirty(struct terminal_surface *surface, int index);
+static void terminal_surface_blank_out(struct terminal_surface *surface,
+                                       int col, int row,
+                                       const struct term_cell *fill);
 
 static int terminal_surface_clamp(int value, int min, int max)
 {
@@ -36,6 +39,8 @@ static struct term_cell terminal_surface_blank_cell(const struct term_cell *fill
   if (fill != NULL) {
     blank = *fill;
     blank.ch = ' ';
+    blank.attr &= (unsigned char)(~TERM_ATTR_CONTINUATION);
+    blank.width = 1;
     return blank;
   }
 
@@ -43,6 +48,7 @@ static struct term_cell terminal_surface_blank_cell(const struct term_cell *fill
   blank.fg = TERM_COLOR_LIGHT_GRAY;
   blank.bg = TERM_COLOR_BLACK;
   blank.attr = 0;
+  blank.width = 1;
   return blank;
 }
 
@@ -54,6 +60,32 @@ static void terminal_surface_mark_dirty(struct terminal_surface *surface, int in
     surface->dirty[index] = 1;
     surface->dirty_count++;
   }
+}
+
+static void terminal_surface_blank_out(struct terminal_surface *surface,
+                                       int col, int row,
+                                       const struct term_cell *fill)
+{
+  int index;
+  struct term_cell blank;
+
+  if (surface == NULL || surface->cells == NULL)
+    return;
+  if (col < 0 || row < 0 || col >= surface->cols || row >= surface->rows)
+    return;
+
+  blank = terminal_surface_blank_cell(fill);
+  index = terminal_surface_index(surface, col, row);
+  if (surface->cells[index].ch == blank.ch &&
+      surface->cells[index].fg == blank.fg &&
+      surface->cells[index].bg == blank.bg &&
+      surface->cells[index].attr == blank.attr &&
+      surface->cells[index].width == blank.width) {
+    return;
+  }
+
+  surface->cells[index] = blank;
+  terminal_surface_mark_dirty(surface, index);
 }
 
 int terminal_surface_init(struct terminal_surface *surface, int cols, int rows)
@@ -362,14 +394,27 @@ void terminal_surface_put_cell(struct terminal_surface *surface,
   next = blank;
   if (cell != NULL)
     next = *cell;
-  if (next.ch == 0)
+  if ((next.attr & TERM_ATTR_CONTINUATION) != 0) {
+    next.ch = 0;
+    next.width = 0;
+  } else if (next.width == 0) {
+    next.width = 1;
+  }
+  if (next.ch == 0 && (next.attr & TERM_ATTR_CONTINUATION) == 0) {
     next.ch = ' ';
+  }
 
   index = terminal_surface_index(surface, col, row);
+  if ((surface->cells[index].attr & TERM_ATTR_CONTINUATION) != 0 && col > 0) {
+    terminal_surface_blank_out(surface, col - 1, row, &next);
+  } else if (surface->cells[index].width > 1 && col + 1 < surface->cols) {
+    terminal_surface_blank_out(surface, col + 1, row, &next);
+  }
   if (surface->cells[index].ch == next.ch &&
       surface->cells[index].fg == next.fg &&
       surface->cells[index].bg == next.bg &&
-      surface->cells[index].attr == next.attr) {
+      surface->cells[index].attr == next.attr &&
+      surface->cells[index].width == next.width) {
     return;
   }
 
@@ -377,22 +422,45 @@ void terminal_surface_put_cell(struct terminal_surface *surface,
   terminal_surface_mark_dirty(surface, index);
 }
 
-void terminal_surface_write_char(struct terminal_surface *surface,
-                                 char ch, const struct term_cell *style)
+void terminal_surface_write_codepoint(struct terminal_surface *surface,
+                                      u_int32_t codepoint, int width,
+                                      const struct term_cell *style)
 {
   struct term_cell cell;
+  struct term_cell continuation;
 
   if (surface == NULL || surface->cols <= 0 || surface->rows <= 0)
     return;
+  if (width <= 0)
+    return;
+  if (width > 2)
+    width = 1;
+  if (width == 2 && surface->cols < 2)
+    width = 1;
+
+  if (width == 2 && surface->cursor_col >= surface->cols - 1)
+    terminal_surface_newline(surface, style);
 
   cell = terminal_surface_blank_cell(style);
-  cell.ch = (ch == 0) ? ' ' : ch;
+  cell.ch = (codepoint == 0) ? ' ' : codepoint;
+  cell.width = (unsigned char)width;
   terminal_surface_put_cell(surface,
                             surface->cursor_col,
                             surface->cursor_row,
                             &cell);
 
-  if (surface->cursor_col >= surface->cols - 1) {
+  if (width == 2) {
+    continuation = terminal_surface_blank_cell(style);
+    continuation.ch = 0;
+    continuation.attr |= TERM_ATTR_CONTINUATION;
+    continuation.width = 0;
+    terminal_surface_put_cell(surface,
+                              surface->cursor_col + 1,
+                              surface->cursor_row,
+                              &continuation);
+  }
+
+  if (surface->cursor_col >= surface->cols - width) {
     surface->cursor_col = 0;
     if (surface->cursor_row >= surface->rows - 1) {
       terminal_surface_scroll_up(surface, 1, style);
@@ -403,7 +471,13 @@ void terminal_surface_write_char(struct terminal_surface *surface,
     return;
   }
 
-  surface->cursor_col++;
+  surface->cursor_col += width;
+}
+
+void terminal_surface_write_char(struct terminal_surface *surface,
+                                 char ch, const struct term_cell *style)
+{
+  terminal_surface_write_codepoint(surface, (u_int32_t)(unsigned char)ch, 1, style);
 }
 
 void terminal_surface_newline(struct terminal_surface *surface,
@@ -432,8 +506,19 @@ void terminal_surface_backspace(struct terminal_surface *surface)
 {
   if (surface == NULL)
     return;
-  if (surface->cursor_col > 0)
+  if (surface->cursor_col > 0) {
     surface->cursor_col--;
+    while (surface->cursor_col > 0) {
+      const struct term_cell *cell;
+
+      cell = terminal_surface_cell(surface,
+                                   surface->cursor_col,
+                                   surface->cursor_row);
+      if (cell == NULL || (cell->attr & TERM_ATTR_CONTINUATION) == 0)
+        break;
+      surface->cursor_col--;
+    }
+  }
 }
 
 void terminal_surface_tab(struct terminal_surface *surface,
@@ -446,7 +531,7 @@ void terminal_surface_tab(struct terminal_surface *surface,
 
   next_stop = ((surface->cursor_col / TERM_TAB_WIDTH) + 1) * TERM_TAB_WIDTH;
   while (surface->cursor_col < next_stop) {
-    terminal_surface_write_char(surface, ' ', style);
+    terminal_surface_write_codepoint(surface, ' ', 1, style);
     if (surface->cursor_col == 0)
       break;
   }

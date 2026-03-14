@@ -243,7 +243,7 @@ static void vi_handle_insert(struct vi_editor *editor, char ch)
     vi_buffer_insert_newline(&editor->buffer);
     return;
   }
-  if (ch >= 0x20 && ch <= 0x7e)
+  if ((unsigned char)ch >= 0x20 && ch != 0x7f)
     vi_buffer_insert_char(&editor->buffer, ch);
 }
 

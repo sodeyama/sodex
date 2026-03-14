@@ -1,6 +1,6 @@
 #include <display/fb_backend.h>
 #include <fb.h>
-#include <font8x16.h>
+#include <font_registry.h>
 
 PRIVATE void fb_backend_put_cell(struct display_backend *backend,
                                  int x, int y, char color, char c);
@@ -37,6 +37,7 @@ PRIVATE u_int32_t fb_backend_color(char color, int foreground)
 PRIVATE void fb_backend_put_cell(struct display_backend *backend,
                                  int x, int y, char color, char c)
 {
+  const struct font_face *font;
   const unsigned char *glyph;
   u_int32_t fg;
   u_int32_t bg;
@@ -44,23 +45,28 @@ PRIVATE void fb_backend_put_cell(struct display_backend *backend,
   int py;
   int cell_x;
   int cell_y;
+  int cell_width;
+  int cell_height;
 
   (void)backend;
   if (fb_is_available() == 0)
     return;
 
-  cell_x = x * FONT8X16_WIDTH;
-  cell_y = y * FONT8X16_HEIGHT;
+  font = font_registry_default();
+  cell_width = font->narrow_width;
+  cell_height = font->height;
+  cell_x = x * cell_width;
+  cell_y = y * cell_height;
   fg = fb_backend_color(color, TRUE);
   bg = fb_backend_color(color, FALSE);
-  fb_fillrect(cell_x, cell_y, FONT8X16_WIDTH, FONT8X16_HEIGHT, bg);
+  fb_fillrect(cell_x, cell_y, cell_width, cell_height, bg);
 
   if (c == 0)
     c = ' ';
-  glyph = font8x16_glyph((unsigned char)c);
-  for (py = 0; py < FONT8X16_HEIGHT; py++) {
-    for (px = 0; px < FONT8X16_WIDTH; px++) {
-      if ((glyph[py] & (1 << (7 - px))) != 0)
+  glyph = font_registry_lookup_narrow((unsigned char)c);
+  for (py = 0; py < cell_height; py++) {
+    for (px = 0; px < cell_width; px++) {
+      if ((glyph[py] & (1 << (cell_width - 1 - px))) != 0)
         fb_putpixel(cell_x + px, cell_y + py, fg);
     }
   }
@@ -74,6 +80,7 @@ PRIVATE void fb_backend_clear(struct display_backend *backend, char color)
 
 PRIVATE void fb_backend_scroll_up(struct display_backend *backend, char color)
 {
+  const struct font_face *font;
   const struct fb_info *info;
   int scroll_pixels;
 
@@ -82,7 +89,8 @@ PRIVATE void fb_backend_scroll_up(struct display_backend *backend, char color)
   if (info->available == 0)
     return;
 
-  scroll_pixels = FONT8X16_HEIGHT;
+  font = font_registry_default();
+  scroll_pixels = font->height;
   if (info->height <= scroll_pixels) {
     fb_clear(fb_backend_color(color, FALSE));
     return;
@@ -101,6 +109,7 @@ PRIVATE void fb_backend_flush(struct display_backend *backend)
 
 PUBLIC int fb_backend_init(struct display_backend *backend)
 {
+  const struct font_face *font;
   const struct fb_info *info;
 
   if (backend == NULL)
@@ -108,9 +117,10 @@ PUBLIC int fb_backend_init(struct display_backend *backend)
   if (fb_is_available() == 0)
     return -1;
 
+  font = font_registry_default();
   info = fb_get_info();
-  backend->cols = info->width / FONT8X16_WIDTH;
-  backend->rows = info->height / FONT8X16_HEIGHT;
+  backend->cols = info->width / font->narrow_width;
+  backend->rows = info->height / font->height;
   if (backend->cols <= 0 || backend->rows <= 0)
     return -1;
   backend->ctx = NULL;

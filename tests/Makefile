@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth
 
 .PHONY: all clean test
 
@@ -108,14 +108,24 @@ test_cell_renderer: test_cell_renderer.c test_cell_renderer_renderer.o
 test_cell_renderer_renderer.o: $(SRC)/usr/lib/libc/cell_renderer.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
+# Shared default font lookup tests
+test_font_default: test_font_default.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_font_default.c
+
 # VT parser tests
-test_vt_parser: test_vt_parser.c test_vt_parser_surface.o test_vt_parser_parser.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vt_parser.c test_vt_parser_surface.o test_vt_parser_parser.o
+test_vt_parser: test_vt_parser.c test_vt_parser_surface.o test_vt_parser_parser.o test_vt_parser_utf8.o test_vt_parser_wcwidth.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vt_parser.c test_vt_parser_surface.o test_vt_parser_parser.o test_vt_parser_utf8.o test_vt_parser_wcwidth.o
 
 test_vt_parser_surface.o: $(SRC)/usr/lib/libc/terminal_surface.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_vt_parser_parser.o: $(SRC)/usr/lib/libc/vt_parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vt_parser_utf8.o: $(SRC)/usr/lib/libc/utf8.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vt_parser_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # VT fixture tests
@@ -165,10 +175,30 @@ test_socket: test_socket.c
 	$(CC) $(CFLAGS) -o $@ test_socket.c
 
 # vi buffer tests
-test_vi_buffer: test_vi_buffer.c test_vi_buffer_vi_buffer.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vi_buffer.c test_vi_buffer_vi_buffer.o
+test_vi_buffer: test_vi_buffer.c test_vi_buffer_vi_buffer.o test_vi_buffer_utf8.o test_vi_buffer_wcwidth.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vi_buffer.c test_vi_buffer_vi_buffer.o test_vi_buffer_utf8.o test_vi_buffer_wcwidth.o
 
 test_vi_buffer_vi_buffer.o: $(SRC)/usr/lib/libc/vi_buffer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vi_buffer_utf8.o: $(SRC)/usr/lib/libc/utf8.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vi_buffer_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# UTF-8 logic tests
+test_utf8: test_utf8.c test_utf8_utf8.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_utf8.c test_utf8_utf8.o
+
+test_utf8_utf8.o: $(SRC)/usr/lib/libc/utf8.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Width calculation tests
+test_wcwidth: test_wcwidth.c test_wcwidth_wcwidth.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_wcwidth.c test_wcwidth_wcwidth.o
+
+test_wcwidth_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:

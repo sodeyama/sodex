@@ -1,7 +1,9 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
+#include <utf8.h>
 #include <vi.h>
+#include <wcwidth.h>
 
 #define VI_INITIAL_LINE_CAP 8
 #define VI_INITIAL_CHAR_CAP 16
@@ -12,6 +14,82 @@ static int vi_line_reserve(struct vi_line *line, int needed);
 static int vi_buffer_append_loaded_char(struct vi_buffer *buffer, char ch);
 static int vi_buffer_append_loaded_newline(struct vi_buffer *buffer);
 static void vi_buffer_clamp_cursor(struct vi_buffer *buffer);
+static int vi_is_continuation_byte(unsigned char ch);
+static int vi_line_prev_boundary(const struct vi_line *line, int index);
+static int vi_line_next_boundary(const struct vi_line *line, int index);
+static int vi_line_display_col_until(const struct vi_line *line, int byte_limit);
+static int vi_line_offset_for_display_col(const struct vi_line *line, int display_col);
+
+static int vi_is_continuation_byte(unsigned char ch)
+{
+  return (ch & 0xc0U) == 0x80U;
+}
+
+static int vi_line_prev_boundary(const struct vi_line *line, int index)
+{
+  if (line == NULL || line->data == NULL)
+    return 0;
+  return utf8_prev_char_start(line->data, line->len, index);
+}
+
+static int vi_line_next_boundary(const struct vi_line *line, int index)
+{
+  if (line == NULL || line->data == NULL)
+    return index;
+  return utf8_next_char_end(line->data, line->len, index);
+}
+
+static int vi_line_display_col_until(const struct vi_line *line, int byte_limit)
+{
+  int index = 0;
+  int cols = 0;
+
+  if (line == NULL || line->data == NULL)
+    return 0;
+  if (byte_limit > line->len)
+    byte_limit = line->len;
+
+  while (index < byte_limit) {
+    u_int32_t codepoint;
+    int consumed;
+    int width;
+
+    utf8_decode_one(line->data + index, byte_limit - index, &codepoint, &consumed);
+    width = unicode_wcwidth(codepoint);
+    if (width < 0)
+      width = 1;
+    cols += width;
+    index += consumed;
+  }
+  return cols;
+}
+
+static int vi_line_offset_for_display_col(const struct vi_line *line, int display_col)
+{
+  int index = 0;
+  int cols = 0;
+
+  if (line == NULL || line->data == NULL)
+    return 0;
+  if (display_col <= 0)
+    return 0;
+
+  while (index < line->len) {
+    u_int32_t codepoint;
+    int consumed;
+    int width;
+
+    utf8_decode_one(line->data + index, line->len - index, &codepoint, &consumed);
+    width = unicode_wcwidth(codepoint);
+    if (width < 0)
+      width = 1;
+    if (cols + width > display_col)
+      break;
+    cols += width;
+    index += consumed;
+  }
+  return index;
+}
 
 static int vi_buffer_reset_empty(struct vi_buffer *buffer)
 {
@@ -110,6 +188,7 @@ static int vi_buffer_append_loaded_newline(struct vi_buffer *buffer)
 static void vi_buffer_clamp_cursor(struct vi_buffer *buffer)
 {
   int len;
+  struct vi_line *line;
 
   if (buffer->cursor_row < 0)
     buffer->cursor_row = 0;
@@ -121,6 +200,13 @@ static void vi_buffer_clamp_cursor(struct vi_buffer *buffer)
     buffer->cursor_col = 0;
   if (buffer->cursor_col > len)
     buffer->cursor_col = len;
+  if (buffer->cursor_col < len) {
+    line = &buffer->lines[buffer->cursor_row];
+    while (buffer->cursor_col > 0 &&
+           vi_is_continuation_byte((unsigned char)line->data[buffer->cursor_col])) {
+      buffer->cursor_col--;
+    }
+  }
 }
 
 int vi_buffer_init(struct vi_buffer *buffer)
@@ -248,6 +334,7 @@ int vi_buffer_backspace(struct vi_buffer *buffer)
   struct vi_line *prev;
   int i;
   int prev_len;
+  int prev_col;
 
   if (buffer == NULL)
     return -1;
@@ -256,11 +343,12 @@ int vi_buffer_backspace(struct vi_buffer *buffer)
   line = &buffer->lines[buffer->cursor_row];
 
   if (buffer->cursor_col > 0) {
+    prev_col = vi_line_prev_boundary(line, buffer->cursor_col);
     for (i = buffer->cursor_col; i <= line->len; i++) {
-      line->data[i - 1] = line->data[i];
+      line->data[prev_col + i - buffer->cursor_col] = line->data[i];
     }
-    line->len--;
-    buffer->cursor_col--;
+    line->len -= buffer->cursor_col - prev_col;
+    buffer->cursor_col = prev_col;
     buffer->dirty = 1;
     return 0;
   }
@@ -293,11 +381,14 @@ int vi_buffer_backspace(struct vi_buffer *buffer)
 
 void vi_buffer_move_left(struct vi_buffer *buffer)
 {
+  struct vi_line *line;
+
   if (buffer == NULL)
     return;
 
   if (buffer->cursor_col > 0) {
-    buffer->cursor_col--;
+    line = &buffer->lines[buffer->cursor_row];
+    buffer->cursor_col = vi_line_prev_boundary(line, buffer->cursor_col);
   } else if (buffer->cursor_row > 0) {
     buffer->cursor_row--;
     buffer->cursor_col = vi_buffer_line_length(buffer, buffer->cursor_row);
@@ -307,13 +398,15 @@ void vi_buffer_move_left(struct vi_buffer *buffer)
 void vi_buffer_move_right(struct vi_buffer *buffer)
 {
   int len;
+  struct vi_line *line;
 
   if (buffer == NULL)
     return;
 
   len = vi_buffer_line_length(buffer, buffer->cursor_row);
   if (buffer->cursor_col < len) {
-    buffer->cursor_col++;
+    line = &buffer->lines[buffer->cursor_row];
+    buffer->cursor_col = vi_line_next_boundary(line, buffer->cursor_col);
   } else if (buffer->cursor_row + 1 < buffer->line_count) {
     buffer->cursor_row++;
     buffer->cursor_col = 0;
@@ -322,22 +415,30 @@ void vi_buffer_move_right(struct vi_buffer *buffer)
 
 void vi_buffer_move_up(struct vi_buffer *buffer)
 {
+  int target_col;
+
   if (buffer == NULL)
     return;
 
+  target_col = vi_buffer_cursor_display_col(buffer);
   if (buffer->cursor_row > 0)
     buffer->cursor_row--;
-  vi_buffer_clamp_cursor(buffer);
+  buffer->cursor_col = vi_line_offset_for_display_col(&buffer->lines[buffer->cursor_row],
+                                                      target_col);
 }
 
 void vi_buffer_move_down(struct vi_buffer *buffer)
 {
+  int target_col;
+
   if (buffer == NULL)
     return;
 
+  target_col = vi_buffer_cursor_display_col(buffer);
   if (buffer->cursor_row + 1 < buffer->line_count)
     buffer->cursor_row++;
-  vi_buffer_clamp_cursor(buffer);
+  buffer->cursor_col = vi_line_offset_for_display_col(&buffer->lines[buffer->cursor_row],
+                                                      target_col);
 }
 
 const char *vi_buffer_line_data(const struct vi_buffer *buffer, int row)
@@ -354,6 +455,28 @@ int vi_buffer_line_length(const struct vi_buffer *buffer, int row)
   if (buffer == NULL || row < 0 || row >= buffer->line_count)
     return 0;
   return buffer->lines[row].len;
+}
+
+int vi_buffer_line_display_width(const struct vi_buffer *buffer, int row)
+{
+  if (buffer == NULL || row < 0 || row >= buffer->line_count)
+    return 0;
+  return vi_line_display_col_until(&buffer->lines[row], buffer->lines[row].len);
+}
+
+int vi_buffer_line_bytes_for_width(const struct vi_buffer *buffer, int row, int cols)
+{
+  if (buffer == NULL || row < 0 || row >= buffer->line_count)
+    return 0;
+  return vi_line_offset_for_display_col(&buffer->lines[row], cols);
+}
+
+int vi_buffer_cursor_display_col(const struct vi_buffer *buffer)
+{
+  if (buffer == NULL || buffer->cursor_row < 0 || buffer->cursor_row >= buffer->line_count)
+    return 0;
+  return vi_line_display_col_until(&buffer->lines[buffer->cursor_row],
+                                   buffer->cursor_col);
 }
 
 void vi_buffer_clear_dirty(struct vi_buffer *buffer)

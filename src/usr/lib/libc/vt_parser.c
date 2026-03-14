@@ -1,5 +1,6 @@
 #include <sodex/const.h>
 #include <vt_parser.h>
+#include <wcwidth.h>
 
 static void vt_parser_reset_params(struct vt_parser *parser);
 static int vt_parser_param(const struct vt_parser *parser, int index, int fallback);
@@ -9,7 +10,9 @@ static void vt_parser_apply_sgr(struct vt_parser *parser);
 static void vt_parser_erase_display(struct vt_parser *parser, int mode);
 static void vt_parser_erase_line(struct vt_parser *parser, int mode);
 static void vt_parser_dispatch_csi(struct vt_parser *parser, char final);
-static void vt_parser_feed_ground(struct vt_parser *parser, char ch);
+static void vt_parser_emit_codepoint(struct vt_parser *parser, u_int32_t codepoint);
+static void vt_parser_flush_partial_utf8(struct vt_parser *parser);
+static void vt_parser_feed_ground(struct vt_parser *parser, unsigned char ch);
 
 enum {
   VT_STATE_GROUND = 0,
@@ -227,28 +230,71 @@ static void vt_parser_dispatch_csi(struct vt_parser *parser, char final)
   }
 }
 
-static void vt_parser_feed_ground(struct vt_parser *parser, char ch)
+static void vt_parser_emit_codepoint(struct vt_parser *parser, u_int32_t codepoint)
 {
+  int width;
+
+  if (codepoint == 0)
+    return;
+
+  width = unicode_wcwidth(codepoint);
+  if (width < 0)
+    return;
+  if (width == 0)
+    return;
+
+  terminal_surface_write_codepoint(parser->surface, codepoint, width, &parser->pen);
+}
+
+static void vt_parser_flush_partial_utf8(struct vt_parser *parser)
+{
+  if (parser == 0)
+    return;
+  if (parser->decoder.expected == 0)
+    return;
+
+  utf8_decoder_reset(&parser->decoder);
+  vt_parser_emit_codepoint(parser, UTF8_REPLACEMENT_CHAR);
+}
+
+static void vt_parser_feed_ground(struct vt_parser *parser, unsigned char ch)
+{
+  u_int32_t codepoint;
+  int decoded;
+
   if (ch == '\r') {
+    vt_parser_flush_partial_utf8(parser);
     terminal_surface_carriage_return(parser->surface);
     return;
   }
   if (ch == '\n') {
+    vt_parser_flush_partial_utf8(parser);
     terminal_surface_newline(parser->surface, &parser->pen);
     return;
   }
   if (ch == '\b') {
+    vt_parser_flush_partial_utf8(parser);
     terminal_surface_backspace(parser->surface);
     return;
   }
   if (ch == '\t') {
+    vt_parser_flush_partial_utf8(parser);
     terminal_surface_tab(parser->surface, &parser->pen);
     return;
   }
   if (ch < 0x20 || ch == 0x7f)
     return;
 
-  terminal_surface_write_char(parser->surface, ch, &parser->pen);
+  decoded = utf8_decode_byte(&parser->decoder, ch, &codepoint);
+  if (decoded > 0) {
+    vt_parser_emit_codepoint(parser, codepoint);
+    return;
+  }
+  if (decoded < 0) {
+    vt_parser_emit_codepoint(parser, UTF8_REPLACEMENT_CHAR);
+    if (ch >= 0x20 && ch < 0x80)
+      vt_parser_emit_codepoint(parser, ch);
+  }
 }
 
 void vt_parser_init(struct vt_parser *parser, struct terminal_surface *surface)
@@ -261,6 +307,7 @@ void vt_parser_init(struct vt_parser *parser, struct terminal_surface *surface)
   parser->default_pen.fg = TERM_COLOR_LIGHT_GRAY;
   parser->default_pen.bg = TERM_COLOR_BLACK;
   parser->default_pen.attr = 0;
+  parser->default_pen.width = 1;
   vt_parser_reset(parser);
 }
 
@@ -271,6 +318,7 @@ void vt_parser_reset(struct vt_parser *parser)
 
   parser->state = VT_STATE_GROUND;
   parser->pen = parser->default_pen;
+  utf8_decoder_reset(&parser->decoder);
   vt_parser_reset_params(parser);
 }
 
@@ -282,10 +330,11 @@ void vt_parser_feed(struct vt_parser *parser, const char *data, size_t len)
     return;
 
   for (i = 0; i < len; i++) {
-    char ch = data[i];
+    unsigned char ch = (unsigned char)data[i];
 
     if (parser->state == VT_STATE_GROUND) {
       if (ch == 0x1b) {
+        vt_parser_flush_partial_utf8(parser);
         parser->state = VT_STATE_ESCAPE;
       } else {
         vt_parser_feed_ground(parser, ch);

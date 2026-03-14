@@ -177,9 +177,7 @@ void vi_screen_redraw(const struct vi_buffer *buffer, enum vi_mode mode,
     line_index = row_offset + row;
     vi_screen_move_cursor(row, 0);
     if (line_index < buffer->line_count) {
-      len = vi_buffer_line_length(buffer, line_index);
-      if (len > cols)
-        len = cols;
+      len = vi_buffer_line_bytes_for_width(buffer, line_index, cols);
       vi_screen_write_n(vi_buffer_line_data(buffer, line_index), len);
     }
     vi_screen_write("\x1b[K");
@@ -211,7 +209,7 @@ void vi_screen_redraw(const struct vi_buffer *buffer, enum vi_mode mode,
   } else {
     vi_screen_write_status(mode, path, status, buffer->dirty, cols);
     cursor_row = buffer->cursor_row - row_offset;
-    cursor_col = buffer->cursor_col;
+    cursor_col = vi_buffer_cursor_display_col(buffer);
     if (cursor_row < 0)
       cursor_row = 0;
     if (cursor_row >= visible_rows)

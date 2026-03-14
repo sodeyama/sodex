@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_vt_parser test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
 
 .PHONY: all clean test
 
@@ -93,6 +93,23 @@ test_tty: test_tty.c test_tty_tty.o
 
 test_tty_tty.o: $(SRC)/tty/tty.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# Terminal surface tests
+test_terminal_surface: test_terminal_surface.c test_terminal_surface_surface.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_terminal_surface.c test_terminal_surface_surface.o
+
+test_terminal_surface_surface.o: $(SRC)/usr/lib/libc/terminal_surface.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# VT parser tests
+test_vt_parser: test_vt_parser.c test_vt_parser_surface.o test_vt_parser_parser.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vt_parser.c test_vt_parser_surface.o test_vt_parser_parser.o
+
+test_vt_parser_surface.o: $(SRC)/usr/lib/libc/terminal_surface.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vt_parser_parser.o: $(SRC)/usr/lib/libc/vt_parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # ext3fs bitmap/parse tests (standalone, no ext3fs.c dependency)
 test_ext3fs: test_ext3fs.c

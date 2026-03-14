@@ -41,6 +41,11 @@ PRIVATE int sys_openpty();
 PRIVATE int sys_execve_pty_call(const char *filename, char *const argv[],
                                 int master_fd);
 PRIVATE int sys_set_input_mode(int mode);
+PRIVATE int sys_console_cols(void);
+PRIVATE int sys_console_rows(void);
+PRIVATE void sys_console_putc_at(int x, int y, char color, char c);
+PRIVATE void sys_console_set_cursor(int x, int y);
+PRIVATE void sys_console_clear(void);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -132,6 +137,26 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_SET_INPUT_MODE:
     ret = sys_set_input_mode(p1);
+    break;
+
+  case SYS_CALL_CONSOLE_COLS:
+    ret = sys_console_cols();
+    break;
+
+  case SYS_CALL_CONSOLE_ROWS:
+    ret = sys_console_rows();
+    break;
+
+  case SYS_CALL_CONSOLE_PUTC_AT:
+    sys_console_putc_at((int)p1, (int)p2, (char)p3, (char)p4);
+    break;
+
+  case SYS_CALL_CONSOLE_SET_CURSOR:
+    sys_console_set_cursor((int)p1, (int)p2);
+    break;
+
+  case SYS_CALL_CONSOLE_CLEAR:
+    sys_console_clear();
     break;
 
   case SYS_CALL_BRK:
@@ -339,6 +364,31 @@ PRIVATE int sys_getkeyevent(struct key_event *event)
 PRIVATE int sys_set_input_mode(int mode)
 {
   return tty_set_input_mode(mode);
+}
+
+PRIVATE int sys_console_cols(void)
+{
+  return screen_cols();
+}
+
+PRIVATE int sys_console_rows(void)
+{
+  return screen_rows();
+}
+
+PRIVATE void sys_console_putc_at(int x, int y, char color, char c)
+{
+  _poscolor_printc(x, y, color, c);
+}
+
+PRIVATE void sys_console_set_cursor(int x, int y)
+{
+  screen_pointset(x, y);
+}
+
+PRIVATE void sys_console_clear(void)
+{
+  clr_screen();
 }
 
 PRIVATE int sys_send(char* buf)

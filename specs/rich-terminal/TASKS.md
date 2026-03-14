@@ -49,15 +49,15 @@
 | [x] | RT-16 | `/usr/bin/term` の build、image 収録、起動骨格を作る | RT-10, RT-15 | `term` バイナリが build できる |
 | [ ] | RT-17 | `term` から framebuffer と input event を初期化し、列数・行数を計算する | RT-16 | terminal 側で viewport が確定する |
 | [x] | RT-18 | `term` が PTY master を開き、子として `eshell` を起動する | RT-14, RT-16 | shell 出力を読み込める |
-| [ ] | RT-19 | `term` のメインループで PTY 読み取り、入力送信、damage redraw を回す | RT-17, RT-18 | shell 出力が framebuffer 上に見える |
+| [x] | RT-19 | `term` のメインループで PTY 読み取り、入力送信、damage redraw を回す | RT-17, RT-18 | shell 出力が framebuffer 上に見える |
 | [ ] | RT-20 | scrollback リングと全画面再描画経路を追加する | RT-19 | 長文出力後も履歴を保持できる |
 
 ## M4: terminal としての完成度を上げる
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-21 | VT parser 状態機械を実装し、通常文字と CSI を分離する | RT-19 | escape sequence を安全に解釈できる |
-| [ ] | RT-22 | `clear`、色、カーソル移動、消去、保存/復元の主要シーケンスを実装する | RT-21 | `clear` と `ls --color` が通る |
+| [x] | RT-21 | VT parser 状態機械を実装し、通常文字と CSI を分離する | RT-19 | escape sequence を安全に解釈できる |
+| [x] | RT-22 | `clear`、色、カーソル移動、消去、保存/復元の主要シーケンスを実装する | RT-21 | `clear` と `ls --color` が通る |
 | [ ] | RT-23 | 初期 winsize 伝播を `term` → shell に渡す | RT-18 | 120 列以上でも prompt が破綻しにくい |
 | [x] | RT-24 | `src/usr/init.c` を `term` 起動中心へ切り替え、旧 `eshell` を fallback 化する | RT-20, RT-22, RT-23 | boot 後の既定 terminal が `term` になる |
 | [ ] | RT-25 | resize 通知と再描画を実装し、`eshell` の固定長前提を減らす | RT-23, RT-24 | 画面サイズ変更後も再計算と再描画ができる |
@@ -66,7 +66,7 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-26 | `tests/Makefile` に surface、VT、key、TTY の host test を追加する | RT-09, RT-12, RT-21 | pure logic の回帰テストが一括実行できる |
+| [x] | RT-26 | `tests/Makefile` に surface、VT、key、TTY の host test を追加する | RT-09, RT-12, RT-21 | pure logic の回帰テストが一括実行できる |
 | [ ] | RT-27 | VT fixture と期待 surface 比較のテストデータを用意する | RT-22, RT-26 | parser 退行を fixture で検知できる |
 | [ ] | RT-28 | graphics terminal 向け QEMU smoke test を追加する | RT-24 | boot から shell 表示まで自動確認できる |
 | [ ] | RT-29 | framebuffer dump または比較用スクリーンショット経路を用意する | RT-28 | 見た目差分を機械的に確認できる |

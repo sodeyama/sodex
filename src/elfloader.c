@@ -32,7 +32,9 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
     current = task;
   int fd = open_env(filename, O_RDWR, 0);
   if (fd == FS_OPEN_FAIL) {
-    _kprintf("%s: file open error for '%s'\n", __func__, filename);
+    /* 相対コマンドの未検出は shell 側で整形して表示する。 */
+    if (filename != NULL && filename[0] == '/')
+      _kprintf("%s: file open error for '%s'\n", __func__, filename);
     return ELF_FAIL;
   }
   ext3_inode* inode = FD_TOINODE(fd, current);

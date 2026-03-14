@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
+TESTS = test_lib test_memb test_memory test_vga test_key test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
 
 .PHONY: all clean test
 
@@ -68,11 +68,24 @@ test_memory_string.o: $(SRC)/lib/string.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
 
 # VGA _kvsnprintf format test
-test_vga: test_vga.c test_vga_vga.o
-	$(CC) $(CFLAGS) -o $@ test_vga.c test_vga_vga.o
+test_vga: test_vga.c test_vga_vga.o test_vga_console.o test_vga_vga_text_backend.o
+	$(CC) $(CFLAGS) -o $@ test_vga.c test_vga_vga.o test_vga_console.o test_vga_vga_text_backend.o
 
 test_vga_vga.o: $(SRC)/vga.c
-	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_vga_console.o: $(SRC)/display/console.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_vga_vga_text_backend.o: $(SRC)/display/vga_text_backend.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# Keyboard event/input adapter tests
+test_key: test_key.c test_key_key.o
+	$(CC) $(CFLAGS) -o $@ test_key.c test_key_key.o
+
+test_key_key.o: $(SRC)/key.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
 
 # ext3fs bitmap/parse tests (standalone, no ext3fs.c dependency)
 test_ext3fs: test_ext3fs.c

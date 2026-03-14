@@ -35,6 +35,7 @@ PRIVATE void sys_write(int fd, const void* buf, size_t count);
 PRIVATE void sys_close(int fd);
 PRIVATE int sys_getdentry();
 PRIVATE int sys_getpstat();
+PRIVATE int sys_getkeyevent(struct key_event *event);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -110,6 +111,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_GETPSTAT:
     ret = sys_getpstat();
+    break;
+
+  case SYS_CALL_GETKEYEVENT:
+    ret = sys_getkeyevent((struct key_event *)p1);
     break;
 
   case SYS_CALL_BRK:
@@ -271,6 +276,21 @@ PRIVATE int sys_getdentry()
 PRIVATE int sys_getpstat()
 {
   return (int)current;
+}
+
+PRIVATE int sys_getkeyevent(struct key_event *event)
+{
+  struct key_event next_event;
+
+  if (event == NULL) {
+    return 0;
+  }
+  if (key_pop_event(&next_event) == FALSE) {
+    return 0;
+  }
+
+  memcpy(event, &next_event, sizeof(struct key_event));
+  return 1;
 }
 
 PRIVATE int sys_send(char* buf)

@@ -17,12 +17,6 @@
 #include <sys/types.h>
 #include <stdarg.h>
 
-#define SCREEN_WIDTH    80
-#define SCREEN_HEIGHT   25
-#define VRAMMAX         2080 // SCREEN*(SCREEN_HEIGHT+1)
-
-#define VRAM    ((char *)0xc00b8000)
-
 /* VGA text-mode color attributes */
 #define VGA_COLOR_GREEN   0x02
 #define VGA_COLOR_CYAN    0x30
@@ -41,6 +35,8 @@ PUBLIC void screen_scrollup();
 PUBLIC void clr_screen();
 PUBLIC void init_screen();
 PUBLIC void screen_pointset(int x, int y);
+PUBLIC int screen_cols(void);
+PUBLIC int screen_rows(void);
 
 PUBLIC void screen_save_prompt();
 PUBLIC void print_registers();

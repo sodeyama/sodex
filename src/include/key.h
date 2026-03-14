@@ -77,15 +77,33 @@
 #define KEY_SHIFT           0x0F
 
 #define KEY_BUF 64
+#define KEY_EVENT_BUF 64
 
-struct stdin_list {
-  struct stdin_list* next;
-  char buf[KEY_BUF+1];
-  int nums;
+#define KEY_SCANCODE_EXTENDED    0xE0
+#define KEY_SCANCODE_RELEASE     0x80
+#define KEY_SCANCODE_LEFT_CTRL   0x1D
+#define KEY_SCANCODE_LEFT_ALT    0x38
+#define KEY_SCANCODE_LEFT_SHIFT  0x2A
+#define KEY_SCANCODE_RIGHT_SHIFT 0x36
+
+#define KEY_MOD_SHIFT 0x01
+#define KEY_MOD_CTRL  0x02
+#define KEY_MOD_ALT   0x04
+
+#define KEY_EVENT_RELEASE 0x01
+#define KEY_EVENT_EXTENDED 0x02
+
+struct key_event {
+  u_int8_t scancode;
+  u_int8_t ascii;
+  u_int8_t modifiers;
+  u_int8_t flags;
 };
 
 PUBLIC char get_keymap(u_int8_t c);
 PUBLIC char get_shiftkeymap(u_int8_t c);
+PUBLIC char key_handle_scancode(u_int8_t c);
+PUBLIC int key_pop_event(struct key_event *event);
 PUBLIC char set_stdin(u_int8_t c);
 PUBLIC char* get_stdin(char* tobuf);
 

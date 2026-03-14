@@ -74,4 +74,20 @@
 #define KEY_F11             0x00
 #define KEY_F12             0x00
 
+#define KEY_EVENT_RELEASE 0x01
+#define KEY_EVENT_EXTENDED 0x02
+
+#define KEY_MOD_SHIFT 0x01
+#define KEY_MOD_CTRL  0x02
+#define KEY_MOD_ALT   0x04
+
+struct key_event {
+  u_int8_t scancode;
+  u_int8_t ascii;
+  u_int8_t modifiers;
+  u_int8_t flags;
+};
+
+int getkeyevent(struct key_event *event);
+
 #endif /* _KEY_H */

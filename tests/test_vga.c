@@ -16,6 +16,18 @@ typedef uint32_t u_int32_t;
 
 /* Function under test */
 extern int _kvsnprintf(char *buf, int size, const char *fmt, va_list ap);
+extern void _kputc(char c);
+extern void screen_pointset(int x, int y);
+extern void screen_setcolor(char color);
+extern void screen_save_prompt(void);
+extern int screen_cols(void);
+extern int screen_rows(void);
+extern void test_vga_reset_console(void);
+extern char test_vga_peek_char(int x, int y);
+extern char test_vga_peek_color(int x, int y);
+
+#define KEY_BACK 0x08
+#define VGA_COLOR_CYAN 0x30
 
 /* Helper to call _kvsnprintf with variadic args */
 static int test_snprintf(char *buf, int size, const char *fmt, ...)
@@ -157,6 +169,54 @@ TEST(format_return_value) {
     ASSERT_EQ(ret, 3);
 }
 
+TEST(console_write_single_char) {
+    test_vga_reset_console();
+    _kputc('A');
+    ASSERT_EQ(test_vga_peek_char(0, 0), 'A');
+}
+
+TEST(console_write_newline) {
+    test_vga_reset_console();
+    _kputc('A');
+    _kputc('\n');
+    _kputc('B');
+    ASSERT_EQ(test_vga_peek_char(0, 0), 'A');
+    ASSERT_EQ(test_vga_peek_char(0, 1), 'B');
+}
+
+TEST(console_wraps_next_line) {
+    test_vga_reset_console();
+    screen_pointset(screen_cols() - 1, 0);
+    _kputc('Z');
+    _kputc('Q');
+    ASSERT_EQ(test_vga_peek_char(screen_cols() - 1, 0), 'Z');
+    ASSERT_EQ(test_vga_peek_char(0, 1), 'Q');
+}
+
+TEST(console_scrolls_last_line) {
+    test_vga_reset_console();
+    screen_pointset(0, screen_rows() - 1);
+    _kputc('A');
+    _kputc('\n');
+    _kputc('B');
+    ASSERT_EQ(test_vga_peek_char(0, screen_rows() - 2), 'A');
+    ASSERT_EQ(test_vga_peek_char(0, screen_rows() - 1), 'B');
+}
+
+TEST(console_honors_prompt_for_backspace) {
+    test_vga_reset_console();
+    screen_save_prompt();
+    _kputc(KEY_BACK);
+    ASSERT_EQ(test_vga_peek_char(0, 0), 0);
+}
+
+TEST(console_uses_current_color) {
+    test_vga_reset_console();
+    screen_setcolor(VGA_COLOR_CYAN);
+    _kputc('C');
+    ASSERT_EQ(test_vga_peek_color(0, 0), VGA_COLOR_CYAN);
+}
+
 int main(void)
 {
     printf("=== vga _kvsnprintf tests ===\n");
@@ -186,6 +246,13 @@ int main(void)
 
     RUN_TEST(format_truncation);
     RUN_TEST(format_return_value);
+
+    RUN_TEST(console_write_single_char);
+    RUN_TEST(console_write_newline);
+    RUN_TEST(console_wraps_next_line);
+    RUN_TEST(console_scrolls_last_line);
+    RUN_TEST(console_honors_prompt_for_backspace);
+    RUN_TEST(console_uses_current_color);
 
     TEST_REPORT();
 }

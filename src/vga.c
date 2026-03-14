@@ -18,66 +18,44 @@ typedef uint16_t u_int16_t;
 typedef uint32_t u_int32_t;
 #define PUBLIC
 #define PRIVATE static
+#define VGA_COLOR_DEFAULT 0x02
 #else
 #include <kernel.h>
 #include <vga.h>
-#include <key.h>
 #include <stdarg.h>
-#include <descriptor.h>
 #endif
 
-#ifndef TEST_BUILD
-PRIVATE int screenX = 0;
-PRIVATE int screenY = 0;
-PRIVATE int promptX = 0;
-PRIVATE int promptY = 0;
-//char gColor = 0x7;
-//char gColor = 0x9a;
-//char gColor = 0x30;
-char gColor = VGA_COLOR_DEFAULT;
+#include <display/console.h>
+#include <display/vga_text_backend.h>
 
-PUBLIC void _pos_putc(int x, int y, char c)
+PRIVATE struct console_state kernel_console;
+PRIVATE struct display_backend vga_console_backend;
+PRIVATE int console_initialized = 0;
+
+PRIVATE struct console_state *get_kernel_console()
 {
-  _poscolor_printc(x, y, gColor, c);
+  if (console_initialized == 0) {
+    vga_text_backend_init(&vga_console_backend);
+    console_init(&kernel_console, &vga_console_backend, VGA_COLOR_DEFAULT);
+    console_initialized = 1;
+  }
+  return &kernel_console;
 }
 
 PUBLIC void _kputc(char c)
 {
-  if (c == '\n') {
-    screenX = 0;
-    if (screenY + 2> SCREEN_HEIGHT) {
-      screen_scrollup();
-    } else
-      screenY++;
-    return;
-  } else if (c == KEY_BACK) {
-    if (screenY > promptY || (screenY == promptY && screenX > promptX)) {
-      _poscolor_printc(--screenX, screenY, gColor, 0);
-    }
-    return;
-  }
-
-  _poscolor_printc(screenX, screenY, gColor, c);
-  
-  if (screenX >= SCREEN_WIDTH-1) {
-    screenY++;
-    if (screenY + 1 > SCREEN_HEIGHT) {
-      screen_scrollup();
-    }
-  }
-  screenX = (screenX + 1)%SCREEN_WIDTH;
+  console_write_char(get_kernel_console(), c);
 }
 
 PUBLIC void _kputs(char *str)
 {
-  char *p = str;
-  while (*p != '\0') {
-    _kputc(*p);
-    p++;
-  }
+  console_write(get_kernel_console(), str);
 }
 
-#endif /* !TEST_BUILD */
+PUBLIC void _pos_putc(int x, int y, char c)
+{
+  console_putc_at(get_kernel_console(), x, y, c);
+}
 
 /*
  * _snprintb: Write hex representation of a byte to buffer.
@@ -178,7 +156,6 @@ PUBLIC int _kvsnprintf(char *buf, int size, const char *fmt, va_list ap)
   return pos;
 }
 
-#ifndef TEST_BUILD
 PUBLIC void _kprintf(char *fmt, ...)
 {
   char buf[256];
@@ -189,9 +166,7 @@ PUBLIC void _kprintf(char *fmt, ...)
   va_end(ap);
   _kputs(buf);
 }
-#endif
 
-#ifndef TEST_BUILD
 PUBLIC void _kprintb(u_int8_t c)
 {
   char high, low;
@@ -232,38 +207,39 @@ PUBLIC void _kprintb32(u_int32_t c)
 
 PUBLIC void clr_screen()
 {
-  int x, y;
-
-  for (y=0; y <= SCREEN_HEIGHT; ++y)
-    for (x=0; x <= SCREEN_WIDTH; ++x)
-      _pos_putc(x, y, 0);
+  console_clear(get_kernel_console());
 }
 
 PUBLIC void screen_scrollup()
 {
-  int i, j;
-  for (i = SCREEN_WIDTH, j=0; i <= VRAMMAX; ++i, ++j)
-    VRAM[2 * j] = VRAM[2 * i];
-  for (i = 0; i < SCREEN_WIDTH*2; ++i)
-    VRAM[2*SCREEN_WIDTH*SCREEN_HEIGHT+i] = 0;
-  screenY = SCREEN_HEIGHT - 1;
-  if (promptY > 0)
-    promptY--;
+  console_scroll_up(get_kernel_console());
 }
 
 PUBLIC void screen_pointset(int x, int y)
 {
-  screenX = x;
-  screenY = y;
+  console_set_cursor(get_kernel_console(), x, y);
+}
+
+PUBLIC int screen_cols(void)
+{
+  return get_kernel_console()->backend->cols;
+}
+
+PUBLIC int screen_rows(void)
+{
+  return get_kernel_console()->backend->rows;
 }
 
 PUBLIC void screen_setcolor(char color)
 {
-  gColor = color;
+  console_set_color(get_kernel_console(), color);
 }
 
 PUBLIC void init_screen()
 {
+  struct console_state *console = get_kernel_console();
+
+  console_reset(console);
   clr_screen();
   _kputs("Sodex  version 0.0.2 {2007/10/28}                  "
          "Copyright (C) 2007, Sodeyama\n");
@@ -273,15 +249,40 @@ PUBLIC void init_screen()
 
 PUBLIC void screen_save_prompt()
 {
-  promptX = screenX;
-  promptY = screenY;
+  console_save_prompt(get_kernel_console());
 }
 
 PUBLIC void debug_print()
 {
-  _pos_putc(0, 74, (char)(screenX>>24));
-  _pos_putc(1, 75, (char)(screenX>>16));
-  _pos_putc(2, 76, (char)(screenX>>8));
-  _pos_putc(3, 77, (char)screenX);
+  struct console_state *console = get_kernel_console();
+  int last_row = screen_rows() - 1;
+
+  if (last_row < 0) {
+    last_row = 0;
+  }
+
+  _pos_putc(0, last_row, (char)(console->cursor_x >> 24));
+  _pos_putc(1, last_row, (char)(console->cursor_x >> 16));
+  _pos_putc(2, last_row, (char)(console->cursor_x >> 8));
+  _pos_putc(3, last_row, (char)console->cursor_x);
 }
-#endif /* !TEST_BUILD */
+
+#ifdef TEST_BUILD
+PUBLIC void test_vga_reset_console(void)
+{
+  struct console_state *console = get_kernel_console();
+
+  console_reset(console);
+  console_clear(console);
+}
+
+PUBLIC char test_vga_peek_char(int x, int y)
+{
+  return vga_text_backend_peek_char(x, y);
+}
+
+PUBLIC char test_vga_peek_color(int x, int y)
+{
+  return vga_text_backend_peek_color(x, y);
+}
+#endif

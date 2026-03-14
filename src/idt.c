@@ -309,30 +309,17 @@ PUBLIC void i20h_pictimer()
 
 PUBLIC void i21h_keyhandler()
 {
-  static int shift_flag = FALSE;
   u_int8_t a;
   char c;
 
   a = in8(KB_DATA_PORT);
-  if (a <= 127) {
-    c = get_keymap(a);
-    if (c == KEY_ENTER) {
-      _kputc('\n');
-      set_stdin(a);
-    } else if (c == KEY_BACK) {
-      _kputc(KEY_BACK);
-      set_stdin(a);
-    } else if (c == KEY_SHIFT) {
-      shift_flag = TRUE;
-    } else {
-      if (shift_flag == TRUE) {
-        c = get_shiftkeymap(a);
-        _kputc(c);
-      } else {
-        _kputc(c);
-      }
-      set_stdin(a);
-    } 
+  c = key_handle_scancode(a);
+  if (c == KEY_ENTER) {
+    _kputc('\n');
+  } else if (c == KEY_BACK) {
+    _kputc(KEY_BACK);
+  } else if (c != KEY_NULL) {
+    _kputc(c);
   }
   pic_eoi(IRQ_KEY);
 }

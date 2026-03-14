@@ -22,6 +22,8 @@ VRAM_ADDRESS = 0xc00b8000
 .global enableInterrupt, disableInterrupt, is_enableInterrupt
 .global _poscolor_printc, lgdt, lidt, ltr, procjmp
 .global memset, memcpy      
+.extern vga_text_backend_cols
+.extern vga_text_backend_vram
 
 enableInterrupt:
         sti
@@ -127,15 +129,11 @@ _poscolor_printc:
         pushl   %ebp
         movl    %esp, %ebp
         movl    0xc(%ebp), %eax
-        movw    $80, %cx
-        mulw    %cx             # eax = y * 80
-        movw    $2, %cx
-        mulw    %cx             # eax = y * 80 * 2
-
+        imull   vga_text_backend_cols, %eax # eax = y * cols
         movl    0x8(%ebp), %ebx
         addl    %ebx, %eax
-        addl    %ebx, %eax
-        addl    $VRAM_ADDRESS, %eax
+        addl    %eax, %eax      # eax = (y * cols + x) * 2
+        addl    vga_text_backend_vram, %eax
         movb    0x14(%ebp), %dl # set char
         movb    0x10(%ebp), %dh # set color
         movw    %dx, (%eax)
@@ -479,4 +477,3 @@ switch_to:
         popl    %ebp
         ret
 */
-

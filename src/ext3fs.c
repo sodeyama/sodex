@@ -684,7 +684,8 @@ PRIVATE void __read_dentry(ext3_inode* inode, ext3_dentry* parent)
           return;
         }
         memset(dentry->d_name, 0, EXT3_NAME_LEN);
-        memcpy(dentry->d_name, p+8, (p[6]%4 == 0 ? p[6] : p[6]+4-p[6]%4));
+        memcpy(dentry->d_name, p+8, dentry->d_namelen);
+        dentry->d_name[dentry->d_namelen] = '\0';
         dentry->d_flags = dentry->d_inode->i_flags;
         dentry->d_parent = parent;
         init_dentry_lists(dentry);

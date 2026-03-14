@@ -67,10 +67,9 @@ def render_glyph(font: ImageFont.FreeTypeFont, ch: str,
 
 def parse_codepoint_ranges(spec: str) -> list[int]:
     seen: set[int] = set()
-    codepoints: list[int] = []
 
     if not spec:
-        return codepoints
+        return []
 
     for part in spec.split(","):
         item = part.strip()
@@ -86,10 +85,8 @@ def parse_codepoint_ranges(spec: str) -> list[int]:
         if last < first:
             first, last = last, first
         for codepoint in range(first, last + 1):
-            if codepoint not in seen:
-                seen.add(codepoint)
-                codepoints.append(codepoint)
-    return codepoints
+            seen.add(codepoint)
+    return sorted(seen)
 
 
 def format_row_values(rows: list[int], row_hex_width: int) -> str:

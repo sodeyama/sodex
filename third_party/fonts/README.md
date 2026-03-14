@@ -1,7 +1,7 @@
 # 外部フォント
 
 `sodex` の rich terminal 向けフォント生成では、`UDEV Gothic` を元フォントとして使う。
-生の `ttf` は repo に含めず、生成済みの 8x16 bitmap header だけを tree に置く。
+再生成を再現できるように、元の `ttf` と生成済み bitmap header を repo に含める。
 
 ## 元フォント
 
@@ -14,7 +14,7 @@
 
 1. upstream release から `UDEVGothic_v2.1.0.zip` を取得する
 2. `UDEVGothic-Regular.ttf` をこの directory に配置する
-3. repo root で `make -C src regen-font8x16` を実行する
+3. repo root で `make -C src regen-fonts` を実行する
 
 ## ライセンス
 

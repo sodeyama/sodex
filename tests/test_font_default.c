@@ -26,6 +26,14 @@ TEST(wide_lookup_finds_hiragana) {
     ASSERT_EQ(glyph[3], 0x0600);
 }
 
+TEST(wide_lookup_finds_demo_kanji) {
+    const unsigned int *glyph = font_default_wide_glyph(0x65e5);
+
+    ASSERT_NOT_NULL(glyph);
+    ASSERT_EQ(font_default_glyph_width(0x65e5), 2);
+    ASSERT_EQ(glyph[3], 0x3ff0);
+}
+
 TEST(missing_wide_glyph_falls_back_to_single_cell) {
     ASSERT_NULL(font_default_wide_glyph(0x4e00));
     ASSERT_EQ(font_default_glyph_width(0x4e00), 1);
@@ -38,6 +46,7 @@ int main(void)
     RUN_TEST(ascii_metrics_match_default_pack);
     RUN_TEST(lowercase_i_keeps_visible_dot);
     RUN_TEST(wide_lookup_finds_hiragana);
+    RUN_TEST(wide_lookup_finds_demo_kanji);
     RUN_TEST(missing_wide_glyph_falls_back_to_single_cell);
 
     TEST_REPORT();

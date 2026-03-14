@@ -1,0 +1,12 @@
+cols=5
+rows=2
+cursor=2,0
+input=hello\nworld\x1b[2J\x1b[HOK
+text=OK...
+fg=77777
+bg=00000
+attr=00000
+text=.....
+fg=77777
+bg=00000
+attr=00000

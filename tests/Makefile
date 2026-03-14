@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_vt_parser test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
 
 .PHONY: all clean test
 
@@ -117,6 +117,10 @@ test_vt_parser_surface.o: $(SRC)/usr/lib/libc/terminal_surface.c
 
 test_vt_parser_parser.o: $(SRC)/usr/lib/libc/vt_parser.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# VT fixture tests
+test_vt_fixtures: test_vt_fixtures.c test_vt_parser_surface.o test_vt_parser_parser.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vt_fixtures.c test_vt_parser_surface.o test_vt_parser_parser.o
 
 # ext3fs bitmap/parse tests (standalone, no ext3fs.c dependency)
 test_ext3fs: test_ext3fs.c

@@ -77,7 +77,13 @@ int cell_renderer_init(struct cell_renderer *renderer,
     return -1;
 
   memset(renderer, 0, sizeof(*renderer));
-  renderer->fb = *info;
+  renderer->fb.available = info->available;
+  renderer->fb.width = info->width;
+  renderer->fb.height = info->height;
+  renderer->fb.pitch = info->pitch;
+  renderer->fb.bpp = info->bpp;
+  renderer->fb.base = info->base;
+  renderer->fb.size = info->size;
   renderer->cols = info->width / FONT8X16_WIDTH;
   renderer->rows = info->height / FONT8X16_HEIGHT;
   if (renderer->cols <= 0 || renderer->rows <= 0)

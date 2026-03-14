@@ -1,0 +1,12 @@
+cols=8
+rows=2
+cursor=1,1
+input=abcd\x1b[sXY\x1b[u\x1b[2D\x1b[K\n\x1b[31mZ
+text=ab......
+fg=77777777
+bg=00000000
+attr=00000000
+text=Z.......
+fg=47777777
+bg=00000000
+attr=00000000

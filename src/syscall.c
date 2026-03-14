@@ -432,7 +432,13 @@ PRIVATE int sys_get_fb_info(struct fb_info *info)
     return -1;
 
   kernel_info = fb_get_info();
-  *info = *kernel_info;
+  info->available = kernel_info->available;
+  info->width = kernel_info->width;
+  info->height = kernel_info->height;
+  info->pitch = kernel_info->pitch;
+  info->bpp = kernel_info->bpp;
+  info->base = kernel_info->base;
+  info->size = kernel_info->size;
   return 0;
 }
 

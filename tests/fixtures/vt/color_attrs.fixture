@@ -1,0 +1,8 @@
+cols=5
+rows=1
+cursor=3,0
+input=\x1b[1;34;43mA\x1b[7mB\x1b[0mC
+text=ABC..
+fg=11777
+bg=66000
+attr=13000

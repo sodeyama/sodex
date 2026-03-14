@@ -1,0 +1,12 @@
+cols=6
+rows=2
+cursor=1,1
+input=ab\nc
+text=ab....
+fg=777777
+bg=000000
+attr=000000
+text=c.....
+fg=777777
+bg=000000
+attr=000000

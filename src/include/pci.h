@@ -93,5 +93,8 @@ PUBLIC void init_pci();
 PUBLIC struct pci_info* search_pci_device();
 PUBLIC u_int32_t pci_read_config(u_int8_t bus, u_int8_t device,
                                  u_int8_t function, u_int8_t reg, u_int8_t size);
+PUBLIC void pci_write_config(u_int8_t bus, u_int8_t device,
+                             u_int8_t function, u_int8_t reg, u_int8_t size,
+                             u_int32_t value);
 
 #endif /* pci.h */

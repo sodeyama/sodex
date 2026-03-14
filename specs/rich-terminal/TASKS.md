@@ -26,11 +26,11 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-06 | QEMU/Bochs 向け graphics device の検出と mode set を実装する | RT-03 | graphics mode に入れるか、失敗時に VGA text へ戻せる |
-| [ ] | RT-07 | `fb_info`, `putpixel`, `fillrect`, `blit`, `flush` を持つ framebuffer 層を作る | RT-06 | 単色塗りつぶしや矩形描画ができる |
-| [ ] | RT-08 | 8x16 系固定幅フォントと glyph 描画ルーチンを組み込む | RT-07 | 任意セル位置に ASCII 文字を描ける |
-| [ ] | RT-09 | `term_cell` / `terminal_surface` / dirty tracking を実装する | RT-08 | 可変列数の surface 更新とスクロールが pure logic で扱える |
-| [ ] | RT-10 | surface から framebuffer への cell renderer を作る | RT-09 | 80x25 を超える列数で文字列を描画できる |
+| [x] | RT-06 | QEMU/Bochs 向け graphics device の検出と mode set を実装する | RT-03 | graphics mode に入れるか、失敗時に VGA text へ戻せる |
+| [x] | RT-07 | `fb_info`, `putpixel`, `fillrect`, `blit`, `flush` を持つ framebuffer 層を作る | RT-06 | 単色塗りつぶしや矩形描画ができる |
+| [x] | RT-08 | 8x16 系固定幅フォントと glyph 描画ルーチンを組み込む | RT-07 | 任意セル位置に ASCII 文字を描ける |
+| [x] | RT-09 | `term_cell` / `terminal_surface` / dirty tracking を実装する | RT-08 | 可変列数の surface 更新とスクロールが pure logic で扱える |
+| [x] | RT-10 | surface から framebuffer への cell renderer を作る | RT-09 | 80x25 を超える列数で文字列を描画できる |
 
 ## M2: Shell と terminal の分離
 
@@ -47,7 +47,7 @@
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
 | [x] | RT-16 | `/usr/bin/term` の build、image 収録、起動骨格を作る | RT-10, RT-15 | `term` バイナリが build できる |
-| [ ] | RT-17 | `term` から framebuffer と input event を初期化し、列数・行数を計算する | RT-16 | terminal 側で viewport が確定する |
+| [x] | RT-17 | `term` から framebuffer と input event を初期化し、列数・行数を計算する | RT-16 | terminal 側で viewport が確定する |
 | [x] | RT-18 | `term` が PTY master を開き、子として `eshell` を起動する | RT-14, RT-16 | shell 出力を読み込める |
 | [x] | RT-19 | `term` のメインループで PTY 読み取り、入力送信、damage redraw を回す | RT-17, RT-18 | shell 出力が framebuffer 上に見える |
 | [x] | RT-20 | scrollback リングと全画面再描画経路を追加する | RT-19 | 長文出力後も履歴を保持できる |

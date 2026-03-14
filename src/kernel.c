@@ -112,6 +112,10 @@ PUBLIC void start_kernel()
   _kputs(" KERNEL: SETUP PAGING\n");
   _kputs(" KERNEL: SETUP PCI\n");
   init_pci();
+  if (screen_try_enable_graphics())
+    _kputs(" KERNEL: SETUP GRAPHICS\n");
+  else
+    _kputs(" KERNEL: GRAPHICS FALLBACK VGA TEXT\n");
 #ifdef USB_DEVICE
   ata_init();
   rawdev.raw_read = ata_read;

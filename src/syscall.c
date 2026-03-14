@@ -28,6 +28,7 @@
 #include <ether.h>
 #include <socket.h>
 #include <tty.h>
+#include <fb.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_read(int fd, void* buf, size_t count);
@@ -48,6 +49,7 @@ PRIVATE void sys_console_set_cursor(int x, int y);
 PRIVATE void sys_console_clear(void);
 PRIVATE int sys_get_winsize(int fd, struct winsize *winsize);
 PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize);
+PRIVATE int sys_get_fb_info(struct fb_info *info);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -167,6 +169,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_SET_WINSIZE:
     ret = sys_set_winsize((int)p1, (const struct winsize *)p2);
+    break;
+
+  case SYS_CALL_GET_FB_INFO:
+    ret = sys_get_fb_info((struct fb_info *)p1);
     break;
 
   case SYS_CALL_BRK:
@@ -416,6 +422,18 @@ PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize)
 
   tty = tty_lookup_file(current->files, fd);
   return tty_set_winsize(tty, winsize->cols, winsize->rows);
+}
+
+PRIVATE int sys_get_fb_info(struct fb_info *info)
+{
+  const struct fb_info *kernel_info;
+
+  if (info == NULL)
+    return -1;
+
+  kernel_info = fb_get_info();
+  *info = *kernel_info;
+  return 0;
 }
 
 PRIVATE int sys_send(char* buf)

@@ -31,6 +31,8 @@ PUBLIC void create_kernel_page(u_int32_t* pg_dir);
 PUBLIC void* create_process_page(u_int32_t* pg_dir, size_t size);
 PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
 							  size_t size);
+PUBLIC void pg_set_kernel_4m_page(u_int32_t virt_addr, u_int32_t phys_addr,
+                                  u_int32_t flags);
 PUBLIC void init_paging();
 PUBLIC void pg_enable_pse();
 PUBLIC void pg_disable_pse();
@@ -38,6 +40,7 @@ PUBLIC void pg_enable_paging();
 PUBLIC void pg_disable_paging();
 PUBLIC void pg_load_cr3(u_int32_t* pg_dir);
 PUBLIC u_int32_t pg_get_cr3();
-PUBLIC void pg_flush_tbl();
+PUBLIC void pg_flush_tlb();
+#define pg_flush_tbl pg_flush_tlb
 
 #endif 

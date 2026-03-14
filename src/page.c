@@ -15,6 +15,7 @@
 
 PRIVATE void delete_first_page();
 PRIVATE u_int32_t get_need_blocks(size_t need_size, size_t size);
+PRIVATE u_int32_t kernel_extra_pdes[PAGE_DIR_SIZE];
 
 PUBLIC void init_paging()
 {
@@ -34,14 +35,19 @@ PUBLIC void create_kernel_page(u_int32_t* pg_dir)
 {
   u_int32_t pte;
   int pos;
-  for (pos = 0; pos < PGDIR_KERNEL_END; pos++) {
-    if (pos < PGDIR_KERNEL_START) {
-      pg_dir[pos] = 0;
-    } else {
+  for (pos = 0; pos < PAGE_DIR_SIZE; pos++) {
+    if (pos >= PGDIR_KERNEL_START && pos < PGDIR_KERNEL_END) {
       pte = (pos - PGDIR_KERNEL_START) * PSE_PAGE_SIZE;
       pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US|PAGE_PSE|PAGE_GLOBAL);
       pg_dir[pos] = pte;
+    } else {
+      pg_dir[pos] = 0;
     }
+  }
+
+  for (pos = 0; pos < PAGE_DIR_SIZE; pos++) {
+    if (kernel_extra_pdes[pos] != 0)
+      pg_dir[pos] = kernel_extra_pdes[pos];
   }
 }
 
@@ -123,6 +129,23 @@ PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
   }
 
   return (void*)new_start_vaddr;
+}
+
+PUBLIC void pg_set_kernel_4m_page(u_int32_t virt_addr, u_int32_t phys_addr,
+                                  u_int32_t flags)
+{
+  u_int32_t pos;
+  u_int32_t pte;
+
+  pos = virt_addr / PSE_PAGE_SIZE;
+  if (pos >= PAGE_DIR_SIZE)
+    return;
+
+  pte = (phys_addr & ~(PSE_PAGE_SIZE - 1));
+  pte |= (flags | PAGE_PSE);
+  kernel_extra_pdes[pos] = pte;
+  pg_dir[pos] = pte;
+  pg_flush_tlb();
 }
 
 PRIVATE u_int32_t get_need_blocks(size_t need_size, size_t size)

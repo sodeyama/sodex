@@ -23,6 +23,8 @@ typedef uint32_t u_int32_t;
 #include <kernel.h>
 #include <vga.h>
 #include <stdarg.h>
+#include <fb.h>
+#include <display/fb_backend.h>
 #endif
 
 #include <display/console.h>
@@ -30,6 +32,9 @@ typedef uint32_t u_int32_t;
 
 PRIVATE struct console_state kernel_console;
 PRIVATE struct display_backend vga_console_backend;
+#ifndef TEST_BUILD
+PRIVATE struct display_backend fb_console_backend;
+#endif
 PRIVATE int console_initialized = 0;
 
 PRIVATE struct console_state *get_kernel_console()
@@ -40,6 +45,26 @@ PRIVATE struct console_state *get_kernel_console()
     console_initialized = 1;
   }
   return &kernel_console;
+}
+
+PUBLIC int screen_try_enable_graphics(void)
+{
+#ifdef TEST_BUILD
+  return FALSE;
+#else
+  char color;
+
+  color = get_kernel_console()->color;
+  if (fb_init() < 0)
+    return FALSE;
+  if (fb_backend_init(&fb_console_backend) < 0)
+    return FALSE;
+
+  console_init(&kernel_console, &fb_console_backend, color);
+  console_initialized = 1;
+  console_clear(&kernel_console);
+  return TRUE;
+#endif
 }
 
 PUBLIC void _kputc(char c)

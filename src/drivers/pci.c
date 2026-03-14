@@ -80,6 +80,37 @@ PUBLIC u_int32_t pci_read_config(u_int8_t bus, u_int8_t device,
   return result;
 }
 
+PUBLIC void pci_write_config(u_int8_t bus, u_int8_t device,
+                             u_int8_t function, u_int8_t reg, u_int8_t size,
+                             u_int32_t value)
+{
+  pci_param param;
+
+  param.p.enabled = 1;
+  param.p.none = 0;
+  param.p.reserve = 0;
+  param.p.bus = bus;
+  param.p.device = device;
+  param.p.function = function;
+  param.p.reg = ((reg & ~3) >> 2);
+  out32(PCI_CONF_ADDR_PORT, param.command);
+  switch (size) {
+  case 1:
+    out8(PCI_CONF_DATA_PORT + (reg & 3), (u_int8_t)value);
+    break;
+  case 2:
+    out16(PCI_CONF_DATA_PORT + (reg & 3), (u_int16_t)value);
+    break;
+  case 4:
+    out32(PCI_CONF_DATA_PORT, value);
+    break;
+  default:
+    break;
+  }
+  param.p.enabled = 0;
+  out32(PCI_CONF_ADDR_PORT, param.command);
+}
+
 PRIVATE void regist_pci_devices()
 {
   u_int8_t func_num = 0;

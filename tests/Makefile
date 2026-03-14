@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_vt_parser test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_vt_parser test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
 
 .PHONY: all clean test
 
@@ -99,6 +99,13 @@ test_terminal_surface: test_terminal_surface.c test_terminal_surface_surface.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_terminal_surface.c test_terminal_surface_surface.o
 
 test_terminal_surface_surface.o: $(SRC)/usr/lib/libc/terminal_surface.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Cell renderer tests
+test_cell_renderer: test_cell_renderer.c test_cell_renderer_renderer.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_cell_renderer.c test_cell_renderer_renderer.o
+
+test_cell_renderer_renderer.o: $(SRC)/usr/lib/libc/cell_renderer.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # VT parser tests

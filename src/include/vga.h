@@ -34,6 +34,7 @@ PUBLIC void _kprintb32(u_int32_t c);
 PUBLIC void screen_scrollup();
 PUBLIC void clr_screen();
 PUBLIC void init_screen();
+PUBLIC int screen_try_enable_graphics(void);
 PUBLIC void screen_pointset(int x, int y);
 PUBLIC int screen_cols(void);
 PUBLIC int screen_rows(void);

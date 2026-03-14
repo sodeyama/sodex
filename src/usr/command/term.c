@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cell_renderer.h>
 #include <console.h>
+#include <fb.h>
 #include <key.h>
 #include <terminal_surface.h>
 #include <tty.h>
@@ -12,12 +14,20 @@
 
 struct term_app {
   int master_fd;
+  int use_framebuffer;
+  int cursor_valid;
+  int last_cursor_col;
+  int last_cursor_row;
+  struct fb_info fb;
+  struct cell_renderer renderer;
   struct terminal_surface surface;
   struct vt_parser parser;
   char scrollback[TERM_SCROLLBACK_SIZE];
   int scroll_head;
   int scroll_len;
 };
+
+PRIVATE struct term_app term_state;
 
 PRIVATE int term_init(struct term_app *app);
 PRIVATE int sync_viewport(struct term_app *app);
@@ -33,50 +43,51 @@ PRIVATE void replay_scrollback(struct term_app *app);
 
 int main(int argc, char** argv)
 {
-  struct term_app app;
+  struct term_app *app = &term_state;
   char *shell_argv[2];
 
   (void)argc;
   (void)argv;
-  memset(&app, 0, sizeof(struct term_app));
+  memset(app, 0, sizeof(struct term_app));
 
-  app.master_fd = openpty();
-  if (app.master_fd < 0) {
+  app->master_fd = openpty();
+  if (app->master_fd < 0) {
     write(1, "term: openpty failed\n", 21);
     return execve("/usr/bin/eshell", 0, 0);
   }
 
   set_input_mode(INPUT_MODE_RAW);
-  if (term_init(&app) < 0) {
+  if (term_init(app) < 0) {
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: console init failed\n", 26);
     return execve("/usr/bin/eshell", 0, 0);
   }
 
-  console_clear();
-  render_surface(&app, TRUE);
+  if (app->use_framebuffer == 0)
+    console_clear();
+  render_surface(app, TRUE);
   {
     struct winsize winsize;
-    winsize.cols = app.surface.cols;
-    winsize.rows = app.surface.rows;
-    set_winsize(app.master_fd, &winsize);
+    winsize.cols = app->surface.cols;
+    winsize.rows = app->surface.rows;
+    set_winsize(app->master_fd, &winsize);
   }
 
   shell_argv[0] = "eshell";
   shell_argv[1] = NULL;
-  if (execve_pty("/usr/bin/eshell", shell_argv, app.master_fd) < 0) {
+  if (execve_pty("/usr/bin/eshell", shell_argv, app->master_fd) < 0) {
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: fallback to eshell\n", 25);
     return execve("/usr/bin/eshell", 0, 0);
   }
 
   while (TRUE) {
-    int resized = sync_viewport(&app);
-    int output = pump_master(&app);
-    int input = pump_keys(app.master_fd);
+    int resized = sync_viewport(app);
+    int output = pump_master(app);
+    int input = pump_keys(app->master_fd);
 
-    if (resized > 0 || output > 0 || terminal_surface_has_damage(&app.surface)) {
-      render_surface(&app, FALSE);
+    if (resized > 0 || output > 0 || terminal_surface_has_damage(&app->surface)) {
+      render_surface(app, FALSE);
     }
 
     if (output == 0 && input == 0) {
@@ -91,8 +102,20 @@ int main(int argc, char** argv)
 PRIVATE int term_init(struct term_app *app)
 {
   struct term_cell blank;
-  int cols = console_cols();
-  int rows = console_rows();
+  int cols = 0;
+  int rows = 0;
+
+  memset(&app->fb, 0, sizeof(app->fb));
+  if (get_fb_info(&app->fb) == 0 && app->fb.available != 0 &&
+      cell_renderer_init(&app->renderer, &app->fb) == 0) {
+    app->use_framebuffer = 1;
+    cols = app->renderer.cols;
+    rows = app->renderer.rows;
+  } else {
+    app->use_framebuffer = 0;
+    cols = console_cols();
+    rows = console_rows();
+  }
 
   if (cols <= 0)
     cols = 80;
@@ -105,6 +128,7 @@ PRIVATE int term_init(struct term_app *app)
   vt_parser_init(&app->parser, &app->surface);
   app->scroll_head = 0;
   app->scroll_len = 0;
+  app->cursor_valid = 0;
   blank = app->parser.default_pen;
   blank.ch = ' ';
   terminal_surface_reset(&app->surface, &blank);
@@ -119,6 +143,8 @@ PRIVATE int sync_viewport(struct term_app *app)
   int cols = console_cols();
   int rows = console_rows();
 
+  if (app->use_framebuffer != 0)
+    return 0;
   if (cols <= 0 || rows <= 0)
     return 0;
   if (cols == app->surface.cols && rows == app->surface.rows)
@@ -221,6 +247,55 @@ PRIVATE void render_surface(struct term_app *app, int force)
   int row;
   int col;
 
+  if (app->use_framebuffer != 0) {
+    const struct term_cell *cell;
+
+    if (force != FALSE)
+      cell_renderer_clear(&app->renderer, 0x000000);
+
+    for (row = 0; row < app->surface.rows; row++) {
+      for (col = 0; col < app->surface.cols; col++) {
+        if (force == FALSE &&
+            terminal_surface_is_dirty(&app->surface, col, row) == FALSE)
+          continue;
+
+        cell = terminal_surface_cell(&app->surface, col, row);
+        if (cell == NULL)
+          continue;
+        cell_renderer_draw_cell(&app->renderer, col, row, cell, FALSE);
+      }
+    }
+
+    if (app->cursor_valid != 0 &&
+        (app->last_cursor_col != app->surface.cursor_col ||
+         app->last_cursor_row != app->surface.cursor_row)) {
+      cell = terminal_surface_cell(&app->surface,
+                                   app->last_cursor_col,
+                                   app->last_cursor_row);
+      if (cell != NULL) {
+        cell_renderer_draw_cell(&app->renderer,
+                                app->last_cursor_col,
+                                app->last_cursor_row,
+                                cell, FALSE);
+      }
+    }
+
+    cell = terminal_surface_cell(&app->surface,
+                                 app->surface.cursor_col,
+                                 app->surface.cursor_row);
+    if (cell != NULL) {
+      cell_renderer_draw_cell(&app->renderer,
+                              app->surface.cursor_col,
+                              app->surface.cursor_row,
+                              cell, TRUE);
+    }
+    app->last_cursor_col = app->surface.cursor_col;
+    app->last_cursor_row = app->surface.cursor_row;
+    app->cursor_valid = 1;
+    terminal_surface_clear_damage(&app->surface);
+    return;
+  }
+
   for (row = 0; row < app->surface.rows; row++) {
     for (col = 0; col < app->surface.cols; col++) {
       const struct term_cell *cell;
@@ -269,6 +344,7 @@ PRIVATE void reset_surface(struct term_app *app)
 {
   struct term_cell blank = app->parser.default_pen;
   blank.ch = ' ';
+  app->cursor_valid = 0;
   vt_parser_reset(&app->parser);
   terminal_surface_reset(&app->surface, &blank);
 }

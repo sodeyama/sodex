@@ -4,6 +4,10 @@
 
 boot.ld
 
+init/bin/*
+tools/bin/*
+usr/bin/*
+
 bin/*.bin
 bin/*.log
 

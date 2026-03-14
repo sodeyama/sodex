@@ -79,31 +79,31 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-31 | ext3 の namespace 更新 helper を整理し、`unlink` / `rmdir` / `rename` の土台を分離する | RT-26 | dentry 更新と bitmap 更新の責務が見通せる |
-| [ ] | RT-32 | `ext3_unlink`, `ext3_rmdir`, `ext3_rename` と対応 syscall を実装する | RT-31 | kernel から file/dir の削除と改名が呼べる |
-| [ ] | RT-33 | userland libc wrapper と `touch`, `mkdir`, `rm`, `rmdir`, `mv` を追加する | RT-32 | shell から基本コマンドで namespace を操作できる |
-| [ ] | RT-34 | 既存 `ls`, `cat`, `cd`, `pwd` と組み合わせた CRUD フローを確認する | RT-33 | create/read/update/delete の基本導線が破綻しない |
-| [ ] | RT-35 | file CRUD の host/QEMU smoke test を追加する | RT-32, RT-34 | 新規作成、改名、削除の回帰を検知できる |
+| [x] | RT-31 | ext3 の namespace 更新 helper を整理し、`unlink` / `rmdir` / `rename` の土台を分離する | RT-26 | dentry 更新と bitmap 更新の責務が見通せる |
+| [x] | RT-32 | `ext3_unlink`, `ext3_rmdir`, `ext3_rename` と対応 syscall を実装する | RT-31 | kernel から file/dir の削除と改名が呼べる |
+| [x] | RT-33 | userland libc wrapper と `touch`, `mkdir`, `rm`, `rmdir`, `mv` を追加する | RT-32 | shell から基本コマンドで namespace を操作できる |
+| [x] | RT-34 | 既存 `ls`, `cat`, `cd`, `pwd` と組み合わせた CRUD フローを確認する | RT-33 | create/read/update/delete の基本導線が破綻しない |
+| [x] | RT-35 | file CRUD の host/QEMU smoke test を追加する | RT-32, RT-34 | 新規作成、改名、削除の回帰を検知できる |
 
 ## M7: shell の pipe / redirection を成立させる
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-36 | kernel に anonymous pipe と `pipe` / `dup` の最小 fd 制御を実装する | RT-35 | shell が pipe endpoint と fd 保存を扱える |
-| [ ] | RT-37 | child process へ stdio/file table を渡せる `execve` 経路を整える | RT-36 | `fork` 無しでも redirection 前提で command を起動できる |
-| [ ] | RT-38 | `eshell` の parser / executor を拡張し、`|`, `>`, `<` を扱う | RT-37 | `cmd > file`, `cmd < file`, `cmd1 | cmd2` が解釈できる |
-| [ ] | RT-39 | `cat` の stdin fallback と shell I/O 合成の基本コマンド検証を入れる | RT-38 | `cat < file` と `ls | cat` が成立する |
-| [ ] | RT-40 | pipe / redirection の host/QEMU smoke test を追加する | RT-38, RT-39 | shell I/O 合成の回帰を検知できる |
+| [x] | RT-36 | kernel に anonymous pipe と `pipe` / `dup` の最小 fd 制御を実装する | RT-35 | shell が pipe endpoint と fd 保存を扱える |
+| [x] | RT-37 | child process へ stdio/file table を渡せる `execve` 経路を整える | RT-36 | `fork` 無しでも redirection 前提で command を起動できる |
+| [x] | RT-38 | `eshell` の parser / executor を拡張し、`|`, `>`, `<` を扱う | RT-37 | `cmd > file`, `cmd < file`, `cmd1 | cmd2` が解釈できる |
+| [x] | RT-39 | `cat` の stdin fallback と shell I/O 合成の基本コマンド検証を入れる | RT-38 | `cat < file` と `ls | cat` が成立する |
+| [x] | RT-40 | pipe / redirection の host/QEMU smoke test を追加する | RT-38, RT-39 | shell I/O 合成の回帰を検知できる |
 
 ## M8: vi でファイル作成できる状態へ
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-41 | userland から TTY の `ICANON` / `ECHO` を切り替える最小 termios API を追加する | RT-24, RT-25 | `vi` が 1 キーずつ入力を受け取れる |
-| [ ] | RT-42 | `vi` 向けのキー解析と全画面再描画 helper を実装する | RT-41 | `ESC`, 矢印, `hjkl`, `:`, `Backspace`, `Enter` を扱える |
-| [ ] | RT-43 | `/usr/bin/vi` の editor buffer と `normal` / `insert` / `command-line` mode を実装する | RT-42, RT-40 | 新規空バッファを編集して画面に反映できる |
-| [ ] | RT-44 | `:w`, `:q`, `:wq` を実装し、Plan 10/11 の基盤上で保存する | RT-43, RT-40 | `vi memo.txt` から保存し、`cat memo.txt` で確認できる |
-| [ ] | RT-45 | `vi` の host/QEMU smoke test を追加する | RT-44, RT-28 | 新規ファイル作成フローを回帰検知できる |
+| [x] | RT-41 | userland から TTY の `ICANON` / `ECHO` を切り替える最小 termios API を追加する | RT-24, RT-25 | `vi` が 1 キーずつ入力を受け取れる |
+| [x] | RT-42 | `vi` 向けのキー解析と全画面再描画 helper を実装する | RT-41 | `ESC`, 矢印, `hjkl`, `:`, `Backspace`, `Enter` を扱える |
+| [x] | RT-43 | `/usr/bin/vi` の editor buffer と `normal` / `insert` / `command-line` mode を実装する | RT-42, RT-40 | 新規空バッファを編集して画面に反映できる |
+| [x] | RT-44 | `:w`, `:q`, `:wq` を実装し、Plan 10/11 の基盤上で保存する | RT-43, RT-40 | `vi memo.txt` から保存し、`cat memo.txt` で確認できる |
+| [x] | RT-45 | `vi` の host/QEMU smoke test を追加する | RT-44, RT-28 | 新規ファイル作成フローを回帰検知できる |
 
 ## 先送りする項目
 

@@ -10,6 +10,8 @@ PUBLIC void kernel_execve(const char *filename, char *const argv[],
                           char *const envp[]);
 PUBLIC pid_t sys_execve(const char *filename, char *const argv[],
                         char *const envp[]);
+PUBLIC pid_t sys_execve_pty(const char *filename, char *const argv[],
+                            int master_fd);
 PUBLIC pid_t sys_fork();
 
 #endif

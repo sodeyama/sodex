@@ -81,6 +81,11 @@
 #define KEY_MOD_CTRL  0x02
 #define KEY_MOD_ALT   0x04
 
+#define KEY_SCANCODE_UP    0x48
+#define KEY_SCANCODE_LEFT  0x4B
+#define KEY_SCANCODE_RIGHT 0x4D
+#define KEY_SCANCODE_DOWN  0x50
+
 struct key_event {
   u_int8_t scancode;
   u_int8_t ascii;

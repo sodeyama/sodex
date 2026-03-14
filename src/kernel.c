@@ -34,6 +34,7 @@
 #include <uip.h>
 #include <uip_arp.h>
 #include <socket.h>
+#include <tty.h>
 #ifdef KTEST_BUILD
 PUBLIC void run_kernel_tests(void);
 #endif
@@ -98,6 +99,8 @@ PUBLIC void start_kernel()
 
   init_key();
   _kputs(" KERNEL: SETUP KEY\n");
+  init_tty();
+  _kputs(" KERNEL: SETUP TTY\n");
 
   init_dma();
   _kputs(" KERNEL: SETUP DMA\n");

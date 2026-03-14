@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket
 
 .PHONY: all clean test
 
@@ -85,6 +85,13 @@ test_key: test_key.c test_key_key.o
 	$(CC) $(CFLAGS) -o $@ test_key.c test_key_key.o
 
 test_key_key.o: $(SRC)/key.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# TTY / PTY tests
+test_tty: test_tty.c test_tty_tty.o
+	$(CC) $(CFLAGS) -o $@ test_tty.c test_tty_tty.o
+
+test_tty_tty.o: $(SRC)/tty/tty.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
 
 # ext3fs bitmap/parse tests (standalone, no ext3fs.c dependency)

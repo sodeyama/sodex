@@ -8,6 +8,8 @@
 #include <ext3fs.h>
 #include <fs.h>
 
+struct tty;
+
 #define HZ  100
 
 #define MAXPROCESS 3

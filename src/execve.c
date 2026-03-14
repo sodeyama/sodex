@@ -25,9 +25,11 @@
 #include <elfloader.h>
 #include <signal.h>
 #include <execve.h>
+#include <tty.h>
 
 PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
-                                     char *const envp[]);
+                                     char *const envp[],
+                                     struct tty *stdio_tty);
 PRIVATE void set_default_sigaction(struct task_struct* task);
 PRIVATE u_int32_t get_proc_stackmem(u_int32_t *pg_dir);
 PRIVATE int get_argc(char *const argv[]);
@@ -43,7 +45,7 @@ PUBLIC pid_t sys_fork()
 PUBLIC void kernel_execve(const char *filename, char *const argv[],
                           char *const envp[])
 {
-  struct task_struct* kern_task = __execve(filename, argv, envp);
+  struct task_struct* kern_task = __execve(filename, argv, envp, NULL);
   enable_pic_interrupt(IRQ_TIMER);
   current = kern_task;
 }
@@ -53,7 +55,7 @@ PUBLIC pid_t sys_execve(const char *filename, char *const argv[],
 {
   disable_pic_interrupt(IRQ_TIMER);
 
-  struct task_struct* kern_task = __execve(filename, argv, envp);
+  struct task_struct* kern_task = __execve(filename, argv, envp, NULL);
   if (kern_task == NULL) {
     if (strcmp(filename,"") != 0)
       _kprintf("command not found\n");
@@ -65,8 +67,34 @@ PUBLIC pid_t sys_execve(const char *filename, char *const argv[],
   return kern_task->pid;
 }
 
+PUBLIC pid_t sys_execve_pty(const char *filename, char *const argv[],
+                            int master_fd)
+{
+  struct tty *tty;
+  struct task_struct* kern_task;
+
+  disable_pic_interrupt(IRQ_TIMER);
+
+  tty = tty_lookup_master(current->files, master_fd);
+  if (tty == NULL) {
+    enable_pic_interrupt(IRQ_TIMER);
+    return -1;
+  }
+
+  kern_task = __execve(filename, argv, NULL, tty);
+  if (kern_task == NULL) {
+    enable_pic_interrupt(IRQ_TIMER);
+    return -1;
+  }
+
+  dlist_insert_after(&(kern_task->run_list), &(current->run_list));
+  enable_pic_interrupt(IRQ_TIMER);
+  return kern_task->pid;
+}
+
 PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
-                                     char *const envp[])
+                                     char *const envp[],
+                                     struct tty *stdio_tty)
 {
   disable_pic_interrupt(IRQ_TIMER);
   /* set the memory translation using page feature for user process */
@@ -91,7 +119,10 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   memset(kern_task, 0, sizeof(struct task_struct));
   kern_task->files = kalloc(sizeof(struct files_struct));
   memset(kern_task->files, 0, sizeof(struct files_struct));
-  fs_stdio_open(kern_task->files);
+  if (stdio_tty != NULL)
+    fs_stdio_open_tty(kern_task->files, stdio_tty);
+  else
+    fs_stdio_open(kern_task->files);
 
   memcpy(kern_task->filename, filename, PROC_LEN_FILENAME-1);
 

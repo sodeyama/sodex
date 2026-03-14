@@ -27,6 +27,7 @@
 #include <uip.h>
 #include <ether.h>
 #include <socket.h>
+#include <tty.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_read(int fd, void* buf, size_t count);
@@ -36,6 +37,10 @@ PRIVATE void sys_close(int fd);
 PRIVATE int sys_getdentry();
 PRIVATE int sys_getpstat();
 PRIVATE int sys_getkeyevent(struct key_event *event);
+PRIVATE int sys_openpty();
+PRIVATE int sys_execve_pty_call(const char *filename, char *const argv[],
+                                int master_fd);
+PRIVATE int sys_set_input_mode(int mode);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -117,6 +122,18 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
     ret = sys_getkeyevent((struct key_event *)p1);
     break;
 
+  case SYS_CALL_OPENPTY:
+    ret = sys_openpty();
+    break;
+
+  case SYS_CALL_EXECVE_PTY:
+    ret = sys_execve_pty_call((const char *)p1, (char *const *)p2, p3);
+    break;
+
+  case SYS_CALL_SET_INPUT_MODE:
+    ret = sys_set_input_mode(p1);
+    break;
+
   case SYS_CALL_BRK:
     ret = sys_brk(p1);
     break;
@@ -189,6 +206,13 @@ PRIVATE int sys_read(int fd, void* buf, size_t count)
 {
   int ret;
   struct file* fs = current->files->fs_fd[fd];
+  if (fs == NULL)
+    return -1;
+
+  if (fs->f_ops != NULL && fs->f_ops->read != NULL) {
+    return fs->f_ops->read(fs, buf, count);
+  }
+
   if (fs->f_stdioflag == FLAG_STDIN) {
     ret = __stdin_read(fd, buf, count);
   } else {
@@ -235,6 +259,14 @@ PRIVATE int __stdin_read(int fd, void* buf, size_t count)
 PRIVATE void sys_write(int fd, const void* buf, size_t count)
 {
   struct file* fs = current->files->fs_fd[fd];
+  if (fs == NULL)
+    return;
+
+  if (fs->f_ops != NULL && fs->f_ops->write != NULL) {
+    fs->f_ops->write(fs, buf, count);
+    return;
+  }
+
   if (fs->f_stdioflag == FLAG_STDOUT) {
     int i;
     for (i=0; i<count; i++)
@@ -268,6 +300,17 @@ PRIVATE void sys_close(int fd)
   close(fd);
 }
 
+PRIVATE int sys_openpty()
+{
+  return tty_openpty(current->files);
+}
+
+PRIVATE int sys_execve_pty_call(const char *filename, char *const argv[],
+                                int master_fd)
+{
+  return (int)sys_execve_pty(filename, argv, master_fd);
+}
+
 PRIVATE int sys_getdentry()
 {
   return (int)current->dentry;
@@ -291,6 +334,11 @@ PRIVATE int sys_getkeyevent(struct key_event *event)
 
   memcpy(event, &next_event, sizeof(struct key_event));
   return 1;
+}
+
+PRIVATE int sys_set_input_mode(int mode)
+{
+  return tty_set_input_mode(mode);
 }
 
 PRIVATE int sys_send(char* buf)

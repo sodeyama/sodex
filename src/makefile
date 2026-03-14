@@ -29,6 +29,7 @@ DRIVER_OBJS = $(OBJDIR)/drivers/*.o
 KLIB_OBJS   = $(OBJDIR)/lib/*.o
 NET_OBJS    = $(OBJDIR)/net/*.o
 DISPLAY_OBJS = $(OBJDIR)/display/*.o
+TTY_OBJS    = $(OBJDIR)/tty/*.o
 
 # Test objects
 TESTDIR     = ${SRCDIR}/test
@@ -60,9 +61,9 @@ all : ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
 
-${KERNEL} : ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${BUILDDIR}/boot.ld
+${KERNEL} : ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${BUILDDIR}/boot.ld
 	cd usr; make
-	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${ASMOBJS} -o $@
+	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} -o $@
 
 ${DRIVER_OBJS} :
 	cd drivers; make
@@ -75,6 +76,9 @@ ${NET_OBJS} :
 
 ${DISPLAY_OBJS} :
 	cd display; make
+
+${TTY_OBJS} :
+	cd tty; make
 
 # === Boot loader ===
 
@@ -145,8 +149,8 @@ ktest-build:
 	$(MAKE) clean
 	$(MAKE) EXTRA_CFLAGS="-DKTEST_BUILD" ktest-link
 
-ktest-link: ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
-	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
+ktest-link: ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
+	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
 	$(MAKE) tools
 	$(MAKE) ${ACIENT} ${MIDDLE}
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
@@ -172,4 +176,5 @@ clean :
 	cd lib; make clean
 	cd net; make clean
 	cd display; make clean
+	cd tty; make clean
 	rm -rf ${BUILDDIR}

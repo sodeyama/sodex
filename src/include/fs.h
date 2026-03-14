@@ -4,7 +4,6 @@
 #include <sys/types.h>
 #include <sodex/list.h>
 #include <ext3fs.h>
-#include <process.h>
 
 #define O_ACCMODE   00000003
 #define O_RDONLY    00000000
@@ -46,10 +45,21 @@
 #define FLAG_STDOUT		1
 #define FLAG_STDERR		2
 #define FLAG_FILE		3
+#define FLAG_TTY_MASTER 4
+#define FLAG_TTY_SLAVE  5
 
 #define FD_TOINODE(fd, task) (task->files->fs_fd[fd]->f_dentry->d_inode)
 #define FD_TODENTRY(fd, task) (task->files->fs_fd[fd]->f_dentry)
 #define FD_TOFILE(fd, task) (task->files->fs_fd[fd])
+
+struct file;
+struct tty;
+
+struct file_ops {
+  ssize_t (*read)(struct file *file, void *buf, size_t count);
+  ssize_t (*write)(struct file *file, const void *buf, size_t count);
+  int (*close)(struct file *file);
+};
 
 struct files_struct {
   struct file *fs_fd[FILEDESC_MAX];
@@ -66,10 +76,13 @@ struct file {
   u_int32_t             f_euid;
   u_int32_t             f_error;
   u_int32_t				f_stdioflag;
+  const struct file_ops *f_ops;
+  void                  *private_data;
 };
 
 PUBLIC off_t lseek(int fd, off_t offset, int whence);
 PUBLIC int close(int fd);
 PUBLIC int fs_stdio_open(struct files_struct* ftask);
+PUBLIC int fs_stdio_open_tty(struct files_struct* ftask, struct tty *tty);
 
 #endif

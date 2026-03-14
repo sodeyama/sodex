@@ -36,19 +36,19 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-11 | `struct file` 周辺を見直し、stdio を特殊ケースではなく TTY 経路へ流せる形にする | RT-05 | `sys_read()` / `sys_write()` が TTY へ委譲できる |
-| [ ] | RT-12 | `tty` 本体、line discipline、canonical/raw の最小 subset を実装する | RT-11 | `ECHO` と行編集が TTY 側へ寄る |
-| [ ] | RT-13 | `pty master/slave` のペアとリングバッファを実装する | RT-12 | PTY 越しに双方向通信できる |
-| [ ] | RT-14 | shell 起動時に PTY slave を stdio へ割り当てる経路を作る | RT-13 | shell と console が分離される |
-| [ ] | RT-15 | raw input event を PTY へ流す最小 user/kernel API を定義する | RT-13 | terminal client が矢印キーや Ctrl を入力として送れる |
+| [x] | RT-11 | `struct file` 周辺を見直し、stdio を特殊ケースではなく TTY 経路へ流せる形にする | RT-05 | `sys_read()` / `sys_write()` が TTY へ委譲できる |
+| [x] | RT-12 | `tty` 本体、line discipline、canonical/raw の最小 subset を実装する | RT-11 | `ECHO` と行編集が TTY 側へ寄る |
+| [x] | RT-13 | `pty master/slave` のペアとリングバッファを実装する | RT-12 | PTY 越しに双方向通信できる |
+| [x] | RT-14 | shell 起動時に PTY slave を stdio へ割り当てる経路を作る | RT-13 | shell と console が分離される |
+| [x] | RT-15 | raw input event を PTY へ流す最小 user/kernel API を定義する | RT-13 | terminal client が矢印キーや Ctrl を入力として送れる |
 
 ## M3: terminal client MVP
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-16 | `/usr/bin/term` の build、image 収録、起動骨格を作る | RT-10, RT-15 | `term` バイナリが build できる |
+| [x] | RT-16 | `/usr/bin/term` の build、image 収録、起動骨格を作る | RT-10, RT-15 | `term` バイナリが build できる |
 | [ ] | RT-17 | `term` から framebuffer と input event を初期化し、列数・行数を計算する | RT-16 | terminal 側で viewport が確定する |
-| [ ] | RT-18 | `term` が PTY master を開き、子として `eshell` を起動する | RT-14, RT-16 | shell 出力を読み込める |
+| [x] | RT-18 | `term` が PTY master を開き、子として `eshell` を起動する | RT-14, RT-16 | shell 出力を読み込める |
 | [ ] | RT-19 | `term` のメインループで PTY 読み取り、入力送信、damage redraw を回す | RT-17, RT-18 | shell 出力が framebuffer 上に見える |
 | [ ] | RT-20 | scrollback リングと全画面再描画経路を追加する | RT-19 | 長文出力後も履歴を保持できる |
 

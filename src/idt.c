@@ -18,6 +18,7 @@
 #include <io.h>
 #include <floppy.h>
 #include <ne2000.h>
+#include <tty.h>
 
 /* IDT gate types */
 #define TYPE_INTR_GATE 0xEE  /* DPL=3, 32-bit interrupt gate */
@@ -314,13 +315,7 @@ PUBLIC void i21h_keyhandler()
 
   a = in8(KB_DATA_PORT);
   c = key_handle_scancode(a);
-  if (c == KEY_ENTER) {
-    _kputc('\n');
-  } else if (c == KEY_BACK) {
-    _kputc(KEY_BACK);
-  } else if (c != KEY_NULL) {
-    _kputc(c);
-  }
+  tty_feed_console_char(c);
   pic_eoi(IRQ_KEY);
 }
 

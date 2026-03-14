@@ -2,6 +2,7 @@
 #include <vga.h>
 #include <ext3fs.h>
 #include <process.h>
+#include <tty.h>
 
 PUBLIC off_t lseek(int fd, off_t offset, int whence)
 {
@@ -30,26 +31,20 @@ PUBLIC off_t lseek(int fd, off_t offset, int whence)
 
 PUBLIC int close(int fd)
 {
+  struct file* file = FD_TOFILE(fd, current);
+  if (file != NULL && file->f_ops != NULL && file->f_ops->close != NULL) {
+    file->f_ops->close(file);
+  }
   FD_TOFILE(fd, current) = NULL;
   return TRUE;
 }
 
 PUBLIC int fs_stdio_open(struct files_struct* ftask)
 {
-  struct file* fs_stdin = kalloc(sizeof(struct file));
-  memset(fs_stdin, 0, sizeof(struct file));
-  fs_stdin->f_stdioflag = FLAG_STDIN;
-  ftask->fs_fd[ftask->fs_freefd++] = fs_stdin;
+  return fs_stdio_open_tty(ftask, tty_get_console());
+}
 
-  struct file* fs_stdout = kalloc(sizeof(struct file));
-  memset(fs_stdout, 0, sizeof(struct file));
-  fs_stdout->f_stdioflag = FLAG_STDOUT;
-  ftask->fs_fd[ftask->fs_freefd++] = fs_stdout;
-
-  struct file* fs_stderr = kalloc(sizeof(struct file));
-  memset(fs_stderr, 0, sizeof(struct file));
-  fs_stderr->f_stdioflag = FLAG_STDOUT;
-  ftask->fs_fd[ftask->fs_freefd++] = fs_stderr;
-
-  return TRUE;
+PUBLIC int fs_stdio_open_tty(struct files_struct* ftask, struct tty *tty)
+{
+  return tty_install_stdio(ftask, tty);
 }

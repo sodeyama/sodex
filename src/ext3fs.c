@@ -635,7 +635,7 @@ PRIVATE ext3_dentry* __read_rootdir(u_int32_t ino)
     _kprintf("%s kalloc error\n", __func__);
     return NULL;
   }
-  memset(dentry->d_name, "/", 1);
+  dentry->d_name[0] = '/';
   memset(dentry->d_name+1, 0, 1);
   dentry->d_flags = inode->i_flags;
   dentry->d_parent = NULL;

@@ -19,8 +19,9 @@ INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 45
-IME_FILE_TEXT = "にほんご アイウエオ ABC".encode("utf-8")
-SHELL_FILENAME = "あいうえ"
+IME_FILE_TEXT = "にほんご あいうえお ABC".encode("utf-8")
+SHELL_FILENAME = "あいう"
+LATIN_FILENAME = "latin.txt"
 
 
 def read_ppm(path: pathlib.Path) -> tuple[int, int, bytes]:
@@ -110,6 +111,15 @@ class QemuMonitor:
     def send_ctrl_space(self) -> None:
         self.send_key("ctrl-spc")
 
+    def send_hankaku_zenkaku(self) -> None:
+        self.send_key("grave_accent")
+
+    def send_henkan(self) -> None:
+        self.send_key("henkan")
+
+    def send_muhenkan(self) -> None:
+        self.send_key("muhenkan")
+
     def send_text(self, text: str) -> None:
         keymap = {
             " ": "spc",
@@ -163,6 +173,18 @@ def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
     raise TimeoutError("prompt screenshot did not match reference")
 
 
+def wait_for_screen(monitor: QemuMonitor, ppm_path: pathlib.Path,
+                    reference: dict[str, int | str], timeout: float,
+                    what: str) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        monitor.command(f"screendump {ppm_path}", pause=0.3)
+        if crop_matches(ppm_path, reference):
+            return
+        time.sleep(0.2)
+    raise TimeoutError(f"{what} screenshot did not match reference")
+
+
 def inode_bytes(image: bytes, ino: int) -> bytes:
     start = P_INODE_BLOCK + (ino - 1) * INODE_SIZE
     return image[start:start + INODE_SIZE]
@@ -207,6 +229,7 @@ def assert_ime_state(fsboot: pathlib.Path) -> None:
     ime_entry = root_entries.get("ime.txt")
     marker_entry = root_entries.get("afterime.txt")
     shell_entry = root_entries.get(SHELL_FILENAME)
+    latin_entry = root_entries.get(LATIN_FILENAME)
 
     if ime_entry is None:
         raise AssertionError("ime.txt was not created")
@@ -214,6 +237,8 @@ def assert_ime_state(fsboot: pathlib.Path) -> None:
         raise AssertionError("afterime.txt was not created after returning to shell")
     if shell_entry is None:
         raise AssertionError(f"{SHELL_FILENAME!r} was not created from shell input")
+    if latin_entry is None:
+        raise AssertionError(f"{LATIN_FILENAME!r} was not created after returning to latin mode")
 
     content = read_file(image, ime_entry[0])
     if content != IME_FILE_TEXT:
@@ -229,14 +254,19 @@ def main() -> int:
     logdir = pathlib.Path(sys.argv[2]).resolve()
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
+    ime_reference = json.loads((repo_root / "src/test/data/term_ime_line_reference.json").read_text())
+    hira_overlay_reference = json.loads((repo_root / "src/test/data/term_ime_hira_overlay_reference.json").read_text())
+    latin_overlay_reference = json.loads((repo_root / "src/test/data/term_ime_latin_overlay_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
     monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_i_{os.getpid()}.sock"
     serial_log = logdir / f"ime_serial_{os.getpid()}.log"
     qemu_log = logdir / f"ime_qemu_{os.getpid()}.log"
     prompt_ppm = logdir / f"ime_prompt_{os.getpid()}.ppm"
+    ime_ppm = logdir / f"ime_line_{os.getpid()}.ppm"
+    overlay_ppm = logdir / f"ime_overlay_{os.getpid()}.ppm"
 
-    for path in (monitor_sock, serial_log, qemu_log, prompt_ppm):
+    for path in (monitor_sock, serial_log, qemu_log, prompt_ppm, ime_ppm, overlay_ppm):
         if path.exists():
             path.unlink()
 
@@ -269,20 +299,29 @@ def main() -> int:
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)
 
         monitor.send_text("touch ")
-        monitor.send_ctrl_space()
-        monitor.send_text("aiue\n")
+        monitor.send_hankaku_zenkaku()
+        wait_for_screen(monitor, overlay_ppm, hira_overlay_reference, timeout, "hira overlay")
+        monitor.send_text("aiueo")
+        monitor.send_key("backspace")
+        monitor.send_key("backspace")
+        wait_for_screen(monitor, ime_ppm, ime_reference, timeout, "ime line")
+        monitor.send_hankaku_zenkaku()
+        wait_for_screen(monitor, overlay_ppm, latin_overlay_reference, timeout, "latin overlay")
+        monitor.send_text("\n")
         time.sleep(1.0)
-        monitor.send_ctrl_space()
-        monitor.send_ctrl_space()
+        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        monitor.send_text(f"touch {LATIN_FILENAME}\n")
+        time.sleep(1.0)
 
         monitor.send_text("vi ime.txt\n")
         time.sleep(1.0)
         monitor.send_text("i")
-        monitor.send_ctrl_space()
+        monitor.send_henkan()
         monitor.send_text("nihongo ")
-        monitor.send_ctrl_space()
+        monitor.send_muhenkan()
+        monitor.send_henkan()
         monitor.send_text("aiueo")
-        monitor.send_ctrl_space()
+        monitor.send_muhenkan()
         monitor.send_text(" ABC")
         time.sleep(0.5)
         monitor.send_key("esc")
@@ -297,7 +336,7 @@ def main() -> int:
         assert_ime_state(fsboot)
 
         print("=== IME QEMU SMOKE DONE ===")
-        print(f"Artifacts: {serial_log}, {qemu_log}, {prompt_ppm}")
+        print(f"Artifacts: {serial_log}, {qemu_log}, {prompt_ppm}, {ime_ppm}, {overlay_ppm}")
         return 0
     except Exception as exc:
         print(f"ime smoke failed: {exc}", file=sys.stderr)

@@ -96,6 +96,16 @@ void ime_init(struct ime_state *state)
   state->mode = IME_MODE_LATIN;
 }
 
+void ime_set_mode(struct ime_state *state, enum ime_mode mode)
+{
+  if (state == NULL)
+    return;
+
+  if (mode < IME_MODE_LATIN || mode > IME_MODE_KATAKANA)
+    return;
+  state->mode = mode;
+}
+
 void ime_cycle_mode(struct ime_state *state)
 {
   if (state == NULL)

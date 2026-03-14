@@ -506,19 +506,8 @@ void terminal_surface_backspace(struct terminal_surface *surface)
 {
   if (surface == NULL)
     return;
-  if (surface->cursor_col > 0) {
+  if (surface->cursor_col > 0)
     surface->cursor_col--;
-    while (surface->cursor_col > 0) {
-      const struct term_cell *cell;
-
-      cell = terminal_surface_cell(surface,
-                                   surface->cursor_col,
-                                   surface->cursor_row);
-      if (cell == NULL || (cell->attr & TERM_ATTR_CONTINUATION) == 0)
-        break;
-      surface->cursor_col--;
-    }
-  }
 }
 
 void terminal_surface_tab(struct terminal_surface *surface,

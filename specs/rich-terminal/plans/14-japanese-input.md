@@ -97,7 +97,7 @@ host 側 IME の変換結果を guest へ渡す経路もない。
 
 ## 検証
 
-- `Ctrl+Space` または `変換` / `無変換` / `かな` で IME mode を切り替えられる
+- `Ctrl+Space` または `半角/全角` で `latin` / `hiragana` を即時トグルでき、`変換` は `hiragana`、`無変換` は `latin`、`かな` は `hiragana`、`Shift+かな` は `katakana` を直接選べる
 - `nihongo` から `にほんご` を確定できる
 - preedit 中の Backspace が romaji / かなの両方で破綻しない
 - shell の 1 行入力で multibyte を含むファイル名や文字列を扱える

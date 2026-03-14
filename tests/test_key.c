@@ -33,6 +33,7 @@ extern char *get_stdin(char *tobuf);
 #define KEY_SCANCODE_SEMICOLON 0x27
 #define KEY_SCANCODE_APOSTROPHE 0x28
 #define KEY_SCANCODE_GRAVE 0x29
+#define KEY_SCANCODE_HANKAKU_ZENKAKU 0x29
 #define KEY_SCANCODE_BACKSLASH 0x2B
 #define KEY_SCANCODE_COMMA 0x33
 #define KEY_SCANCODE_PERIOD 0x34
@@ -206,6 +207,19 @@ TEST(japanese_toggle_key_generates_raw_event_only) {
     ASSERT_NULL(get_stdin(stdin_buf));
 }
 
+TEST(hankaku_zenkaku_keeps_raw_scancode_and_ascii) {
+    struct key_event event;
+    char stdin_buf[65];
+
+    init_key();
+    ASSERT_EQ(key_handle_scancode(KEY_SCANCODE_HANKAKU_ZENKAKU), '`');
+    ASSERT(key_pop_event(&event));
+    ASSERT_EQ(event.scancode, KEY_SCANCODE_HANKAKU_ZENKAKU);
+    ASSERT_EQ(event.ascii, '`');
+    ASSERT_EQ(event.flags, 0);
+    ASSERT_STR_EQ(get_stdin(stdin_buf), "`");
+}
+
 int main(void)
 {
     printf("=== key event tests ===\n");
@@ -220,6 +234,7 @@ int main(void)
     RUN_TEST(enter_and_backspace_are_preserved_for_compat);
     RUN_TEST(extended_key_generates_raw_event_only);
     RUN_TEST(japanese_toggle_key_generates_raw_event_only);
+    RUN_TEST(hankaku_zenkaku_keeps_raw_scancode_and_ascii);
 
     TEST_REPORT();
 }

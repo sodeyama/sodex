@@ -30,6 +30,14 @@ struct term_metrics {
   u_int32_t long_output_marks;
 };
 
+enum term_ime_action {
+  TERM_IME_ACTION_NONE = 0,
+  TERM_IME_ACTION_TOGGLE_LATIN_HIRA = 1,
+  TERM_IME_ACTION_SET_HIRAGANA = 2,
+  TERM_IME_ACTION_SET_KATAKANA = 3,
+  TERM_IME_ACTION_SET_LATIN = 4
+};
+
 struct term_app {
   int master_fd;
   int use_framebuffer;
@@ -69,7 +77,8 @@ PRIVATE void emit_metric(struct term_app *app, const char *point,
                          u_int32_t last_bytes, u_int32_t last_cells);
 PRIVATE int append_output(char *buf, int len, const char *src, int src_len);
 PRIVATE int flush_ime(struct term_app *app, char *buf, int len);
-PRIVATE int ime_toggle_direction(const struct key_event *event);
+PRIVATE enum term_ime_action ime_action_for_event(const struct key_event *event);
+PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action);
 PRIVATE void render_ime_overlay(struct term_app *app);
 PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap);
 
@@ -118,7 +127,8 @@ int main(int argc, char** argv)
     int output = pump_master(app);
     int input = pump_keys(app);
 
-    if (resized > 0 || output > 0 || terminal_surface_has_damage(&app->surface)) {
+    if (resized > 0 || output > 0 || input > 0 ||
+        terminal_surface_has_damage(&app->surface)) {
       render_surface(app, FALSE);
     }
 
@@ -243,22 +253,19 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
                           char *buf, int *needs_redraw)
 {
   int len = 0;
-  int toggle_direction;
+  enum term_ime_action action;
 
   if (needs_redraw != NULL)
     *needs_redraw = 0;
   if (event->flags & KEY_EVENT_RELEASE)
     return 0;
 
-  toggle_direction = ime_toggle_direction(event);
-  if (toggle_direction != 0) {
+  action = ime_action_for_event(event);
+  if (action != TERM_IME_ACTION_NONE) {
     len = flush_ime(app, buf, len);
     if (len < 0)
       return 0;
-    if (toggle_direction > 0)
-      ime_cycle_mode(&app->ime);
-    else
-      ime_cycle_mode_reverse(&app->ime);
+    ime_apply_action(&app->ime, action);
     if (needs_redraw != NULL)
       *needs_redraw = 1;
     return len;
@@ -349,6 +356,17 @@ PRIVATE void render_surface(struct term_app *app, int force)
         cell = terminal_surface_cell(&app->surface, col, row);
         if (cell == NULL)
           continue;
+        if ((cell->attr & TERM_ATTR_CONTINUATION) != 0 && col > 0) {
+          const struct term_cell *lead =
+              terminal_surface_cell(&app->surface, col - 1, row);
+          if (lead != NULL &&
+              (lead->attr & TERM_ATTR_CONTINUATION) == 0 &&
+              lead->width > 1) {
+            cell_renderer_draw_cell(&app->renderer, col - 1, row, lead, FALSE);
+            rendered++;
+            continue;
+          }
+        }
         cell_renderer_draw_cell(&app->renderer, col, row, cell, FALSE);
         rendered++;
       }
@@ -599,18 +617,50 @@ PRIVATE int flush_ime(struct term_app *app, char *buf, int len)
   return len + emitted;
 }
 
-PRIVATE int ime_toggle_direction(const struct key_event *event)
+PRIVATE enum term_ime_action ime_action_for_event(const struct key_event *event)
 {
   if (event == NULL)
-    return 0;
+    return TERM_IME_ACTION_NONE;
   if ((event->modifiers & KEY_MOD_CTRL) != 0 && event->ascii == ' ')
-    return 1;
-  if (event->scancode == KEY_SCANCODE_HENKAN ||
-      event->scancode == KEY_SCANCODE_KANA)
-    return 1;
+    return TERM_IME_ACTION_TOGGLE_LATIN_HIRA;
+  if (event->scancode == KEY_SCANCODE_HANKAKU_ZENKAKU)
+    return TERM_IME_ACTION_TOGGLE_LATIN_HIRA;
+  if (event->scancode == KEY_SCANCODE_HENKAN)
+    return TERM_IME_ACTION_SET_HIRAGANA;
   if (event->scancode == KEY_SCANCODE_MUHENKAN)
-    return -1;
-  return 0;
+    return TERM_IME_ACTION_SET_LATIN;
+  if (event->scancode == KEY_SCANCODE_KANA) {
+    if ((event->modifiers & KEY_MOD_SHIFT) != 0)
+      return TERM_IME_ACTION_SET_KATAKANA;
+    return TERM_IME_ACTION_SET_HIRAGANA;
+  }
+  return TERM_IME_ACTION_NONE;
+}
+
+PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action)
+{
+  if (ime == NULL)
+    return;
+
+  switch (action) {
+  case TERM_IME_ACTION_TOGGLE_LATIN_HIRA:
+    if (ime->mode == IME_MODE_LATIN)
+      ime_set_mode(ime, IME_MODE_HIRAGANA);
+    else
+      ime_set_mode(ime, IME_MODE_LATIN);
+    break;
+  case TERM_IME_ACTION_SET_HIRAGANA:
+    ime_set_mode(ime, IME_MODE_HIRAGANA);
+    break;
+  case TERM_IME_ACTION_SET_KATAKANA:
+    ime_set_mode(ime, IME_MODE_KATAKANA);
+    break;
+  case TERM_IME_ACTION_SET_LATIN:
+    ime_set_mode(ime, IME_MODE_LATIN);
+    break;
+  default:
+    break;
+  }
 }
 
 PRIVATE void render_ime_overlay(struct term_app *app)

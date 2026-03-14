@@ -112,6 +112,31 @@ TEST(utf8_wide_text_uses_two_cells) {
     terminal_surface_free(&surface);
 }
 
+TEST(wide_backspace_erases_only_last_character) {
+    struct terminal_surface surface;
+    struct vt_parser parser;
+    const char data[] = {
+        (char)0xe3, (char)0x81, (char)0x82,
+        (char)0xe3, (char)0x81, (char)0x84,
+        '\b', ' ', '\b', '\b', ' ', '\b'
+    };
+
+    ASSERT_EQ(terminal_surface_init(&surface, 6, 1), 0);
+    vt_parser_init(&parser, &surface);
+
+    vt_parser_feed(&parser, data, sizeof(data));
+
+    ASSERT_EQ(terminal_surface_cell(&surface, 0, 0)->ch, 0x3042);
+    ASSERT_EQ(terminal_surface_cell(&surface, 0, 0)->width, 2);
+    ASSERT(terminal_surface_cell(&surface, 1, 0)->attr & TERM_ATTR_CONTINUATION);
+    ASSERT_EQ(terminal_surface_cell(&surface, 2, 0)->ch, ' ');
+    ASSERT_EQ(terminal_surface_cell(&surface, 3, 0)->ch, ' ');
+    ASSERT_EQ(surface.cursor_col, 2);
+    ASSERT_EQ(surface.cursor_row, 0);
+
+    terminal_surface_free(&surface);
+}
+
 int main(void)
 {
     printf("=== vt parser tests ===\n");
@@ -122,6 +147,7 @@ int main(void)
     RUN_TEST(cursor_move_save_restore_and_erase_line);
     RUN_TEST(backspace_space_backspace_erases_previous_cell);
     RUN_TEST(utf8_wide_text_uses_two_cells);
+    RUN_TEST(wide_backspace_erases_only_last_character);
 
     TEST_REPORT();
 }

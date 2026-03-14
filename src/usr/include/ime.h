@@ -18,6 +18,7 @@ struct ime_state {
 };
 
 void ime_init(struct ime_state *state);
+void ime_set_mode(struct ime_state *state, enum ime_mode mode);
 void ime_cycle_mode(struct ime_state *state);
 void ime_cycle_mode_reverse(struct ime_state *state);
 const char *ime_mode_label(const struct ime_state *state);

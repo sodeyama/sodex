@@ -109,6 +109,22 @@ TEST(backspace_removes_pending_preedit) {
     ASSERT_EQ(ime_backspace(&ime), 0);
 }
 
+TEST(set_mode_switches_directly) {
+    struct ime_state ime;
+
+    ime_init(&ime);
+    ASSERT_STR_EQ(ime_mode_label(&ime), "LATN");
+
+    ime_set_mode(&ime, IME_MODE_HIRAGANA);
+    ASSERT_STR_EQ(ime_mode_label(&ime), "HIRA");
+
+    ime_set_mode(&ime, IME_MODE_KATAKANA);
+    ASSERT_STR_EQ(ime_mode_label(&ime), "KATA");
+
+    ime_set_mode(&ime, IME_MODE_LATIN);
+    ASSERT_STR_EQ(ime_mode_label(&ime), "LATN");
+}
+
 int main(void)
 {
     printf("=== ime romaji tests ===\n");
@@ -118,6 +134,7 @@ int main(void)
     RUN_TEST(double_consonant_becomes_small_tsu);
     RUN_TEST(single_n_flushes_to_n);
     RUN_TEST(backspace_removes_pending_preedit);
+    RUN_TEST(set_mode_switches_directly);
 
     TEST_REPORT();
 }

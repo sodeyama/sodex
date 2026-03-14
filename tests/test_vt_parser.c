@@ -77,6 +77,22 @@ TEST(cursor_move_save_restore_and_erase_line) {
     terminal_surface_free(&surface);
 }
 
+TEST(backspace_space_backspace_erases_previous_cell) {
+    struct terminal_surface surface;
+    struct vt_parser parser;
+
+    ASSERT_EQ(terminal_surface_init(&surface, 4, 1), 0);
+    vt_parser_init(&parser, &surface);
+
+    vt_parser_feed(&parser, "a\b \b", 4);
+
+    ASSERT_EQ(terminal_surface_cell(&surface, 0, 0)->ch, ' ');
+    ASSERT_EQ(surface.cursor_col, 0);
+    ASSERT_EQ(surface.cursor_row, 0);
+
+    terminal_surface_free(&surface);
+}
+
 TEST(utf8_wide_text_uses_two_cells) {
     struct terminal_surface surface;
     struct vt_parser parser;
@@ -104,6 +120,7 @@ int main(void)
     RUN_TEST(clear_and_home_sequence);
     RUN_TEST(sgr_changes_colors_and_resets);
     RUN_TEST(cursor_move_save_restore_and_erase_line);
+    RUN_TEST(backspace_space_backspace_erases_previous_cell);
     RUN_TEST(utf8_wide_text_uses_two_cells);
 
     TEST_REPORT();

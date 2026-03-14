@@ -68,6 +68,7 @@ PRIVATE int tty_ring_push(struct tty_ring *ring, char c);
 PRIVATE int tty_ring_pop(struct tty_ring *ring, char *c);
 PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag);
 PRIVATE void tty_emit_output(struct tty *tty, char c);
+PRIVATE void tty_echo_erase(struct tty *tty);
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c);
 PRIVATE void tty_receive_char(struct tty *tty, char c);
 PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,
@@ -424,6 +425,21 @@ PRIVATE void tty_emit_output(struct tty *tty, char c)
   }
 }
 
+PRIVATE void tty_echo_erase(struct tty *tty)
+{
+  if (tty == NULL)
+    return;
+
+  if (tty->has_master == TRUE) {
+    tty_emit_output(tty, KEY_BACK);
+    tty_emit_output(tty, ' ');
+    tty_emit_output(tty, KEY_BACK);
+    return;
+  }
+
+  tty_emit_output(tty, KEY_BACK);
+}
+
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c)
 {
   tty_ring_push(&tty->slave_rx, c);
@@ -443,7 +459,7 @@ PRIVATE void tty_receive_char(struct tty *tty, char c)
     if (tty->canon_len > 0) {
       tty->canon_len--;
       if (tty->flags & TTY_FLAG_ECHO)
-        tty_emit_output(tty, KEY_BACK);
+        tty_echo_erase(tty);
     }
     return;
   }

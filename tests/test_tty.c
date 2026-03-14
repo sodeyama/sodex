@@ -83,7 +83,7 @@ TEST(canonical_input_waits_for_enter) {
     ASSERT_EQ(buf[3], '\0');
 }
 
-TEST(canonical_echo_flows_to_master) {
+TEST(canonical_backspace_echo_erases_on_master) {
     struct tty *tty;
     char buf[8];
 
@@ -94,10 +94,12 @@ TEST(canonical_echo_flows_to_master) {
     ASSERT_EQ(tty_master_write(tty, "a", 1), 1);
     ASSERT_EQ(tty_master_write(tty, "\b", 1), 1);
     ASSERT_EQ(tty_master_write(tty, "\r", 1), 1);
-    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 3);
+    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 5);
     ASSERT_EQ(buf[0], 'a');
     ASSERT_EQ(buf[1], '\b');
-    ASSERT_EQ(buf[2], '\n');
+    ASSERT_EQ(buf[2], ' ');
+    ASSERT_EQ(buf[3], '\b');
+    ASSERT_EQ(buf[4], '\n');
 }
 
 TEST(slave_output_is_visible_from_master) {
@@ -175,7 +177,7 @@ int main(void)
     printf("=== tty / pty tests ===\n");
 
     RUN_TEST(canonical_input_waits_for_enter);
-    RUN_TEST(canonical_echo_flows_to_master);
+    RUN_TEST(canonical_backspace_echo_erases_on_master);
     RUN_TEST(slave_output_is_visible_from_master);
     RUN_TEST(input_mode_switches_between_console_and_raw);
     RUN_TEST(pty_winsize_can_be_updated);

@@ -3,3 +3,5 @@ build/
 *.a
 *.log
 *.dSYM/
+.claude/sessions/
+.claude/tmp/

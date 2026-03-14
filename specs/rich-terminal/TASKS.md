@@ -131,6 +131,16 @@
 | [x] | RT-58 | TTY canonical 編集と echo を UTF-8 文字境界対応にする | RT-57, RT-46 | multibyte 入力後の Backspace が 1 文字単位で動く |
 | [x] | RT-59 | IME の host/QEMU test を追加し、切り替え、日本語入力、保存を回帰検知できるようにする | RT-57, RT-58, RT-52 | 日本語直接入力の主要導線を自動検知できる |
 
+## M11: vi 基本編集の実用化
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | RT-60 | `vi_buffer` に行頭末尾移動、単語移動、範囲削除、行削除の helper を追加する | RT-51 | UTF-8 文字境界を壊さずに motion と delete 範囲を計算できる |
+| [x] | RT-61 | `vi` の normal mode に operator-pending と複合キー parser を追加する | RT-42, RT-60 | `d` と `g` 系の複合入力を解釈できる |
+| [x] | RT-62 | `0`, `^`, `$`, `w`, `b`, `e`, `gg`, `G`, `x`, `X`, `dd`, `D`, `dw`, `db`, `de`, `d0`, `d$`, `a`, `A`, `I`, `o`, `O` を実装する | RT-61 | 既存ファイルに対する基本編集が normal mode だけで成立する |
+| [x] | RT-63 | `vi` の host test を拡張し、ASCII / UTF-8 の移動と削除を回帰検知できるようにする | RT-60, RT-62 | pure logic の編集退行を自動検知できる |
+| [x] | RT-64 | `vi` の QEMU smoke test を拡張し、移動、削除、追記、保存の一連フローを固定する | RT-62, RT-63, RT-45 | QEMU 上で基本編集コマンドの回帰を検知できる |
+
 ## 先送りする項目
 
 - 複数 terminal セッション

@@ -204,7 +204,7 @@ def assert_vi_state(fsboot: pathlib.Path) -> None:
         raise AssertionError("aftervi.txt was not created after returning to shell")
 
     content = read_file(image, memo_entry[0]).decode("ascii", errors="ignore")
-    if content != "hello\nworld":
+    if content != "first second\nfinal":
         raise AssertionError(f"memo.txt content mismatch: {content!r}")
 
 
@@ -258,9 +258,31 @@ def main() -> int:
 
         monitor.send_text("vi memo.txt\n")
         time.sleep(1.0)
-        monitor.send_text("ihello\nworld")
-        time.sleep(0.8)
+        monitor.send_text("ifirst second")
+        time.sleep(0.5)
         monitor.send_key("esc")
+        time.sleep(0.3)
+        monitor.send_text("0dw")
+        time.sleep(0.3)
+        monitor.send_text("ifirst ")
+        time.sleep(0.4)
+        monitor.send_key("esc")
+        time.sleep(0.3)
+        monitor.send_text("exa")
+        time.sleep(0.2)
+        monitor.send_text("d")
+        time.sleep(0.2)
+        monitor.send_key("esc")
+        time.sleep(0.3)
+        monitor.send_text("ofinal")
+        time.sleep(0.4)
+        monitor.send_key("esc")
+        time.sleep(0.3)
+        monitor.send_text("ofiller")
+        time.sleep(0.4)
+        monitor.send_key("esc")
+        time.sleep(0.3)
+        monitor.send_text("ddgg")
         time.sleep(0.5)
         monitor.send_text(":wq\n")
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)

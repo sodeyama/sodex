@@ -9,9 +9,16 @@
 #define VI_IO_CHUNK 128
 #define VI_PATH_SIZE 128
 
+enum vi_pending {
+  VI_PENDING_NONE = 0,
+  VI_PENDING_DELETE = 1,
+  VI_PENDING_G = 2
+};
+
 struct vi_editor {
   struct vi_buffer buffer;
   enum vi_mode mode;
+  enum vi_pending pending;
   int row_offset;
   int should_exit;
   int termios_active;
@@ -28,8 +35,15 @@ static void vi_adjust_view(struct vi_editor *editor, int rows);
 static int vi_load_file(struct vi_editor *editor);
 static int vi_save_file(struct vi_editor *editor);
 static void vi_clear_command(struct vi_editor *editor);
+static void vi_clear_pending(struct vi_editor *editor);
 static void vi_enter_command_mode(struct vi_editor *editor);
+static void vi_enter_insert_mode(struct vi_editor *editor);
+static void vi_enter_insert_after(struct vi_editor *editor);
+static void vi_normal_move_left(struct vi_editor *editor);
+static void vi_normal_move_right(struct vi_editor *editor);
 static void vi_handle_arrow(struct vi_editor *editor, char code);
+static void vi_handle_pending_delete(struct vi_editor *editor, char ch);
+static void vi_handle_pending_g(struct vi_editor *editor, char ch);
 static void vi_handle_normal(struct vi_editor *editor, char ch);
 static void vi_handle_insert(struct vi_editor *editor, char ch);
 static void vi_handle_command(struct vi_editor *editor, char ch);
@@ -175,14 +189,71 @@ static void vi_clear_command(struct vi_editor *editor)
   memset(editor->command, 0, sizeof(editor->command));
 }
 
+static void vi_clear_pending(struct vi_editor *editor)
+{
+  editor->pending = VI_PENDING_NONE;
+}
+
 static void vi_enter_command_mode(struct vi_editor *editor)
 {
   editor->mode = VI_MODE_COMMAND;
+  vi_clear_pending(editor);
   vi_clear_command(editor);
+}
+
+static void vi_enter_insert_mode(struct vi_editor *editor)
+{
+  editor->mode = VI_MODE_INSERT;
+  vi_clear_pending(editor);
+  vi_set_status(editor, "insert");
+}
+
+static void vi_enter_insert_after(struct vi_editor *editor)
+{
+  int len;
+
+  len = vi_buffer_line_length(&editor->buffer, editor->buffer.cursor_row);
+  if (editor->buffer.cursor_col < len)
+    vi_buffer_move_right(&editor->buffer);
+  vi_enter_insert_mode(editor);
+}
+
+static void vi_normal_move_left(struct vi_editor *editor)
+{
+  int row;
+  int col;
+
+  row = editor->buffer.cursor_row;
+  col = editor->buffer.cursor_col;
+  vi_buffer_move_left(&editor->buffer);
+  if (editor->buffer.cursor_row != row) {
+    editor->buffer.cursor_row = row;
+    editor->buffer.cursor_col = col;
+  }
+}
+
+static void vi_normal_move_right(struct vi_editor *editor)
+{
+  int row;
+  int col;
+  int len;
+
+  row = editor->buffer.cursor_row;
+  col = editor->buffer.cursor_col;
+  len = vi_buffer_line_length(&editor->buffer, row);
+  vi_buffer_move_right(&editor->buffer);
+  if (editor->buffer.cursor_row != row ||
+      editor->buffer.cursor_col >= len) {
+    editor->buffer.cursor_row = row;
+    editor->buffer.cursor_col = col;
+  }
 }
 
 static void vi_handle_arrow(struct vi_editor *editor, char code)
 {
+  if (editor->mode == VI_MODE_NORMAL)
+    vi_clear_pending(editor);
+
   switch (code) {
   case 'A':
     vi_buffer_move_up(&editor->buffer);
@@ -191,21 +262,85 @@ static void vi_handle_arrow(struct vi_editor *editor, char code)
     vi_buffer_move_down(&editor->buffer);
     break;
   case 'C':
-    vi_buffer_move_right(&editor->buffer);
+    if (editor->mode == VI_MODE_NORMAL)
+      vi_normal_move_right(editor);
+    else
+      vi_buffer_move_right(&editor->buffer);
     break;
   case 'D':
-    vi_buffer_move_left(&editor->buffer);
+    if (editor->mode == VI_MODE_NORMAL)
+      vi_normal_move_left(editor);
+    else
+      vi_buffer_move_left(&editor->buffer);
     break;
   default:
     break;
   }
 }
 
+static void vi_handle_pending_delete(struct vi_editor *editor, char ch)
+{
+  vi_clear_pending(editor);
+
+  switch (ch) {
+  case 'd':
+    vi_buffer_delete_line(&editor->buffer);
+    break;
+  case 'w':
+    vi_buffer_delete_word_forward(&editor->buffer);
+    break;
+  case 'b':
+    vi_buffer_delete_word_backward(&editor->buffer);
+    break;
+  case 'e':
+    vi_buffer_delete_word_end(&editor->buffer);
+    break;
+  case '0':
+    vi_buffer_delete_to_line_start(&editor->buffer);
+    break;
+  case '$':
+    vi_buffer_delete_to_line_end(&editor->buffer);
+    break;
+  default:
+    vi_set_status(editor, "unknown command");
+    break;
+  }
+}
+
+static void vi_handle_pending_g(struct vi_editor *editor, char ch)
+{
+  vi_clear_pending(editor);
+
+  switch (ch) {
+  case 'g':
+    vi_buffer_move_first_line(&editor->buffer);
+    break;
+  default:
+    vi_set_status(editor, "unknown command");
+    break;
+  }
+}
+
 static void vi_handle_normal(struct vi_editor *editor, char ch)
 {
+  if (ch == '\x1b') {
+    vi_clear_pending(editor);
+    vi_set_status(editor, "normal");
+    return;
+  }
+
+  if (editor->pending == VI_PENDING_DELETE) {
+    vi_handle_pending_delete(editor, ch);
+    return;
+  }
+  if (editor->pending == VI_PENDING_G) {
+    vi_handle_pending_g(editor, ch);
+    return;
+  }
+
   switch (ch) {
   case 'h':
-    vi_buffer_move_left(&editor->buffer);
+    vi_normal_move_left(editor);
     break;
   case 'j':
     vi_buffer_move_down(&editor->buffer);
@@ -214,11 +349,65 @@ static void vi_handle_normal(struct vi_editor *editor, char ch)
     vi_buffer_move_up(&editor->buffer);
     break;
   case 'l':
-    vi_buffer_move_right(&editor->buffer);
+    vi_normal_move_right(editor);
+    break;
+  case '0':
+    vi_buffer_move_line_start(&editor->buffer);
+    break;
+  case '^':
+    vi_buffer_move_line_first_nonblank(&editor->buffer);
+    break;
+  case '$':
+    vi_buffer_move_line_last_char(&editor->buffer);
+    break;
+  case 'w':
+    vi_buffer_move_word_forward(&editor->buffer);
+    break;
+  case 'b':
+    vi_buffer_move_word_backward(&editor->buffer);
+    break;
+  case 'e':
+    vi_buffer_move_word_end(&editor->buffer);
+    break;
+  case 'g':
+    editor->pending = VI_PENDING_G;
+    break;
+  case 'G':
+    vi_buffer_move_last_line(&editor->buffer);
+    break;
+  case 'x':
+    vi_buffer_delete_char(&editor->buffer);
+    break;
+  case 'X':
+    vi_buffer_delete_prev_char(&editor->buffer);
+    break;
+  case 'd':
+    editor->pending = VI_PENDING_DELETE;
+    break;
+  case 'D':
+    vi_buffer_delete_to_line_end(&editor->buffer);
     break;
   case 'i':
-    editor->mode = VI_MODE_INSERT;
-    vi_set_status(editor, "insert");
+    vi_enter_insert_mode(editor);
+    break;
+  case 'a':
+    vi_enter_insert_after(editor);
+    break;
+  case 'A':
+    vi_buffer_move_line_end(&editor->buffer);
+    vi_enter_insert_mode(editor);
+    break;
+  case 'I':
+    vi_buffer_move_line_first_nonblank(&editor->buffer);
+    vi_enter_insert_mode(editor);
+    break;
+  case 'o':
+    if (vi_buffer_open_line_below(&editor->buffer) == 0)
+      vi_enter_insert_mode(editor);
+    break;
+  case 'O':
+    if (vi_buffer_open_line_above(&editor->buffer) == 0)
+      vi_enter_insert_mode(editor);
     break;
   case ':':
     vi_enter_command_mode(editor);
@@ -232,6 +421,7 @@ static void vi_handle_insert(struct vi_editor *editor, char ch)
 {
   if (ch == '\x1b') {
     editor->mode = VI_MODE_NORMAL;
+    vi_clear_pending(editor);
     vi_set_status(editor, "normal");
     return;
   }
@@ -254,6 +444,7 @@ static void vi_handle_command(struct vi_editor *editor, char ch)
 
   if (ch == '\x1b') {
     editor->mode = VI_MODE_NORMAL;
+    vi_clear_pending(editor);
     vi_clear_command(editor);
     return;
   }

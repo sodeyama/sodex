@@ -558,6 +558,7 @@ int create_root_dir(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
 
   int iblock = alloc_inode_block(sb, gd);
   ino->i_block[0] = iblock;
+  set_bitmap(block_bitmap, iblock);
 
 
   // set '0' to dir block
@@ -597,6 +598,7 @@ int create_lostfound_dir(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
 
   int iblock = alloc_inode_block(sb, gd);
   ino->i_block[0] = iblock;
+  set_bitmap(block_bitmap, iblock);
 
 
   // set '0' to dir block
@@ -635,6 +637,7 @@ int create_dir(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
 
   int iblock = alloc_inode_block(sb, gd);
   ino->i_block[0] = iblock;
+  set_bitmap(block_bitmap, iblock);
 
 
   // set '0' to dir block
@@ -745,7 +748,15 @@ int main(int argc, char **argv)
   cout << "The size of init2 file is " << init2_size << endl;
 #endif
 
-  fstream kernel_iofs(fskernel_filename.c_str(), ios::in|ios::out|ios::binary);
+  fstream kernel_iofs(fskernel_filename.c_str(),
+                      ios::in|ios::out|ios::binary|ios::trunc);
+  if (!kernel_iofs)
+    error("fs image open error");
+
+  // 実行時に新しい data block を確保できるよう、fs image を最大サイズまで広げる。
+  kernel_iofs.seekp(BLOCK_MAX * BLOCK_SIZE - 1, ios::beg);
+  kernel_iofs.write("", 1);
+  kernel_iofs.flush();
 
   set_boot_block(kernel_iofs, (char*)boota);
 

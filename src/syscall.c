@@ -31,10 +31,16 @@
 #include <fb.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
+PRIVATE int sys_creat(const char* pathname, mode_t mode);
 PRIVATE int sys_read(int fd, void* buf, size_t count);
 PRIVATE int __stdin_read(int fd, void* buf, size_t count);
 PRIVATE void sys_write(int fd, const void* buf, size_t count);
 PRIVATE void sys_close(int fd);
+PRIVATE int sys_lseek(int fd, off_t offset, int whence);
+PRIVATE int sys_mkdir_call(const char* pathname, mode_t mode);
+PRIVATE int sys_unlink_call(const char* pathname);
+PRIVATE int sys_rmdir_call(const char* pathname);
+PRIVATE int sys_rename_call(const char* oldpath, const char* newpath);
 PRIVATE int sys_getdentry();
 PRIVATE int sys_getpstat();
 PRIVATE int sys_getkeyevent(struct key_event *event);
@@ -104,6 +110,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
     ret = sys_open(p1, p2, p3);
     break;
 
+  case SYS_CALL_CREAT:
+    ret = sys_creat((const char *)p1, (mode_t)p2);
+    break;
+
   case SYS_CALL_CLOSE:
     sys_close(p1);
     break;
@@ -118,6 +128,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_CHDIR:
     ret = sys_chdir(p1);
+    break;
+
+  case SYS_CALL_LSEEK:
+    ret = sys_lseek((int)p1, (off_t)p2, (int)p3);
     break;
 
   case SYS_CALL_GETDENTRY:
@@ -186,6 +200,22 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_KILL:
     ret = sys_kill(p1, p2);
+    break;
+
+  case SYS_CALL_RENAME:
+    ret = sys_rename_call((const char *)p1, (const char *)p2);
+    break;
+
+  case SYS_CALL_MKDIR:
+    ret = sys_mkdir_call((const char *)p1, (mode_t)p2);
+    break;
+
+  case SYS_CALL_RMDIR:
+    ret = sys_rmdir_call((const char *)p1);
+    break;
+
+  case SYS_CALL_UNLINK:
+    ret = sys_unlink_call((const char *)p1);
     break;
 
   case SYS_CALL_SIGNAL:
@@ -334,16 +364,46 @@ PRIVATE int sys_open(const char* pathname, int flags, mode_t mode)
 {
   disable_pic_interrupt(IRQ_TIMER);
 
-  int fd = open_env(pathname, flags, mode);
+  int fd = ext3_open(pathname, flags, mode);
 
   enable_pic_interrupt(IRQ_TIMER);
 
   return fd;
 }
 
+PRIVATE int sys_creat(const char* pathname, mode_t mode)
+{
+  return sys_open(pathname, O_CREAT | O_TRUNC | O_WRONLY, mode);
+}
+
 PRIVATE void sys_close(int fd)
 {
   close(fd);
+}
+
+PRIVATE int sys_lseek(int fd, off_t offset, int whence)
+{
+  return (int)lseek(fd, offset, whence);
+}
+
+PRIVATE int sys_mkdir_call(const char* pathname, mode_t mode)
+{
+  return ext3_mkdir(pathname, mode);
+}
+
+PRIVATE int sys_unlink_call(const char* pathname)
+{
+  return ext3_unlink(pathname);
+}
+
+PRIVATE int sys_rmdir_call(const char* pathname)
+{
+  return ext3_rmdir(pathname);
+}
+
+PRIVATE int sys_rename_call(const char* oldpath, const char* newpath)
+{
+  return ext3_rename(oldpath, newpath);
 }
 
 PRIVATE int sys_openpty()

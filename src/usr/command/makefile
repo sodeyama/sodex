@@ -22,6 +22,11 @@ REGEX   = ${USRDIR}/bin/regex
 SEND    = ${USRDIR}/bin/send
 PING    = ${USRDIR}/bin/ping
 TERM    = ${USRDIR}/bin/term
+TOUCH   = ${USRDIR}/bin/touch
+MKDIR   = ${USRDIR}/bin/mkdir
+RM      = ${USRDIR}/bin/rm
+RMDIR   = ${USRDIR}/bin/rmdir
+MV      = ${USRDIR}/bin/mv
 
 all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
@@ -38,6 +43,11 @@ all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/send.o -o ${SEND} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ping.o -o ${PING} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/term.o -o ${TERM} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/touch.o -o ${TOUCH} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/mkdir.o -o ${MKDIR} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/rm.o -o ${RM} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/rmdir.o -o ${RMDIR} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/mv.o -o ${MV} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

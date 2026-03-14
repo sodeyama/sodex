@@ -47,6 +47,8 @@
 #define FLAG_FILE		3
 #define FLAG_TTY_MASTER 4
 #define FLAG_TTY_SLAVE  5
+#define FLAG_PIPE_READ  6
+#define FLAG_PIPE_WRITE 7
 
 #define FD_TOINODE(fd, task) (task->files->fs_fd[fd]->f_dentry->d_inode)
 #define FD_TODENTRY(fd, task) (task->files->fs_fd[fd]->f_dentry)
@@ -71,6 +73,7 @@ struct file {
   mode_t                f_mode;
   u_int32_t				f_flags;
   off_t                 f_pos;
+  int                   f_refcount;
   u_int32_t             f_pid;
   u_int32_t             f_uid;
   u_int32_t             f_euid;

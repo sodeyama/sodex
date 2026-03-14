@@ -122,16 +122,29 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   kern_task->files = kalloc(sizeof(struct files_struct));
   memset(kern_task->files, 0, sizeof(struct files_struct));
   child_tty = inherit_stdio_tty(stdio_tty);
-  if (child_tty != NULL)
+  if (current != NULL && stdio_tty == NULL) {
+    files_clone(kern_task->files, current->files);
+  } else if (child_tty != NULL) {
     fs_stdio_open_tty(kern_task->files, child_tty);
-  else
+  } else {
     fs_stdio_open(kern_task->files);
+  }
 
   memcpy(kern_task->filename, filename, PROC_LEN_FILENAME-1);
+  if (current == NULL || current->dentry == NULL)
+    kern_task->dentry = rootdir;
+  else
+    kern_task->dentry = current->dentry;
 
   u_int32_t entrypoint, loadaddr, allocation_point;
   int elf_ret;
-  elf_ret = elf_loader(filename, &entrypoint, &loadaddr, pg_dir, kern_task, &allocation_point);
+  {
+    struct task_struct *saved_current = current;
+    current = kern_task;
+    elf_ret = elf_loader(filename, &entrypoint, &loadaddr, pg_dir, kern_task,
+                         &allocation_point);
+    current = saved_current;
+  }
   if (elf_ret == ELF_FAIL)
 	return NULL;
   kern_task->allocpoint = allocation_point;
@@ -139,14 +152,14 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   init_dlist_set(&(kern_task->children));
   init_dlist_set(&(kern_task->sibling));
   kern_task->pid = alloc_pid();
-  if (current == NULL || current->dentry == NULL)
-    kern_task->dentry = rootdir;
-  else
-    kern_task->dentry = current->dentry;
 
-  // set the parent process
-  kern_task->parent = current;
-  // set the child process
+  // 初回の kernel_execve() では current が未設定なので自分自身を親にする。
+  if (current == NULL)
+    kern_task->parent = kern_task;
+  else
+    kern_task->parent = current;
+
+  // 親が別タスクのときだけ子リストへ繋ぐ。
   if (kern_task->parent != kern_task)
     dlist_insert_after(&(kern_task->sibling), &(kern_task->parent->children));
 

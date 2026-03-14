@@ -123,6 +123,9 @@ PUBLIC int tty_install_stdio(struct files_struct* files, struct tty *tty)
   struct file *stdin_file;
   struct file *stdout_file;
   struct file *stderr_file;
+  int stdin_fd;
+  int stdout_fd;
+  int stderr_fd;
 
   stdin_file = tty_new_file(FLAG_TTY_SLAVE, &g_tty_slave_file_ops, tty);
   stdout_file = tty_new_file(FLAG_TTY_SLAVE, &g_tty_slave_file_ops, tty);
@@ -131,9 +134,14 @@ PUBLIC int tty_install_stdio(struct files_struct* files, struct tty *tty)
     return FALSE;
   }
 
-  files->fs_fd[files->fs_freefd++] = stdin_file;
-  files->fs_fd[files->fs_freefd++] = stdout_file;
-  files->fs_fd[files->fs_freefd++] = stderr_file;
+  stdin_fd = files_alloc_fd(files, stdin_file);
+  stdout_fd = files_alloc_fd(files, stdout_file);
+  stderr_fd = files_alloc_fd(files, stderr_file);
+  if (stdin_fd != STDIN_FILENO ||
+      stdout_fd != STDOUT_FILENO ||
+      stderr_fd != STDERR_FILENO) {
+    return FALSE;
+  }
   return TRUE;
 }
 
@@ -151,8 +159,7 @@ PUBLIC int tty_openpty(struct files_struct* files)
   if (master_file == NULL)
     return -1;
 
-  fd = files->fs_freefd++;
-  files->fs_fd[fd] = master_file;
+  fd = files_alloc_fd(files, master_file);
   return fd;
 }
 
@@ -437,5 +444,6 @@ PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,
   file->f_stdioflag = stdioflag;
   file->f_ops = ops;
   file->private_data = tty;
+  file->f_refcount = 1;
   return file;
 }

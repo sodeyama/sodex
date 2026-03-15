@@ -167,12 +167,31 @@ void* malloc(size_t size)
     new_reserve_size = CEIL(size*2, BLOCK_SIZE);
 
   void* new_addr = sbrk(new_reserve_size);
+  MemHole *used;
+  MemHole *free_hole;
   if (new_addr == NULL)
     return NULL;
-  (mfree_list.prev)->base += size;
-  (mfree_list.prev)->size += (new_reserve_size - size);
 
-  return (mfree_list.prev)->base;
+  /* free list が空でも sentinel を壊さず、新しい領域を used/free に分ける。 */
+  used = new_mhole(&mhole_list);
+  if (used == NULL)
+    return NULL;
+  used->base = (u_int32_t)new_addr;
+  used->size = size;
+  MHOLE_INSERT_HEAD(used, muse_list);
+
+  if (new_reserve_size > size) {
+    free_hole = new_mhole(&mhole_list);
+    if (free_hole == NULL) {
+      used->size = new_reserve_size;
+    } else {
+      free_hole->base = (u_int32_t)new_addr + size;
+      free_hole->size = new_reserve_size - size;
+      MHOLE_INSERT_TAIL(free_hole, mfree_list);
+    }
+  }
+
+  return (void*)used->base;
 }
 
 static MemHole* new_mhole(MemHole* hole_list)

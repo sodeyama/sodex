@@ -168,7 +168,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -176,6 +176,12 @@ test-qemu: ktest-build
 test-qemu-memory: ktest-build
 	@echo "=== Running memory scaling smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_memory_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-user-memory:
+	@$(MAKE) clean
+	@$(MAKE) all
+	@echo "=== Running user memory smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_user_memory_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-term: all
 	@echo "=== Running rich terminal smoke in QEMU ==="

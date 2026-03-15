@@ -49,6 +49,7 @@ bin/start.sh
 ```
 
 この起動スクリプトは現在 `-display cocoa` を使うため、macOS 前提です。別環境で使う場合は [bin/start.sh](bin/start.sh) の display 設定を調整してください。
+既定の QEMU RAM は `512MB` です。`SODEX_QEMU_MEM_MB=1024 bin/start.sh` のように上書きできます。
 
 ネットワーク付きで起動したい場合:
 
@@ -73,12 +74,18 @@ make test-qemu
 主な QEMU smoke test:
 
 ```sh
+make -C src test-qemu-memory
+make -C src test-qemu-user-memory
 make -C src test-qemu-term
 make -C src test-qemu-fs
 make -C src test-qemu-shell-io
 make -C src test-qemu-vi
 make -C src test-qemu-ime
 ```
+
+`make -C src test-qemu-memory` は `128/256/512/1024MB` の memory scaling matrix を回します。
+`make -C src test-qemu-user-memory` は shell 経由で `memgrow` を起動し、`execve` と `malloc/brk` の userland 回帰を確認します。
+guest が使う RAM を論理的に絞りたいときは、`SODEX_RAM_CAP_MB=256 make -C src test-qemu-memory` のように cap を付けられます。
 
 ## リポジトリの見どころ
 

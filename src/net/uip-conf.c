@@ -52,6 +52,7 @@ void uip_appcall(void) {
   if (socket_table[sockfd].tcp_conn != uip_conn) return;
   struct kern_socket *sk = &socket_table[sockfd];
   int ready_for_output = (uip_poll() || uip_acked() || uip_connected());
+  int sent_output = 0;
 
   if (uip_connected()) {
     dbg_puts("TCP: CONNECTED sockfd=");
@@ -76,12 +77,22 @@ void uip_appcall(void) {
 
   /* appcall 中だけ uip_send() / uip_close() を呼ぶ */
   if (ready_for_output && sk->tx_pending) {
+    dbg_puts("TCP: SEND sockfd=");
+    dbg_dec(sockfd);
+    dbg_puts(" len=");
+    dbg_dec(sk->tx_len);
+    dbg_puts("\n");
     uip_send(sk->tx_buf, sk->tx_len);
     sk->tx_pending = 0;
+    sent_output = 1;
   }
 
-  if (ready_for_output && sk->close_pending && !sk->tx_pending &&
+  if (ready_for_output && !sent_output &&
+      sk->close_pending && !sk->tx_pending &&
       !uip_outstanding(uip_conn)) {
+    dbg_puts("TCP: CLOSE sockfd=");
+    dbg_dec(sockfd);
+    dbg_puts("\n");
     sk->close_pending = 0;
     uip_close();
   }
@@ -89,6 +100,11 @@ void uip_appcall(void) {
   if (uip_rexmit()) {
     /* Retransmit the last sent data */
     if (sk->tx_len > 0) {
+      dbg_puts("TCP: REXMIT sockfd=");
+      dbg_dec(sockfd);
+      dbg_puts(" len=");
+      dbg_dec(sk->tx_len);
+      dbg_puts("\n");
       uip_send(sk->tx_buf, sk->tx_len);
     }
   }

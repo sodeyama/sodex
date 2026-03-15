@@ -30,6 +30,7 @@ EXTERN volatile u_int32_t kernel_tick;
 
 #define HTTP_MAX_CONNECTIONS 2
 #define HTTP_IDLE_TIMEOUT_TICKS 500
+#define HTTP_CLOSE_DRAIN_TICKS 60
 
 PRIVATE int http_append_char(char *buf, int cap, int pos, char c)
 {
@@ -453,7 +454,7 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
   if (conn->closing)
   {
     if (!conn->close_initiated &&
-        (int)(kernel_tick - conn->close_started_tick) >= 2) {
+        (int)(kernel_tick - conn->close_started_tick) >= HTTP_CLOSE_DRAIN_TICKS) {
       socket_begin_close(conn->fd);
       conn->close_initiated = TRUE;
     }

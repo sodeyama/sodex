@@ -569,18 +569,13 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
   }
 
   if (sk->type == SOCK_STREAM && sk->tcp_conn) {
-    /* TCP send via uIP: buffer data and trigger poll */
+    /* TCP send は pending だけ立てて、uIP periodic で送る。
+     * server handler 内から uip_poll_conn() を再入させると不安定になる。 */
     disableInterrupt();
     if (len > SOCK_TXBUF_SIZE) len = SOCK_TXBUF_SIZE;
     memcpy(sk->tx_buf, buf, len);
     sk->tx_len = len;
     sk->tx_pending = 1;
-    /* Trigger uip_appcall via poll so uip_send() runs in correct context */
-    uip_poll_conn(sk->tcp_conn);
-    if (uip_len > 0) {
-      uip_arp_out();
-      ne2000_send(uip_buf, uip_len);
-    }
     enableInterrupt();
     return len;
   }
@@ -626,13 +621,9 @@ PUBLIC int socket_begin_close(int sockfd)
   if (sk->state == SOCK_STATE_UNUSED) return -1;
 
   if (sk->tcp_conn) {
+    /* FIN も pending だけ立てて periodic 側で流す。 */
     disableInterrupt();
     sk->close_pending = 1;
-    uip_poll_conn(sk->tcp_conn);
-    if (uip_len > 0) {
-      uip_arp_out();
-      ne2000_send(uip_buf, uip_len);
-    }
     enableInterrupt();
     return 0;
   }
@@ -651,8 +642,10 @@ PUBLIC int socket_begin_close(int sockfd)
 
 PUBLIC int kern_close_socket(int sockfd)
 {
+  struct kern_socket *sk;
+
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
-  struct kern_socket *sk = &socket_table[sockfd];
+  sk = &socket_table[sockfd];
   EXTERN void network_poll(void);
 
   if (sk->state == SOCK_STATE_UNUSED)
@@ -706,10 +699,15 @@ PUBLIC int kern_close_socket(int sockfd)
       network_poll();
       enableInterrupt();
 
-      if (sk->state == SOCK_STATE_CLOSED)
+      /* close wait 中は stack 上の sk を持ち回らず毎回引き直す。 */
+      if (socket_table[sockfd].state == SOCK_STATE_CLOSED ||
+          socket_table[sockfd].state == SOCK_STATE_UNUSED)
         break;
     }
+    sk = &socket_table[sockfd];
   }
+  if (sk->state == SOCK_STATE_UNUSED)
+    return 0;
   if (sk->udp_conn) {
     uip_udp_remove(sk->udp_conn);
   }

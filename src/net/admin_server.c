@@ -64,6 +64,7 @@ EXTERN volatile u_int32_t kernel_tick;
 #define ADMIN_MAX_CONNECTIONS 2
 #define ADMIN_IDLE_TIMEOUT_TICKS 500
 #define ADMIN_CONFIG_MAX 256
+#define ADMIN_CLOSE_DRAIN_TICKS 60
 
 struct admin_runtime_state {
   char status_token[ADMIN_TOKEN_MAX];
@@ -91,6 +92,8 @@ struct admin_connection {
   u_int32_t accepted_tick;
   int length;
   char buffer[ADMIN_TEXT_REQUEST_MAX];
+  char response[ADMIN_RESPONSE_MAX];
+  struct admin_request request;
 };
 
 PRIVATE int admin_listener_fd = -1;
@@ -801,8 +804,6 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
   char chunk[64];
   int read_len;
   int line_len;
-  struct admin_request req;
-  char response[ADMIN_RESPONSE_MAX];
 
   if (conn == 0 || !conn->in_use)
     return;
@@ -821,7 +822,7 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
   if (conn->closing)
   {
     if (!conn->close_initiated &&
-        (int)(kernel_tick - conn->close_started_tick) >= 2) {
+        (int)(kernel_tick - conn->close_started_tick) >= ADMIN_CLOSE_DRAIN_TICKS) {
       socket_begin_close(conn->fd);
       conn->close_initiated = TRUE;
     }
@@ -850,20 +851,20 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
   if (line_len < 0)
     return;
 
-  if (admin_parse_command(conn->buffer, line_len, &req) < 0) {
+  if (admin_parse_command(conn->buffer, line_len, &conn->request) < 0) {
     admin_audit_peer("invalid_admin", conn->peer_addr);
     admin_send_and_close(conn, "ERR invalid_command\n");
     return;
   }
 
-  if (!admin_authorize_request(&req, conn->peer_addr)) {
+  if (!admin_authorize_request(&conn->request, conn->peer_addr)) {
     admin_audit_peer("unauthorized_admin", conn->peer_addr);
     admin_send_and_close(conn, "ERR unauthorized\n");
     return;
   }
 
-  admin_execute_request(&req, response, sizeof(response), FALSE);
-  admin_send_and_close(conn, response);
+  admin_execute_request(&conn->request, conn->response, sizeof(conn->response), FALSE);
+  admin_send_and_close(conn, conn->response);
 }
 
 PUBLIC void admin_server_init(void)

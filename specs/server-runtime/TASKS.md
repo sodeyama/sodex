@@ -19,16 +19,27 @@
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
 | [x] | SRT-07 | build-time 固定 token / allowlist を runtime 注入へ置き換える | SRT-05 | `src/makefile` の固定 secret なしで `/etc/sodex-admin.conf` から起動時設定できる |
-| [ ] | SRT-08 | Docker / headless 常駐の起動導線を実装する | SRT-02 | Linux + Docker 上で guest server を常駐起動できる |
+| [x] | SRT-08 | Docker / headless 常駐の起動導線を実装する | SRT-02 | Linux + Docker 上で guest server を常駐起動できる |
 | [x] | SRT-09 | 認証失敗に対する rate limit を追加する | SRT-05 | timeout だけでなく失敗連打も抑止できる |
 | [ ] | SRT-10 | `test-qemu-server` を継続実行しやすい CI / 運用導線へ寄せる | SRT-06 | 手元だけでなく定期回帰として回せる |
+
+## M2: 追加で見えた残タスク
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | SRT-11 | throttle 応答に retry 情報を返す | SRT-09 | HTTP `429` と text protocol の両方で再試行待ち時間を client が受け取れる |
+| [ ] | SRT-12 | 起動設定の fail-safe と可視化を整える | SRT-07 | config 不備や token 欠落時の挙動が audit / ready marker / test で固定される |
+| [ ] | SRT-13 | server runtime の異常系テストを拡充する | SRT-08, SRT-09, SRT-10 | happy path だけでなく `403` / `429` / `busy` / `timeout` 系も回帰で拾える |
+| [ ] | SRT-14 | allowlist を複数 peer / CIDR へ広げる | SRT-07, SRT-08 | Linux host / Docker Desktop / CI runner の差を単一 `allow_ip` 上書きなしで吸収できる |
+| [ ] | SRT-15 | debug shell 用の最小 TCP-PTY bridge を実装する | SRT-10, SRT-12, SRT-13 | raw TCP client から token 付きで shell session を張り、切断/再接続まで安定する |
+| [ ] | SRT-16 | 暗号込み `SSH server` を段階導入する | SRT-15 | `OpenSSH` client から最小の shell login が通る |
 
 ## 詳細残タスク
 
 ### SRT-08: Docker / headless 常駐の起動導線
 
-2026-03-15 時点で、Docker image / entrypoint / `server-headless` 導線までは作成済み。
-ただし Linux + Docker 上の close path がまだ不安定で、常駐導線としては未完。
+2026-03-15 時点で、Docker image / entrypoint / `server-headless` 導線に加えて、
+Docker 経由の HTTP/admin smoke まで安定化できた。
 
 - [x] Docker 用の `Dockerfile` / `entrypoint.sh` / `bin/start.sh` を用意する
 - [x] Linux gcc の PIE 差分を吸収し、container 内 build を通す
@@ -38,21 +49,24 @@
 - [x] `kern_close_socket()` の close wait 中に `socket_table[sockfd]` を引き直す
 - [x] headless 起動後の ready 条件を定義する
   - serial/stdout に `AUDIT server_runtime_ready allow_ip=... admin=10023 http=8080` が出た時点を ready とする
-- [ ] admin port (`10023`) の request/response を Docker 経由で安定させる
-  - `PING` は run によって `ERR forbidden` が返るケースと timeout するケースがある
-- [ ] HTTP port (`18080`) の response 後に guest が落ちないようにする
-  - 2026-03-15 の最新観測では `HTTP/1.1 403 Forbidden` を返した直後に `PF: CR2=00 err=00 eip=C0022AA6 cs=08`
-- [ ] close/ACK/FIN のどこで制御が壊れるかを特定し、再現テストを固定する
+- [x] admin port (`10023`) の request/response を Docker 経由で安定させる
+  - `PING` / `STATUS` / `LOG TAIL` を含む smoke が published port 経由で通る
+- [x] HTTP port (`18080`) の response 後に guest が落ちないようにする
+  - `GET /healthz` / `GET /status` / `POST /agent/start` / `POST /agent/stop` の往復後も fault marker なしを確認した
+- [x] close/ACK/FIN のどこで制御が壊れるかを特定し、再現テストを固定する
+  - server handler 後に pending TCP を flush する `socket_service_pending_tcp()` と `uip_newdata()` 応答条件で close path を安定化した
 - [x] Docker 実行時の allowlist 期待値を整理する
-  - `allow_ip=10.0.2.2` を hostfwd peer の既定値として扱い、Docker 導線の ready marker と smoke もこの期待値に合わせる
+  - Linux host の既定は `10.0.2.2`、Docker Desktop/macOS では `192.168.65.1` を確認した
 - [x] 常駐運用の完了条件を満たしたら README の「未確認」注記を閉じる
-  - README は Linux host 前提の supported path を明記し、Docker Desktop/macOS は対象外とした
+  - README に arm64 host build と allowlist 上書き手順を反映した
 
 2026-03-15 追記:
 
 - `docker/server-runtime/entrypoint.sh` は `/tmp/sodex-server-runtime-build` で fresh build してから headless 起動する
 - `make test-docker-server` / `src/test/run_docker_server_smoke.py` を追加し、Docker/headless smoke を別導線で回せるようにした
-- この macOS 作業環境では Linux host と同じ published-port 挙動まではまだ確認できていないため、`admin/http` の安定化と close path の切り分けは継続
+- `docker/server-runtime/Dockerfile` は `i686-linux-gnu` cross toolchain を使う構成へ更新し、arm64 host でも native container build が通る
+- `socket_service_pending_tcp()` を main loop / timer interrupt 後段で回し、HTTP/admin の pending send/close を即座に flush するようにした
+- この macOS + Docker Desktop 環境でも `SODEX_ADMIN_ALLOW_IP=192.168.65.1` を付けた smoke が通り、`SRT-08` の closure 条件を満たした
 
 ### SRT-09: 認証失敗 rate limit
 
@@ -82,9 +96,75 @@
   - `PF:` / `PageFault` / `General Protection Exception` を QEMU/Docker smoke の両方で fail 扱いにした
 - [x] 定期実行しやすい entrypoint を `make` か CI workflow に寄せる
   - `make docker-server-image` / `make test-docker-server` を追加した
-- [ ] `SRT-08` が閉じるまでは Docker/headless job を advisory 扱いにするかを決める
+- [x] `SRT-08` が閉じた後の Docker/headless job の扱いを決める
+  - `test-docker-server` は advisory ではなく通常の smoke として扱ってよい
+- [ ] repo ルートから `test-qemu-server` を叩ける入口を揃える
+  - 現状は `src/makefile` 側に target があり、root `makefile` には wrapper がない
+- [ ] Linux runner 向け CI workflow/job を追加し、`test-qemu-server` を定期回帰へ載せる
+  - repo 直下に CI workflow がまだなく、QEMU smoke は手元実行前提のまま
+- [ ] `test-docker-server` を CI job 化し、artifact upload を整える
+  - Docker smoke は make target まではあるが、CI 上の log 保存と runner 条件整理が未完
+- [ ] runner 前提 (`qemu-system-i386`, Docker, 任意で `/dev/kvm`) を README/CI 設定へ落とす
+  - 常用 CI に載せるには依存ツールと加速有無を明示する必要がある
 
 2026-03-15 追記:
 
 - `test-qemu-server` は ready marker 待ちと fault marker fail-fast を持つ常用 smoke に寄せた
-- Docker/headless 側も同じ ready marker と fault marker を見る smoke を追加したが、`SRT-08` の close path 未解決につき job の扱いは未確定
+- Docker/headless 側も同じ ready marker と fault marker を見る smoke を追加し、`SRT-08` の close path 修正後に常用 smoke へ移せる状態にした
+
+### SRT-11: throttle 応答の retry 情報
+
+- [ ] `admin_authorize_peer()` / `admin_authorize_request_detailed()` の `retry_after_ticks` を call site まで通す
+- [ ] HTTP `429` に `Retry-After` と body 内の retry 値を載せる
+- [ ] text protocol の `ERR throttled` に retry 値を載せる
+- [ ] host test と smoke に throttle 応答の retry 検証を追加する
+
+### SRT-12: 起動設定の fail-safe と可視化
+
+- [ ] `/etc/sodex-admin.conf` の unknown key / parse error / size over を audit に残す
+- [ ] token 欠落時にどこまで listener を立てるかを決め、ready marker に反映する
+- [ ] config 不備時の fail-open / fail-closed を README と test で固定する
+- [ ] `write_server_runtime_overlay.py` と Docker/QEMU smoke で設定不備ケースを再現できるようにする
+
+### SRT-13: 異常系テストの拡充
+
+- [ ] HTTP の `403` / `429` を QEMU/Docker smoke に入れる
+- [ ] text protocol の `ERR forbidden` / `ERR unauthorized` / `ERR throttled` を回帰項目にする
+- [ ] `busy` / `timeout` / `too_large` の host test を追加する
+- [ ] `SODEX_ADMIN_ALLOW_IP` 上書きと config 差し替えの回帰を固定する
+
+### SRT-14: allowlist の複数 peer / CIDR 対応
+
+- [ ] runtime config で複数 `allow_ip` または CIDR を表現できる形式を決める
+- [ ] `admin_is_source_allowed()` と ready marker の表現を複数 peer 前提へ広げる
+- [ ] host test に複数 peer 許可 / 拒否ケースを追加する
+- [ ] Linux host / Docker Desktop / CI runner を同一 build artifact で通せる smoke を用意する
+
+### SRT-15: debug shell 用の最小 TCP-PTY bridge
+
+2026-03-15 追記:
+
+- raw TCP client 前提の `debug_shell_port` と `TOKEN <control_token>` preface を実装し、認証後は `OK shell` で `PTY` relay へ移る形にした
+- `test_debug_shell_parser` で preface / role / config parser を固定した
+- QEMU smoke と README の接続手順は、`test-qemu-server` の baseline 不安定化を先に潰してから閉じる
+
+- [x] `telnet` 互換ではなく raw TCP client 前提の protocol と port を決める
+- [x] listener を default off にし、明示 config がある時だけ有効にする
+- [x] 接続直後の token preface と session upgrade を実装する
+- [x] `openpty()` / `execve_pty()` で `eshell` を起動し、socket <-> `PTY` relay を実装する
+- [x] 単一 session 制限、timeout、close、reconnect、audit を入れる
+- [x] fixed winsize で始める方針に決める
+- [x] host test を追加する
+- [ ] QEMU smoke を追加する
+- [ ] `nc` / `socat` 前提の接続手順を README に書く
+
+### SRT-16: 暗号込み `SSH server` の段階導入
+
+- [ ] `SSHv2` の最小 scope と algorithm suite を決める
+- [ ] 乱数源と crypto 実装の導入方針を決める
+- [ ] host key の注入または永続化方式を決める
+- [ ] transport packet / key exchange / `NEWKEYS` を実装する
+- [ ] 最初の 1 auth method を実装する
+- [ ] `session` channel / `pty-req` / `shell` / `window-change` を実装する
+- [ ] `OpenSSH` client との互換 smoke と host test を追加する
+- [ ] `scp` / `sftp` / forwarding を初期スコープ外として固定する

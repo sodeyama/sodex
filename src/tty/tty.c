@@ -116,10 +116,30 @@ PUBLIC struct tty *tty_alloc_pty(void)
     if (g_ptys[i].active == FALSE) {
       tty_reset(&g_ptys[i], TRUE);
       g_ptys[i].active = TRUE;
+      g_ptys[i].refcount = 1;
       return &g_ptys[i];
     }
   }
   return NULL;
+}
+
+PUBLIC void tty_retain(struct tty *tty)
+{
+  if (tty == NULL)
+    return;
+  tty->refcount++;
+}
+
+PUBLIC void tty_release(struct tty *tty)
+{
+  if (tty == NULL)
+    return;
+  if (tty->refcount > 0)
+    tty->refcount--;
+  if (tty == &g_console_tty)
+    return;
+  if (tty->refcount == 0)
+    tty_reset(tty, FALSE);
 }
 
 PUBLIC int tty_install_stdio(struct files_struct* files, struct tty *tty)
@@ -161,9 +181,18 @@ PUBLIC int tty_openpty(struct files_struct* files)
 
   master_file = tty_new_file(FLAG_TTY_MASTER, &g_tty_master_file_ops, tty);
   if (master_file == NULL)
+  {
+    tty_release(tty);
     return -1;
+  }
 
   fd = files_alloc_fd(files, master_file);
+  if (fd < 0) {
+    file_put(master_file);
+    tty_release(tty);
+    return -1;
+  }
+  tty_release(tty);
   return fd;
 }
 
@@ -346,6 +375,7 @@ PRIVATE ssize_t tty_slave_file_write(struct file *file, const void *buf,
 
 PRIVATE int tty_slave_file_close(struct file *file)
 {
+  tty_release((struct tty *)file->private_data);
   (void)file;
   return TRUE;
 }
@@ -364,8 +394,10 @@ PRIVATE ssize_t tty_master_file_write(struct file *file, const void *buf,
 PRIVATE int tty_master_file_close(struct file *file)
 {
   struct tty *tty = (struct tty *)file->private_data;
-  if (tty != NULL)
+  if (tty != NULL) {
     tty->has_master = FALSE;
+    tty_release(tty);
+  }
   return TRUE;
 }
 
@@ -566,5 +598,6 @@ PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,
   file->f_ops = ops;
   file->private_data = tty;
   file->f_refcount = 1;
+  tty_retain(tty);
   return file;
 }

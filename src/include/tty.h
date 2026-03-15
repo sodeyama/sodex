@@ -28,6 +28,7 @@ struct tty_ring {
 struct tty {
   int active;
   int has_master;
+  int refcount;
   u_int8_t flags;
   u_int16_t cols;
   u_int16_t rows;
@@ -42,6 +43,8 @@ struct tty {
 PUBLIC void init_tty(void);
 PUBLIC struct tty *tty_get_console(void);
 PUBLIC struct tty *tty_alloc_pty(void);
+PUBLIC void tty_retain(struct tty *tty);
+PUBLIC void tty_release(struct tty *tty);
 PUBLIC int tty_install_stdio(struct files_struct* files, struct tty *tty);
 PUBLIC int tty_openpty(struct files_struct* files);
 PUBLIC struct tty *tty_lookup_master(struct files_struct* files, int fd);

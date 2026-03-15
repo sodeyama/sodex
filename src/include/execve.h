@@ -3,11 +3,15 @@
 
 #include <sys/types.h>
 
+struct tty;
+
 #define ARGV_MAX_NUMS 4
 #define ARGV_MAX_LEN 16
 
 PUBLIC void kernel_execve(const char *filename, char *const argv[],
                           char *const envp[]);
+PUBLIC pid_t kernel_execve_tty(const char *filename, char *const argv[],
+                               struct tty *stdio_tty);
 PUBLIC pid_t sys_execve(const char *filename, char *const argv[],
                         char *const envp[]);
 PUBLIC pid_t sys_execve_pty(const char *filename, char *const argv[],

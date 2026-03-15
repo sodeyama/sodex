@@ -50,6 +50,11 @@ int files_alloc_fd(struct files_struct *files, struct file *file) {
     return next_fd++;
 }
 
+int file_put(struct file *file) {
+    (void)file;
+    return 1;
+}
+
 extern void init_tty(void);
 extern struct tty *tty_get_console(void);
 extern struct tty *tty_alloc_pty(void);

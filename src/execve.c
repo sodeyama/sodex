@@ -51,6 +51,26 @@ PUBLIC void kernel_execve(const char *filename, char *const argv[],
   current = kern_task;
 }
 
+PUBLIC pid_t kernel_execve_tty(const char *filename, char *const argv[],
+                               struct tty *stdio_tty)
+{
+  struct task_struct* kern_task;
+
+  if (stdio_tty == NULL)
+    return -1;
+
+  disable_pic_interrupt(IRQ_TIMER);
+  kern_task = __execve(filename, argv, NULL, stdio_tty);
+  if (kern_task == NULL) {
+    enable_pic_interrupt(IRQ_TIMER);
+    return -1;
+  }
+
+  dlist_insert_after(&(kern_task->run_list), &(current->run_list));
+  enable_pic_interrupt(IRQ_TIMER);
+  return kern_task->pid;
+}
+
 PUBLIC pid_t sys_execve(const char *filename, char *const argv[],
                         char *const envp[])
 {

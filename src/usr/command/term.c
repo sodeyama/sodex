@@ -884,6 +884,8 @@ PRIVATE void render_ime_overlay(struct term_app *app)
                               &cell, FALSE);
     }
     for (i = 0; i < overlay_width && i < cell_len; i++) {
+      if ((cells[i].attr & TERM_ATTR_CONTINUATION) != 0)
+        continue;
       cell_renderer_draw_cell(&app->renderer, overlay_start_col + i, 0,
                               &cells[i], FALSE);
     }

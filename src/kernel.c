@@ -35,6 +35,7 @@
 #include <uip_arp.h>
 #include <socket.h>
 #include <admin_server.h>
+#include <debug_shell_server.h>
 #include <network_config.h>
 #include <tty.h>
 #include <font_registry.h>
@@ -146,6 +147,7 @@ PUBLIC void start_kernel()
   admin_runtime_reset();
   admin_server_init();
   http_server_init();
+  debug_shell_server_init();
   _kputs(" KERNEL: SETUP SERVER RUNTIME\n");
 
   init_process();
@@ -158,6 +160,7 @@ PUBLIC void start_kernel()
     network_poll();
     admin_server_tick();
     http_server_tick();
+    debug_shell_server_tick();
     asm("sti\n\thlt");
   }
 }

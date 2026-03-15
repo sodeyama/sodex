@@ -728,6 +728,31 @@ PUBLIC int rxbuf_read_direct(int sockfd, u_int8_t *buf, u_int16_t maxlen,
   return rxbuf_read(&socket_table[sockfd], buf, maxlen, from);
 }
 
+PUBLIC void socket_service_pending_tcp(void)
+{
+  int i;
+
+  for (i = 0; i < MAX_SOCKETS; i++) {
+    struct kern_socket *sk = &socket_table[i];
+
+    if (sk->state == SOCK_STATE_UNUSED)
+      continue;
+    if (sk->type != SOCK_STREAM || sk->tcp_conn == 0)
+      continue;
+    if (sk->tcp_conn->appstate != i)
+      continue;
+    if (!sk->tx_pending && !sk->close_pending)
+      continue;
+
+    /* server handler 完了後にだけ appcall を回して pending を flush する */
+    uip_poll_conn(sk->tcp_conn);
+    if (uip_len > 0) {
+      uip_arp_out();
+      ne2000_send(uip_buf, uip_len);
+    }
+  }
+}
+
 /* Called from netmain.c when an ICMP echo reply is received */
 PUBLIC void socket_icmp_input(u_int8_t *pkt, u_int16_t len)
 {

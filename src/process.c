@@ -25,6 +25,7 @@
 #include <elfloader.h>
 #include <execve.h>
 #include <admin_server.h>
+#include <debug_shell_server.h>
 
 EXTERN void network_poll(void);
 EXTERN volatile u_int32_t kernel_tick;
@@ -116,6 +117,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
   network_poll();
   admin_server_tick();
   http_server_tick();
+  debug_shell_server_tick();
 
   while (current->signal) {
     u_int32_t sig = maxsignal(current->signal)+1;

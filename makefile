@@ -1,7 +1,7 @@
 # Root makefile - delegates to src/makefile
 # All build artifacts go to build/
 
-.PHONY: all clean remake tools ptest test-qemu test docker-server-image test-docker-server
+.PHONY: all clean remake tools ptest test-qemu test-qemu-server test-qemu-debug-shell test docker-server-image test-docker-server
 
 all:
 	$(MAKE) -C src
@@ -20,6 +20,12 @@ ptest:
 
 test-qemu:
 	$(MAKE) -C src test-qemu
+
+test-qemu-server:
+	$(MAKE) -C src test-qemu-server
+
+test-qemu-debug-shell:
+	$(MAKE) -C src test-qemu-debug-shell
 
 # Host-side unit tests
 test:

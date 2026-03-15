@@ -51,7 +51,9 @@ void uip_appcall(void) {
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return;
   if (socket_table[sockfd].tcp_conn != uip_conn) return;
   struct kern_socket *sk = &socket_table[sockfd];
-  int ready_for_output = (uip_poll() || uip_acked() || uip_connected());
+  /* 受信直後の appcall でも応答を返せるようにする。 */
+  int ready_for_output =
+      (uip_poll() || uip_acked() || uip_connected() || uip_newdata());
   int sent_output = 0;
 
   if (uip_connected()) {

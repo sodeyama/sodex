@@ -92,6 +92,7 @@ PUBLIC int  kern_close_socket(int sockfd);
 PUBLIC int  socket_try_accept(int sockfd, struct sockaddr_in *addr);
 PUBLIC int  socket_begin_close(int sockfd);
 PUBLIC int  socket_bind_inbound_tcp(struct uip_conn *conn);
+PUBLIC void socket_service_pending_tcp(void);
 PUBLIC void socket_icmp_input(u_int8_t *pkt, u_int16_t len);
 PUBLIC void socket_udp_input(struct uip_udp_conn *udp_conn,
                              u_int8_t *data, u_int16_t len);

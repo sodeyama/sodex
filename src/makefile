@@ -57,6 +57,8 @@ SODEX_ROOTFS_OVERLAY ?=
 SODEX_ADMIN_STATUS_TOKEN ?= status-secret
 SODEX_ADMIN_CONTROL_TOKEN ?= control-secret
 SODEX_ADMIN_ALLOW_IP ?= 10.0.2.2
+SODEX_DEBUG_SHELL_PORT ?= 10024
+SODEX_HOST_DEBUG_SHELL_PORT ?= 10024
 MEMORY_SCALE_CFLAGS =
 ROOTFS_OVERLAY_ARG = $(if $(strip $(SODEX_ROOTFS_OVERLAY)),$(SODEX_ROOTFS_OVERLAY))
 
@@ -173,7 +175,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-server ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-server test-qemu-debug-shell ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -214,6 +216,13 @@ test-qemu-server:
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/server-rootfs-overlay all
 	@echo "=== Running server runtime smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) python3 $(BASEDIR)/src/test/run_qemu_server_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-debug-shell:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_DEBUG_SHELL_PORT=$(SODEX_DEBUG_SHELL_PORT) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/debug-shell-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/debug-shell-rootfs-overlay all
+	@echo "=== Running debug shell smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_DEBUG_SHELL_PORT=$(SODEX_DEBUG_SHELL_PORT) SODEX_HOST_DEBUG_SHELL_PORT=$(SODEX_HOST_DEBUG_SHELL_PORT) python3 $(BASEDIR)/src/test/run_qemu_debug_shell_smoke.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

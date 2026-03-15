@@ -292,8 +292,11 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
     ip[9] = IPPROTO_ICMP;
     ip[10] = 0; ip[11] = 0; /* checksum (calculated below) */
 
-    /* Source IP: our IP */
-    ip[12] = 10; ip[13] = 0; ip[14] = 2; ip[15] = 15;
+    /* Source IP: 現在のホスト設定をそのまま使う */
+    ip[12] = uip_ipaddr1(&uip_hostaddr);
+    ip[13] = uip_ipaddr2(&uip_hostaddr);
+    ip[14] = uip_ipaddr3(&uip_hostaddr);
+    ip[15] = uip_ipaddr4(&uip_hostaddr);
 
     /* Destination IP */
     u_int8_t *da = (u_int8_t *)&dest->sin_addr;

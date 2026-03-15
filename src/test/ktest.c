@@ -13,7 +13,11 @@
 #include <uip.h>
 #include <uip_arp.h>
 #include <socket.h>
+#include <network_config.h>
 #include <string.h>
+
+#define KTEST_ICMP_ECHO       8
+#define KTEST_ICMP_ECHOREPLY  0
 
 /* Serial port (COM1) */
 #define SERIAL_PORT       0x3F8
@@ -76,6 +80,23 @@ PRIVATE void serial_putdec(int val)
   int i;
   for (i = len - 1; i >= 0; i--)
     serial_putc(buf[i]);
+}
+
+PRIVATE u_int16_t ktest_checksum(u_int8_t *data, int len)
+{
+  u_int32_t sum = 0;
+  int i;
+
+  for (i = 0; i < len - 1; i += 2)
+    sum += (u_int16_t)((data[i] << 8) | data[i + 1]);
+
+  if (len & 1)
+    sum += (u_int16_t)(data[len - 1] << 8);
+
+  while (sum >> 16)
+    sum = (sum & 0xffff) + (sum >> 16);
+
+  return (u_int16_t)(~sum);
 }
 
 PRIVATE void ktest_pass(const char *name)
@@ -228,25 +249,10 @@ PRIVATE void ktest_network_init(void)
 
   serial_puts("  [NET] Initializing uIP...\n");
   uip_init();
-
-  uip_ipaddr_t ipaddr;
-  uip_ipaddr(&ipaddr, 10, 0, 2, 15);
-  uip_sethostaddr(&ipaddr);
-  uip_ipaddr(&ipaddr, 255, 255, 255, 0);
-  uip_setnetmask(&ipaddr);
-  uip_ipaddr(&ipaddr, 10, 0, 2, 2);
-  uip_setdraddr(&ipaddr);
-
-  struct uip_eth_addr mac = {{0x52, 0x54, 0x00, 0x12, 0x34, 0x56}};
-  uip_setethaddr(mac);
+  network_apply_default_config();
 
   network_init();
-
-  /* Enable NE2000 IMR */
-  u_int16_t nb = 0xC100;
-  out8(nb + 0x00, 0x22);  /* CR: Page0, Start, RD abort */
-  out8(nb + 0x0F, 0x7F);  /* IMR: enable all */
-  out8(nb + 0x07, 0xFF);  /* ISR: clear all pending */
+  ne2000_enable_interrupts();
 
   serial_puts("  [NET] Network initialized\n");
 }
@@ -268,9 +274,11 @@ PRIVATE void test_arp_resolution(void)
   arp_pkt[20]=0x00; arp_pkt[21]=0x01; /* Opcode: request */
   arp_pkt[22]=0x52; arp_pkt[23]=0x54; arp_pkt[24]=0x00;
   arp_pkt[25]=0x12; arp_pkt[26]=0x34; arp_pkt[27]=0x56;
-  arp_pkt[28]=10; arp_pkt[29]=0; arp_pkt[30]=2; arp_pkt[31]=15;
+  arp_pkt[28]=SODEX_NET_HOST_IP0; arp_pkt[29]=SODEX_NET_HOST_IP1;
+  arp_pkt[30]=SODEX_NET_HOST_IP2; arp_pkt[31]=SODEX_NET_HOST_IP3;
   memset(&arp_pkt[32], 0, 6);
-  arp_pkt[38]=10; arp_pkt[39]=0; arp_pkt[40]=2; arp_pkt[41]=2;
+  arp_pkt[38]=SODEX_NET_GATEWAY_IP0; arp_pkt[39]=SODEX_NET_GATEWAY_IP1;
+  arp_pkt[40]=SODEX_NET_GATEWAY_IP2; arp_pkt[41]=SODEX_NET_GATEWAY_IP3;
 
   ne2000_send(arp_pkt, 60);
 
@@ -281,12 +289,7 @@ PRIVATE void test_arp_resolution(void)
     disableInterrupt();
     network_poll();
     enableInterrupt();
-    /* After network_poll processes an ARP reply, bnry should advance */
-    out8(0xC100 + 0x00, 0x62); /* CR: Page1 + Start */
-    (void)in8(0xC100 + 0x07); /* CURR on Page1 offset 7 */
-    out8(0xC100 + 0x00, 0x22); /* CR: Page0 + Start */
-    u_int8_t bnry = in8(0xC100 + 0x03);
-    if (bnry != 0x46) { /* BNRY_ADDR initial value */
+    if (ne2000_read_bnry() != BNRY_ADDR) {
       got_reply = 1;
       break;
     }
@@ -297,6 +300,69 @@ PRIVATE void test_arp_resolution(void)
   } else {
     ktest_fail("arp_resolution", "no ARP reply from gateway");
   }
+}
+
+PRIVATE void test_icmp_ping(void)
+{
+  u_int8_t req[24];
+  u_int8_t reply[64];
+  struct sockaddr_in addr;
+  struct sockaddr_in from;
+  int fd;
+  int sent;
+  int received;
+  int ok = 0;
+  int attempt;
+
+  fd = kern_socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+  if (fd < 0) {
+    ktest_fail("icmp_ping", "raw socket creation failed");
+    return;
+  }
+
+  network_fill_gateway_addr(&addr, 0);
+
+  for (attempt = 0; attempt < 3; attempt++) {
+    memset(req, 0, sizeof(req));
+    req[0] = KTEST_ICMP_ECHO;
+    req[1] = 0;
+    req[4] = 0x12;
+    req[5] = 0x34;
+    req[6] = 0x00;
+    req[7] = (u_int8_t)(attempt + 1);
+    memcpy(&req[8], "KTSTPING", 8);
+
+    {
+      u_int16_t cksum = ktest_checksum(req, sizeof(req));
+      req[2] = (cksum >> 8) & 0xff;
+      req[3] = cksum & 0xff;
+    }
+
+    sent = kern_sendto(fd, req, sizeof(req), 0, &addr);
+    if (sent != sizeof(req))
+      continue;
+
+    memset(reply, 0, sizeof(reply));
+    memset(&from, 0, sizeof(from));
+    received = kern_recvfrom(fd, reply, sizeof(reply), 0, &from);
+
+    if (received > 0 &&
+        reply[0] == KTEST_ICMP_ECHOREPLY &&
+        reply[4] == req[4] &&
+        reply[5] == req[5] &&
+        reply[6] == req[6] &&
+        reply[7] == req[7]) {
+      ok = 1;
+      break;
+    }
+  }
+
+  if (ok)
+    ktest_pass("icmp_ping_gateway");
+  else
+    ktest_fail("icmp_ping_gateway", "no ICMP echo reply from gateway");
+
+  kern_close_socket(fd);
 }
 
 /* === Test: Socket creation === */
@@ -446,6 +512,7 @@ PUBLIC void run_kernel_tests(void)
   serial_puts("\n--- Network Tests ---\n");
   ktest_network_init();
   test_arp_resolution();
+  test_icmp_ping();
   test_socket_create();
   test_tcp_connect();
   test_udp_echo();

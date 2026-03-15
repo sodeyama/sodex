@@ -171,6 +171,11 @@
 PUBLIC void init_ne2000();
 PUBLIC int ne2000_send(void* buf, u_int16_t len);
 PUBLIC int ne2000_receive();
+PUBLIC u_int16_t ne2000_get_iobase(void);
+PUBLIC void ne2000_enable_interrupts(void);
+PUBLIC u_int8_t ne2000_read_isr(void);
+PUBLIC void ne2000_ack_isr(u_int8_t status);
+PUBLIC u_int8_t ne2000_read_bnry(void);
 EXTERN volatile u_int8_t ne2000_rx_pending;
 
 #endif

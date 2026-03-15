@@ -35,7 +35,7 @@ PRIVATE void ne_serial_hex16(u_int16_t v)
   ne_serial_hex8(v & 0xFF);
 }
 
-int io_base;
+PRIVATE u_int16_t io_base = NE2K_QEMU_BASEADDR;
 
 PRIVATE u_int16_t get_baseaddr();
 PRIVATE void __attribute__((unused)) set_macaddr(u_int8_t* buff);
@@ -266,6 +266,33 @@ PUBLIC int ne2000_receive()
   ne_serial_putc('\n');
 
   return data_len;
+}
+
+PUBLIC u_int16_t ne2000_get_iobase(void)
+{
+  return io_base;
+}
+
+PUBLIC void ne2000_enable_interrupts(void)
+{
+  out8(io_base + O_CR, CR_PAGE0 | CR_STA | CR_RD_STOP);
+  out8(io_base + O_IMR, IMR_ALL);
+  out8(io_base + O_ISR, 0xFF);
+}
+
+PUBLIC u_int8_t ne2000_read_isr(void)
+{
+  return in8(io_base + I_ISR);
+}
+
+PUBLIC void ne2000_ack_isr(u_int8_t status)
+{
+  out8(io_base + O_ISR, status);
+}
+
+PUBLIC u_int8_t ne2000_read_bnry(void)
+{
+  return in8(io_base + I_BNRY);
 }
 
 PRIVATE u_int16_t get_baseaddr()

@@ -17,6 +17,7 @@
 EXTERN volatile u_int32_t kernel_tick;
 EXTERN void *uip_sappdata;
 EXTERN u16_t uip_slen;
+EXTERN void network_poll(void);
 
 PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 
@@ -102,26 +103,136 @@ PRIVATE int rxbuf_read(struct kern_socket *sk, u_int8_t *buf, u_int16_t maxlen,
   return to_read;
 }
 
-PUBLIC int kern_socket(int domain, int type, int protocol)
+PRIVATE void socket_init_entry(struct kern_socket *sk)
 {
-  if (domain != AF_INET) return -1;
-
   int i;
+
+  memset(sk, 0, sizeof(struct kern_socket));
+  sk->state = SOCK_STATE_CREATED;
+  sk->timeout_ticks = 500;
+  sk->parent_fd = -1;
+  for (i = 0; i < SOCK_ACCEPT_BACKLOG_SIZE; i++) {
+    sk->backlog_fds[i] = -1;
+  }
+  rxbuf_init(sk);
+}
+
+PRIVATE int socket_alloc_entry(void)
+{
+  int i;
+
   for (i = 0; i < MAX_SOCKETS; i++) {
     if (socket_table[i].state == SOCK_STATE_UNUSED) {
-      struct kern_socket *sk = &socket_table[i];
-      memset(sk, 0, sizeof(struct kern_socket));
-      sk->state = SOCK_STATE_CREATED;
-      sk->type = type;
-      sk->protocol = protocol;
-      if (type == SOCK_RAW && protocol == 0)
-        sk->protocol = IPPROTO_ICMP;
-      sk->timeout_ticks = 500; /* 5 seconds default timeout */
-      rxbuf_init(sk);
+      socket_init_entry(&socket_table[i]);
       return i;
     }
   }
   return -1;
+}
+
+PRIVATE int socket_backlog_enqueue(struct kern_socket *listener, int child_fd)
+{
+  if (listener == 0) return -1;
+  if (listener->backlog_limit <= 0) return -1;
+  if (listener->backlog_count >= listener->backlog_limit) return -1;
+  if (listener->backlog_count >= SOCK_ACCEPT_BACKLOG_SIZE) return -1;
+
+  listener->backlog_fds[listener->backlog_count++] = child_fd;
+  return 0;
+}
+
+PRIVATE int socket_backlog_dequeue(struct kern_socket *listener)
+{
+  int child_fd;
+  int i;
+
+  if (listener == 0) return -1;
+  if (listener->backlog_count <= 0) return -1;
+
+  child_fd = listener->backlog_fds[0];
+  for (i = 1; i < listener->backlog_count; i++) {
+    listener->backlog_fds[i - 1] = listener->backlog_fds[i];
+  }
+  listener->backlog_count--;
+  listener->backlog_fds[listener->backlog_count] = -1;
+  return child_fd;
+}
+
+PRIVATE void socket_backlog_remove_fd(struct kern_socket *listener, int child_fd)
+{
+  int i;
+
+  if (listener == 0) return;
+  for (i = 0; i < listener->backlog_count; i++) {
+    if (listener->backlog_fds[i] == child_fd) {
+      int j;
+      for (j = i + 1; j < listener->backlog_count; j++) {
+        listener->backlog_fds[j - 1] = listener->backlog_fds[j];
+      }
+      listener->backlog_count--;
+      listener->backlog_fds[listener->backlog_count] = -1;
+      return;
+    }
+  }
+}
+
+PRIVATE int socket_find_listener_by_port(u_int16_t port)
+{
+  int i;
+
+  for (i = 0; i < MAX_SOCKETS; i++) {
+    struct kern_socket *sk = &socket_table[i];
+    if (sk->state == SOCK_STATE_LISTENING &&
+        sk->type == SOCK_STREAM &&
+        sk->local_addr.sin_port == port) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+PRIVATE void socket_fill_addr_from_uip(struct sockaddr_in *addr,
+                                       u_int16_t port,
+                                       uip_ipaddr_t *ipaddr)
+{
+  u_int8_t *raw;
+
+  memset(addr, 0, sizeof(struct sockaddr_in));
+  addr->sin_family = AF_INET;
+  addr->sin_port = port;
+  raw = (u_int8_t *)&addr->sin_addr;
+  raw[0] = uip_ipaddr1(ipaddr);
+  raw[1] = uip_ipaddr2(ipaddr);
+  raw[2] = uip_ipaddr3(ipaddr);
+  raw[3] = uip_ipaddr4(ipaddr);
+}
+
+PRIVATE void socket_release_entry(int sockfd)
+{
+  struct kern_socket *sk = &socket_table[sockfd];
+
+  if (sk->tcp_conn) {
+    sk->tcp_conn->appstate = -1;
+  }
+
+  memset(sk, 0, sizeof(struct kern_socket));
+  sk->state = SOCK_STATE_UNUSED;
+  sk->parent_fd = -1;
+}
+
+PUBLIC int kern_socket(int domain, int type, int protocol)
+{
+  if (domain != AF_INET) return -1;
+
+  int sockfd = socket_alloc_entry();
+  if (sockfd < 0) return -1;
+
+  struct kern_socket *sk = &socket_table[sockfd];
+  sk->type = type;
+  sk->protocol = protocol;
+  if (type == SOCK_RAW && protocol == 0)
+    sk->protocol = IPPROTO_ICMP;
+  return sockfd;
 }
 
 PUBLIC int kern_bind(int sockfd, struct sockaddr_in *addr)
@@ -140,16 +251,123 @@ PUBLIC int kern_listen(int sockfd, int backlog)
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
   struct kern_socket *sk = &socket_table[sockfd];
   if (sk->type != SOCK_STREAM) return -1;
+  if (sk->state != SOCK_STATE_BOUND && sk->state != SOCK_STATE_CREATED)
+    return -1;
+  if (sk->local_addr.sin_port == 0) return -1;
+
+  if (backlog <= 0) backlog = 1;
+  if (backlog > SOCK_ACCEPT_BACKLOG_SIZE) backlog = SOCK_ACCEPT_BACKLOG_SIZE;
 
   sk->state = SOCK_STATE_LISTENING;
+  sk->backlog_count = 0;
+  sk->backlog_limit = backlog;
+  {
+    int i;
+    for (i = 0; i < SOCK_ACCEPT_BACKLOG_SIZE; i++) {
+      sk->backlog_fds[i] = -1;
+    }
+  }
   uip_listen(sk->local_addr.sin_port);
   return 0;
 }
 
+PUBLIC int socket_try_accept(int sockfd, struct sockaddr_in *addr)
+{
+  int child_fd;
+  struct kern_socket *listener;
+  struct kern_socket *child;
+
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
+  listener = &socket_table[sockfd];
+  if (listener->state != SOCK_STATE_LISTENING) return -1;
+
+  for (;;) {
+    child_fd = socket_backlog_dequeue(listener);
+    if (child_fd < 0) return -1;
+
+    child = &socket_table[child_fd];
+    if (child->state == SOCK_STATE_CLOSED) {
+      child->pending_accept = 0;
+      child->parent_fd = -1;
+      kern_close_socket(child_fd);
+      continue;
+    }
+    child->pending_accept = 0;
+    child->parent_fd = -1;
+    if (addr) {
+      *addr = child->remote_addr;
+    }
+    wakeup(&listener->accept_wq);
+    return child_fd;
+  }
+}
+
 PUBLIC int kern_accept(int sockfd, struct sockaddr_in *addr)
 {
-  /* TODO: implement for TCP */
-  return -1;
+  struct kern_socket *listener;
+  u_int32_t deadline;
+  int child_fd;
+
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
+  listener = &socket_table[sockfd];
+  if (listener->state != SOCK_STATE_LISTENING) return -1;
+
+  deadline = kernel_tick + listener->timeout_ticks;
+  for (;;) {
+    disableInterrupt();
+    child_fd = socket_try_accept(sockfd, addr);
+    enableInterrupt();
+    if (child_fd >= 0)
+      return child_fd;
+
+    disableInterrupt();
+    network_poll();
+    enableInterrupt();
+
+    if ((int)(kernel_tick - deadline) >= 0)
+      return -1;
+  }
+}
+
+PUBLIC int socket_bind_inbound_tcp(struct uip_conn *conn)
+{
+  int listener_fd;
+  int child_fd;
+  struct kern_socket *listener;
+  struct kern_socket *child;
+
+  if (conn == 0) return -1;
+
+  listener_fd = socket_find_listener_by_port(conn->lport);
+  if (listener_fd < 0) return -1;
+
+  listener = &socket_table[listener_fd];
+  if (listener->backlog_count >= listener->backlog_limit)
+    return -1;
+
+  child_fd = socket_alloc_entry();
+  if (child_fd < 0)
+    return -1;
+
+  child = &socket_table[child_fd];
+  child->type = SOCK_STREAM;
+  child->protocol = IPPROTO_TCP;
+  child->state = SOCK_STATE_CONNECTED;
+  child->local_addr = listener->local_addr;
+  socket_fill_addr_from_uip(&child->remote_addr, conn->rport, &conn->ripaddr);
+  child->tcp_conn = conn;
+  child->parent_fd = listener_fd;
+  child->pending_accept = 1;
+  child->timeout_ticks = listener->timeout_ticks;
+
+  if (socket_backlog_enqueue(listener, child_fd) < 0) {
+    socket_release_entry(child_fd);
+    return -1;
+  }
+
+  conn->appstate = child_fd;
+  wakeup(&listener->accept_wq);
+  return child_fd;
 }
 
 PUBLIC int kern_connect(int sockfd, struct sockaddr_in *addr)
@@ -399,16 +617,15 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
   return ret;
 }
 
-PUBLIC int kern_close_socket(int sockfd)
+PUBLIC int socket_begin_close(int sockfd)
 {
+  struct kern_socket *sk;
+
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
-  struct kern_socket *sk = &socket_table[sockfd];
-  EXTERN void network_poll(void);
+  sk = &socket_table[sockfd];
+  if (sk->state == SOCK_STATE_UNUSED) return -1;
 
   if (sk->tcp_conn) {
-    int poll_count;
-
-    /* FIN は appcall コンテキストで送る */
     disableInterrupt();
     sk->close_pending = 1;
     uip_poll_conn(sk->tcp_conn);
@@ -417,6 +634,72 @@ PUBLIC int kern_close_socket(int sockfd)
       ne2000_send(uip_buf, uip_len);
     }
     enableInterrupt();
+    return 0;
+  }
+
+  if (sk->udp_conn) {
+    uip_udp_remove(sk->udp_conn);
+    sk->udp_conn = 0;
+  }
+
+  sk->state = SOCK_STATE_CLOSED;
+  wakeup(&sk->recv_wq);
+  wakeup(&sk->accept_wq);
+  wakeup(&sk->connect_wq);
+  return 0;
+}
+
+PUBLIC int kern_close_socket(int sockfd)
+{
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
+  struct kern_socket *sk = &socket_table[sockfd];
+  EXTERN void network_poll(void);
+
+  if (sk->state == SOCK_STATE_UNUSED)
+    return 0;
+
+  if (sk->state == SOCK_STATE_LISTENING && sk->local_addr.sin_port != 0) {
+    int pending[SOCK_ACCEPT_BACKLOG_SIZE];
+    int pending_count = sk->backlog_count;
+    int i;
+
+    for (i = 0; i < pending_count; i++) {
+      pending[i] = sk->backlog_fds[i];
+    }
+    sk->backlog_count = 0;
+    sk->backlog_limit = 0;
+    for (i = 0; i < SOCK_ACCEPT_BACKLOG_SIZE; i++) {
+      sk->backlog_fds[i] = -1;
+    }
+    uip_unlisten(sk->local_addr.sin_port);
+    for (i = 0; i < pending_count; i++) {
+      int child_fd = pending[i];
+      if (child_fd >= 0 && child_fd < MAX_SOCKETS) {
+        socket_table[child_fd].parent_fd = -1;
+        socket_table[child_fd].pending_accept = 0;
+        kern_close_socket(child_fd);
+      }
+    }
+  }
+
+  if (sk->parent_fd >= 0 && sk->parent_fd < MAX_SOCKETS) {
+    socket_backlog_remove_fd(&socket_table[sk->parent_fd], sockfd);
+    sk->parent_fd = -1;
+    sk->pending_accept = 0;
+  }
+
+  if (sk->state == SOCK_STATE_CLOSED) {
+    wakeup(&sk->recv_wq);
+    wakeup(&sk->accept_wq);
+    wakeup(&sk->connect_wq);
+    socket_release_entry(sockfd);
+    return 0;
+  }
+
+  if (sk->tcp_conn) {
+    int poll_count;
+
+    socket_begin_close(sockfd);
 
     for (poll_count = 0; poll_count < 10000000; poll_count++) {
       disableInterrupt();
@@ -431,17 +714,12 @@ PUBLIC int kern_close_socket(int sockfd)
     uip_udp_remove(sk->udp_conn);
   }
 
-  if (sk->tcp_conn) {
-    sk->tcp_conn->appstate = -1;
-  }
-
   /* Wake up any blocked waiters */
   wakeup(&sk->recv_wq);
   wakeup(&sk->accept_wq);
   wakeup(&sk->connect_wq);
 
-  memset(sk, 0, sizeof(struct kern_socket));
-  sk->state = SOCK_STATE_UNUSED;
+  socket_release_entry(sockfd);
   return 0;
 }
 

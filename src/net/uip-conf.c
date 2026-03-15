@@ -32,7 +32,24 @@ void tcpip_output(void)
 
 void uip_appcall(void) {
   int sockfd = uip_conn->appstate;
+
+  if (uip_connected()) {
+    if (sockfd < 0 || sockfd >= MAX_SOCKETS ||
+        socket_table[sockfd].tcp_conn != uip_conn) {
+      sockfd = socket_bind_inbound_tcp(uip_conn);
+      if (sockfd < 0) {
+        dbg_puts("TCP: INBOUND REJECTED\n");
+        uip_abort();
+        return;
+      }
+      dbg_puts("TCP: INBOUND ACCEPT sockfd=");
+      dbg_dec(sockfd);
+      dbg_puts("\n");
+    }
+  }
+
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return;
+  if (socket_table[sockfd].tcp_conn != uip_conn) return;
   struct kern_socket *sk = &socket_table[sockfd];
   int ready_for_output = (uip_poll() || uip_acked() || uip_connected());
 

@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
 
 .PHONY: all clean test
 
@@ -187,6 +187,23 @@ test_netpoll: test_netpoll.c
 # Socket ring buffer, inet functions, checksum tests (Phase 9)
 test_socket: test_socket.c
 	$(CC) $(CFLAGS) -o $@ test_socket.c
+
+# Admin text protocol parser/auth tests
+test_admin_parser: test_admin_parser.c test_admin_parser_admin.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ test_admin_parser.c test_admin_parser_admin.o
+
+test_admin_parser_admin.o: $(SRC)/net/admin_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# HTTP parser/mapper tests
+test_http_server_parser: test_http_server_parser.c test_http_server_parser_http.o test_http_server_parser_admin.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ test_http_server_parser.c test_http_server_parser_http.o test_http_server_parser_admin.o
+
+test_http_server_parser_http.o: $(SRC)/net/http_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_http_server_parser_admin.o: $(SRC)/net/admin_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
 
 # vi buffer tests
 test_vi_buffer: test_vi_buffer.c test_vi_buffer_vi_buffer.o test_vi_buffer_utf8.o test_vi_buffer_wcwidth.o

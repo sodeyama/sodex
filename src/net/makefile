@@ -9,7 +9,7 @@ $(shell mkdir -p $(SUB_OBJDIR))
 all : ${OBJS}
 
 $(SUB_OBJDIR)/%.o: %.c
-	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	${CC} -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 .PHONY: clean
 clean:

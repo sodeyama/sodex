@@ -34,6 +34,17 @@ NIC_OPTS="-device ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net
 QEMU_CMD="${QEMU_CMD:-qemu-system-i386}"
 
 case "${1:-user}" in
+  server)
+    echo "=== user net mode with hostfwd ==="
+    echo "host 127.0.0.1:18080 -> guest 10.0.2.15:8080"
+    echo "host 127.0.0.1:10023 -> guest 10.0.2.15:10023"
+    echo ""
+    "$QEMU_CMD" \
+        $COMMON_OPTS \
+        -netdev user,id=net0,hostfwd=tcp:127.0.0.1:18080-10.0.2.15:8080,hostfwd=tcp:127.0.0.1:10023-10.0.2.15:10023 \
+        $NIC_OPTS \
+        -display cocoa
+    ;;
   net)
     echo "=== vmnet-shared mode (sudo required) ==="
     echo "Subnet: 10.0.2.0/24, Gateway: 10.0.2.1, Guest: 10.0.2.15"

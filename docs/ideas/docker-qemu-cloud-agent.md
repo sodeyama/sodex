@@ -68,6 +68,18 @@ Linux ホスト
 5. LLM API
 6. MCP Client
 
+## guest 管理面
+
+2026-03-15 時点で、guest `sodex` には最小の管理面を追加した。
+
+- host `127.0.0.1:18080` -> guest `10.0.2.15:8080`
+- host `127.0.0.1:10023` -> guest `10.0.2.15:10023`
+- `GET /healthz`, `GET /status`, `POST /agent/start`, `POST /agent/stop`
+- text protocol の `PING`, `STATUS`, `AGENT START`, `AGENT STOP`, `LOG TAIL`
+
+制御操作は `/etc/sodex-admin.conf` から起動時に読む token を必須にし、role と allowlist で絞る。
+この段階では guest 側に `SSH server` は入れず、ホスト Linux の `SSH` と guest 管理 API を分離する。
+
 ## Sodex Agent の役割
 
 `sodex` 自体は最小の agent runtime と通信層を持ち、重い処理や外部操作はなるべく外に逃がす。

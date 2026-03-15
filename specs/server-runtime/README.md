@@ -76,6 +76,8 @@ Linux ホスト
 | 05 | [05-auth-and-capability-boundary.md](plans/05-auth-and-capability-boundary.md) | 認証、権限制御、接続制限 | 03 または 04 |
 | 06 | [06-ssh-readiness.md](plans/06-ssh-readiness.md) | `SSH` 実装の前提と go/no-go 判定 | 01-05 |
 
+実装タスクと残フォローアップは [TASKS.md](TASKS.md) で管理する。
+
 ## 実装順序
 
 1. `accept()` と passive open を完成させる
@@ -109,10 +111,23 @@ Linux ホスト
   - `src/test/run_qemu_server_smoke.py`
   - `tests/test_socket_server.c`
 
+## 実装状況
+
+2026-03-15 時点で、以下を確認済み。
+
+- passive TCP の inbound accept と backlog 処理
+- `QEMU user net + hostfwd` による host `127.0.0.1:18080` -> guest `10.0.2.15:8080`
+- `QEMU user net + hostfwd` による host `127.0.0.1:10023` -> guest `10.0.2.15:10023`
+- text protocol の `PING`, `STATUS`, `AGENT START`, `AGENT STOP`, `LOG TAIL`
+- HTTP の `GET /healthz`, `GET /status`, `POST /agent/start`, `POST /agent/stop`
+- `/etc/sodex-admin.conf` による起動時 token / allowlist 注入
+- allowlist と audit ring buffer
+- host Linux の `SSH` と guest `sodex` 管理 API の分離を継続し、guest 内 `SSH server` は当面見送る判断
+
 ## 完了条件
 
-- [ ] guest `sodex` が TCP 接続を受けられる
-- [ ] Docker/QEMU 上で host から guest 管理ポートへ接続できる
-- [ ] 最低限の health / status / control 操作ができる
-- [ ] 認証なしの広い制御面を残さない
-- [ ] `SSH` を実装するか、代替構成で十分とするかを文書で決められる
+- [x] guest `sodex` が TCP 接続を受けられる
+- [x] Docker/QEMU 上で host から guest 管理ポートへ接続できる
+- [x] 最低限の health / status / control 操作ができる
+- [x] 認証なしの広い制御面を残さない
+- [x] `SSH` を実装するか、代替構成で十分とするかを文書で決められる

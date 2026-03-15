@@ -230,6 +230,7 @@ void set_bitmap(u_int8_t* bitmap, u_int32_t bit);
 void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
               ext3_group_desc* gd, u_int8_t* inode_bitmap,
               u_int8_t* block_bitmap, int parent_ino, string path);
+string ensure_dir_path(const string& path);
 
 int first_data_block = 8;
 
@@ -664,9 +665,9 @@ int create_dir(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
 
 int main(int argc, char **argv)
 {
-  if (argc < 6) {
+  if (argc < 7 || argc > 8) {
     cerr << "Usage: kmkfs boota.bin bootm.bin kernel.bin fsboot.bin"
-	     << " init init2"
+	     << " init init2 [rootfs-overlay]"
          << endl;
     exit(1);
   }
@@ -691,6 +692,9 @@ int main(int argc, char **argv)
   string init_filename = argv[5];
   string init2_filename = argv[6];
 #endif
+  string overlay_path;
+  if (argc >= 8)
+    overlay_path = ensure_dir_path(argv[7]);
   cout << init_filename << endl;
 
   /*
@@ -825,6 +829,10 @@ int main(int argc, char **argv)
   string path_usrbin = PATH_USRBIN;
   read_dir(kernel_iofs, inode, &sb, &gd, (u_int8_t*)&inode_bitmap,
            (u_int8_t*)&block_bitmap, usr_bin_inode, path_usrbin);
+  if (!overlay_path.empty()) {
+    read_dir(kernel_iofs, inode, &sb, &gd, (u_int8_t*)&inode_bitmap,
+             (u_int8_t*)&block_bitmap, root_inode, overlay_path);
+  }
 
   // set inode blocks to kernel_ofs
   set_inode_block(kernel_iofs, (ext3_inode*)inode);
@@ -832,6 +840,15 @@ int main(int argc, char **argv)
   // set bitmap blocks to kernel_ofs
   set_block_bitmap(kernel_iofs, block_bitmap, S_BLOCK_BITMAP);
   set_inode_bitmap(kernel_iofs, inode_bitmap, S_INODE_BITMAP);
+}
+
+string ensure_dir_path(const string& path)
+{
+  if (path.empty())
+    return path;
+  if (path[path.size() - 1] == '/')
+    return path;
+  return path + "/";
 }
 
 void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,

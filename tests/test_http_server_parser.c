@@ -1,0 +1,97 @@
+#include "test_framework.h"
+#include <string.h>
+
+#define TEST_BUILD 1
+#include "../src/include/admin_server.h"
+
+static u_int32_t test_ip(u_int8_t a, u_int8_t b, u_int8_t c, u_int8_t d)
+{
+    u_int32_t value = 0;
+    u_int8_t *raw = (u_int8_t *)&value;
+    raw[0] = a;
+    raw[1] = b;
+    raw[2] = c;
+    raw[3] = d;
+    return value;
+}
+
+TEST(parse_health_request) {
+    struct http_request req;
+    const char *raw =
+        "GET /healthz HTTP/1.1\r\n"
+        "Host: localhost\r\n"
+        "\r\n";
+
+    ASSERT_EQ(http_parse_request(raw, (int)strlen(raw), &req), 0);
+    ASSERT_STR_EQ(req.method, "GET");
+    ASSERT_STR_EQ(req.path, "/healthz");
+    ASSERT_STR_EQ(req.token, "");
+}
+
+TEST(parse_authorization_header) {
+    struct http_request req;
+    const char *raw =
+        "GET /status HTTP/1.1\r\n"
+        "Authorization: Bearer status-secret\r\n"
+        "\r\n";
+
+    ASSERT_EQ(http_parse_request(raw, (int)strlen(raw), &req), 0);
+    ASSERT_STR_EQ(req.method, "GET");
+    ASSERT_STR_EQ(req.path, "/status");
+    ASSERT_STR_EQ(req.token, "status-secret");
+}
+
+TEST(map_http_to_admin_actions) {
+    struct http_request http_req;
+    struct admin_request admin_req;
+
+    memset(&http_req, 0, sizeof(http_req));
+    strcpy(http_req.method, "POST");
+    strcpy(http_req.path, "/agent/start");
+    strcpy(http_req.token, "control-secret");
+
+    ASSERT_EQ(http_map_request(&http_req, &admin_req), 0);
+    ASSERT_EQ(admin_req.action, ADMIN_ACTION_AGENT_START);
+    ASSERT_EQ(admin_req.required_role, ADMIN_ROLE_CONTROL);
+    ASSERT_STR_EQ(admin_req.token, "control-secret");
+}
+
+TEST(status_request_roundtrip) {
+    struct http_request http_req;
+    struct admin_request admin_req;
+    char body[ADMIN_RESPONSE_MAX];
+    const char *raw =
+        "GET /status HTTP/1.1\r\n"
+        "Authorization: Bearer status-secret\r\n"
+        "\r\n";
+
+    admin_runtime_reset();
+    admin_runtime_set_tokens("status-secret", "control-secret");
+    admin_runtime_set_allow_ip(test_ip(10, 0, 2, 2));
+    admin_runtime_set_tick(4321);
+
+    ASSERT_EQ(http_parse_request(raw, (int)strlen(raw), &http_req), 0);
+    ASSERT_EQ(http_map_request(&http_req, &admin_req), 0);
+    ASSERT(admin_authorize_request(&admin_req, test_ip(10, 0, 2, 2)));
+    ASSERT(admin_execute_request(&admin_req, body, sizeof(body), 1) > 0);
+    ASSERT(strstr(body, "\"agent\":\"stopped\"") != 0);
+    ASSERT(strstr(body, "\"uptime_ticks\":4321") != 0);
+}
+
+TEST(build_http_response) {
+    char response[ADMIN_RESPONSE_MAX];
+
+    ASSERT(http_build_response(200, "ok\n", response, sizeof(response), "text/plain") > 0);
+    ASSERT(strstr(response, "HTTP/1.1 200 OK") != 0);
+    ASSERT(strstr(response, "Content-Length: 3") != 0);
+    ASSERT(strstr(response, "\r\n\r\nok\n") != 0);
+}
+
+int main(void) {
+    RUN_TEST(parse_health_request);
+    RUN_TEST(parse_authorization_header);
+    RUN_TEST(map_http_to_admin_actions);
+    RUN_TEST(status_request_roundtrip);
+    RUN_TEST(build_http_response);
+    TEST_REPORT();
+}

@@ -102,6 +102,11 @@ struct ssh_out_packet {
 struct ssh_channel_state {
   int open;
   int pty_requested;
+  int shell_start_pending;
+  int shell_start_in_progress;
+  int shell_reply_pending;
+  u_int32_t shell_start_tick;
+  int tx_prev_cr;
   int close_sent;
   int eof_sent;
   int exit_status_sent;
@@ -1327,6 +1332,72 @@ PRIVATE int ssh_queue_channel_status(struct ssh_connection *conn, int success)
   return ssh_queue_payload(conn, payload, writer.len, FALSE);
 }
 
+PRIVATE int ssh_start_pending_shell(struct ssh_connection *conn)
+{
+  struct tty *tty;
+  char *shell_argv[2];
+  pid_t pid;
+
+  if (!conn->channel.shell_start_pending ||
+      conn->channel.shell_start_in_progress) {
+    return 0;
+  }
+  if ((int)(kernel_tick - conn->channel.shell_start_tick) < 0)
+    return 0;
+  if (conn->channel.tty != 0 && conn->channel.shell_pid > 0) {
+    conn->channel.shell_start_pending = FALSE;
+    conn->channel.shell_start_tick = 0;
+    if (conn->channel.shell_reply_pending) {
+      conn->channel.shell_reply_pending = FALSE;
+      return ssh_queue_channel_status(conn, TRUE);
+    }
+    return 1;
+  }
+
+  admin_runtime_audit_line("ssh_spawn_begin");
+  tty = tty_alloc_pty();
+  if (tty == 0) {
+    conn->channel.shell_start_pending = FALSE;
+    conn->channel.shell_start_tick = 0;
+    if (conn->channel.shell_reply_pending) {
+      conn->channel.shell_reply_pending = FALSE;
+      return ssh_queue_channel_status(conn, FALSE);
+    }
+    return -1;
+  }
+
+  conn->channel.shell_start_in_progress = TRUE;
+  tty_set_winsize(tty, conn->channel.cols, conn->channel.rows);
+  shell_argv[0] = "eshell";
+  shell_argv[1] = 0;
+  pid = kernel_execve_tty("/usr/bin/eshell", shell_argv, tty);
+  if (pid < 0) {
+    conn->channel.shell_start_pending = FALSE;
+    conn->channel.shell_start_in_progress = FALSE;
+    conn->channel.shell_start_tick = 0;
+    tty_release(tty);
+    if (conn->channel.shell_reply_pending) {
+      conn->channel.shell_reply_pending = FALSE;
+      return ssh_queue_channel_status(conn, FALSE);
+    }
+    return -1;
+  }
+
+  conn->channel.tty = tty;
+  conn->channel.shell_pid = pid;
+  conn->channel.shell_start_pending = FALSE;
+  conn->channel.shell_start_in_progress = FALSE;
+  conn->channel.shell_start_tick = 0;
+  admin_runtime_audit_line("ssh_spawn_ok");
+  ssh_audit_start(conn->peer_addr, pid);
+  if (conn->channel.shell_reply_pending) {
+    conn->channel.shell_reply_pending = FALSE;
+    if (ssh_queue_channel_status(conn, TRUE) < 0)
+      return -1;
+  }
+  return 1;
+}
+
 PRIVATE int ssh_queue_request_failure(struct ssh_connection *conn)
 {
   u_int8_t payload[1];
@@ -1404,31 +1475,13 @@ PRIVATE int ssh_queue_exit_status(struct ssh_connection *conn, u_int32_t status)
 
 PRIVATE int ssh_spawn_shell(struct ssh_connection *conn)
 {
-  struct tty *tty;
-  char *shell_argv[2];
-  pid_t pid;
-
   if (conn->channel.tty != 0 && conn->channel.shell_pid > 0)
     return 0;
+  if (conn->channel.shell_start_pending || conn->channel.shell_start_in_progress)
+    return 0;
 
-  admin_runtime_audit_line("ssh_spawn_begin");
-  tty = tty_alloc_pty();
-  if (tty == 0)
-    return -1;
-
-  tty_set_winsize(tty, conn->channel.cols, conn->channel.rows);
-  shell_argv[0] = "eshell";
-  shell_argv[1] = 0;
-  pid = kernel_execve_tty("/usr/bin/eshell", shell_argv, tty);
-  if (pid < 0) {
-    tty_release(tty);
-    return -1;
-  }
-
-  conn->channel.tty = tty;
-  conn->channel.shell_pid = pid;
-  admin_runtime_audit_line("ssh_spawn_ok");
-  ssh_audit_start(conn->peer_addr, pid);
+  conn->channel.shell_start_pending = TRUE;
+  conn->channel.shell_start_tick = kernel_tick + 1;
   return 0;
 }
 
@@ -1590,7 +1643,8 @@ PRIVATE int ssh_handle_channel_request(struct ssh_connection *conn,
     admin_runtime_audit_line("ssh_shell_req");
     if (ssh_spawn_shell(conn) < 0)
       return want_reply ? ssh_queue_channel_status(conn, FALSE) : -1;
-    return want_reply ? ssh_queue_channel_status(conn, TRUE) : 0;
+    conn->channel.shell_reply_pending = want_reply ? TRUE : FALSE;
+    return 0;
   }
 
   return want_reply ? ssh_queue_channel_status(conn, FALSE) : 0;
@@ -1866,10 +1920,42 @@ PRIVATE void ssh_flush_outbox(struct ssh_connection *conn)
   conn->out_count--;
 }
 
+PRIVATE int ssh_translate_tty_chunk(struct ssh_connection *conn,
+                                    const char *src, int src_len,
+                                    char *dest, int dest_cap)
+{
+  int in_pos = 0;
+  int out_pos = 0;
+
+  if (conn == 0 || src == 0 || dest == 0 || src_len <= 0 || dest_cap <= 0)
+    return 0;
+
+  while (in_pos < src_len && out_pos < dest_cap) {
+    char ch = src[in_pos++];
+
+    if (ch == '\n' && !conn->channel.tx_prev_cr) {
+      if (out_pos + 2 > dest_cap) {
+        in_pos--;
+        break;
+      }
+      dest[out_pos++] = '\r';
+      dest[out_pos++] = '\n';
+    } else {
+      dest[out_pos++] = ch;
+    }
+    conn->channel.tx_prev_cr = (ch == '\r') ? TRUE : FALSE;
+  }
+
+  return out_pos;
+}
+
 PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
 {
-  char chunk[256];
+  char raw_chunk[128];
+  char cooked_chunk[256];
+  int raw_cap;
   int read_len;
+  int send_len;
   u_int32_t cap;
 
   if (!conn->channel.open || conn->channel.tty == 0)
@@ -1880,40 +1966,41 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
     return;
 
   cap = conn->channel.peer_max_packet;
-  if (cap > sizeof(chunk))
-    cap = sizeof(chunk);
+  if (cap > sizeof(cooked_chunk))
+    cap = sizeof(cooked_chunk);
   if (cap > conn->channel.peer_window)
     cap = conn->channel.peer_window;
   if (cap == 0)
     return;
 
-  read_len = (int)tty_master_read(conn->channel.tty, chunk, cap);
+  raw_cap = (int)(cap / 2);
+  if (raw_cap <= 0)
+    raw_cap = 1;
+  if (raw_cap > (int)sizeof(raw_chunk))
+    raw_cap = sizeof(raw_chunk);
+
+  read_len = (int)tty_master_read(conn->channel.tty, raw_chunk, raw_cap);
   if (read_len <= 0)
     return;
-  if (ssh_queue_channel_data(conn, (const u_int8_t *)chunk, read_len) < 0) {
+
+  send_len = ssh_translate_tty_chunk(conn, raw_chunk, read_len,
+                                     cooked_chunk, (int)cap);
+  if (send_len <= 0)
+    return;
+  if (ssh_queue_channel_data(conn, (const u_int8_t *)cooked_chunk, send_len) < 0) {
     ssh_queue_close(conn, "queue_failed");
     return;
   }
-  conn->channel.peer_window -= (u_int32_t)read_len;
+  conn->channel.peer_window -= (u_int32_t)send_len;
   conn->last_activity_tick = kernel_tick;
 }
 
 PRIVATE void ssh_poll_shell(struct ssh_connection *conn)
 {
-  if (conn->channel.shell_pid <= 0)
-    return;
-  if (process_has_pid(conn->channel.shell_pid))
-    return;
-
-  conn->channel.shell_pid = -1;
-  ssh_queue_exit_status(conn, 0);
-  ssh_queue_channel_eof(conn);
-  ssh_queue_channel_close(conn);
-  ssh_queue_close(conn, "shell_exit");
-  if (conn->channel.tty != 0) {
-    tty_release(conn->channel.tty);
-    conn->channel.tty = 0;
-  }
+  (void)conn;
+  /* `eshell` には明示的な exit request がなく、`process_has_pid()` だけで
+   * shell 終了を判定すると command 実行中に誤って close することがある。
+   * cleanup は peer close / socket close / timeout 側へ寄せる。 */
 }
 
 PRIVATE void ssh_accept_pending_connections(void)
@@ -1956,6 +2043,7 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
 {
   int payload_len;
   int result;
+  int start_result = 0;
   u_int32_t timeout_ticks;
   int iterations = 0;
 
@@ -2004,6 +2092,13 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
   }
 
   if (!conn->closing) {
+    start_result = ssh_start_pending_shell(conn);
+    if (start_result < 0) {
+      ssh_queue_close(conn, "spawn_failed");
+    }
+  }
+
+  if (!conn->closing && start_result == 0) {
     ssh_pump_tty_to_channel(conn);
     ssh_poll_shell(conn);
   }

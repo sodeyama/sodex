@@ -1994,6 +1994,14 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
     return;
   if (conn->channel.peer_window == 0)
     return;
+  if (conn->channel.prompt_kick_pending) {
+    if (socket_table[conn->fd].tx_pending != 0)
+      return;
+    if (conn->out_count != 0)
+      return;
+    if ((int)(kernel_tick - conn->channel.shell_started_tick) < 2)
+      return;
+  }
 
   cap = conn->channel.peer_max_packet;
   if (cap > sizeof(cooked_chunk))

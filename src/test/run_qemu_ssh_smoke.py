@@ -134,7 +134,7 @@ spawn ssh -vv -tt -F /dev/null -o PreferredAuthentications=password -o PubkeyAut
 expect -re {{[Pp]assword:}}
 send "{password}\\r"
 expect "shell request accepted on channel 0"
-sleep 1
+expect -re {{sodex .*> }}
 send "exit\\r"
 puts "SSH_SESSION_OK"
 exit 0

@@ -107,11 +107,12 @@ QEMU に与えた RAM を guest が固定 64MB 前提ではなく実際に使え
 
 ## 現在の到達点
 
-- BIOS 由来のメモリサイズ取得は bootloader に存在する
-- kernel direct map は 4MB PDE を 64 本だけ張っており、実質 `256MB` までしか見ない
-- process physical allocator は `32MB-64MB` の 32MB 固定範囲だけを使う
-- `bin/start.sh` と QEMU smoke scripts は `-m 128` を個別に直書きしている
-- 1GB 構成を前提にした boot / allocator / userland の継続検証はまだ無い
+- bootloader から kernel へ `memory_info` / `memory_map` を渡し、E820 優先で usable RAM を構造化して参照できる
+- `memory_layout_policy` により kernel direct map、kernel heap、process pool を検出 RAM と cap から動的に決めている
+- kernel direct map は 4MB PDE 単位で最大 `1GB` まで張られ、`kalloc` / `aalloc` / `palloc` も policy 由来の free range を使う
+- QEMU RAM は `SODEX_QEMU_MEM_MB` に統一され、既定値は `512MB`、guest 側 cap は `SODEX_RAM_CAP_MB` で制御できる
+- host 側は `tests/test_memory_layout`、QEMU 側は `make -C src test-qemu-memory` で `128/256/512/1024MB` の matrix を継続確認できる
+- userland 側は `make -C src test-qemu-user-memory` で shell 経由の `execve` と `malloc/brk` 回帰を確認できる
 
 ## 実装順序
 

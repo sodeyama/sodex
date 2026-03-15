@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 
+from qemu_config import get_qemu_memory_mb
+
 QEMU_SUCCESS = 1
 DEFAULT_TIMEOUT = 45
 
@@ -79,6 +81,7 @@ def main() -> int:
 
     timeout = int(os.environ.get("SODEX_QEMU_TIMEOUT", DEFAULT_TIMEOUT))
     qemu_bin = os.environ.get("QEMU", "qemu-system-i386")
+    qemu_memory_mb = get_qemu_memory_mb()
 
     with echo_log.open("w") as echo_fp:
         echo_proc = subprocess.Popen(
@@ -101,7 +104,7 @@ def main() -> int:
                 "-drive",
                 f"file={fsboot},format=raw,if=ide",
                 "-m",
-                "128",
+                str(qemu_memory_mb),
                 "-nographic",
                 "-device",
                 "isa-debug-exit,iobase=0xf4,iosize=0x04",

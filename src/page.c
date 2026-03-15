@@ -12,10 +12,12 @@
 
 #include <sys/types.h>
 #include <page.h>
+#include <memory_layout.h>
 
 PRIVATE void delete_first_page();
 PRIVATE u_int32_t get_need_blocks(size_t need_size, size_t size);
 PRIVATE u_int32_t kernel_extra_pdes[PAGE_DIR_SIZE];
+PRIVATE u_int32_t get_kernel_pde_end();
 
 PUBLIC void init_paging()
 {
@@ -34,9 +36,10 @@ PRIVATE void delete_first_page()
 PUBLIC void create_kernel_page(u_int32_t* pg_dir)
 {
   u_int32_t pte;
+  u_int32_t kernel_pde_end = get_kernel_pde_end();
   int pos;
   for (pos = 0; pos < PAGE_DIR_SIZE; pos++) {
-    if (pos >= PGDIR_KERNEL_START && pos < PGDIR_KERNEL_END) {
+    if (pos >= PGDIR_KERNEL_START && pos < kernel_pde_end) {
       pte = (pos - PGDIR_KERNEL_START) * PSE_PAGE_SIZE;
       pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US|PAGE_PSE|PAGE_GLOBAL);
       pg_dir[pos] = pte;
@@ -51,20 +54,35 @@ PUBLIC void create_kernel_page(u_int32_t* pg_dir)
   }
 }
 
+PRIVATE u_int32_t get_kernel_pde_end()
+{
+  const memory_layout_policy_t* layout;
+
+  if (memory_layout_is_initialized() == 0)
+    return PGDIR_KERNEL_END;
+
+  layout = memory_get_layout_policy();
+  if (layout->kernel_pde_end <= PGDIR_KERNEL_START ||
+      layout->kernel_pde_end > PAGE_DIR_SIZE)
+    return PGDIR_KERNEL_END;
+
+  return layout->kernel_pde_end;
+}
+
 PUBLIC void* create_process_page(u_int32_t* pg_dir, size_t size)
 {
   u_int32_t need_blocks = ((size&~(BLOCK_SIZE-1)) == 0) ? 
     ((size&~(BLOCK_SIZE-1))>>12) + 1 : ((size&~(BLOCK_SIZE-1))>>12);
   void* phy_proc_mem = palloc(size);
 
-  u_int32_t need_pgdir_blocks = ((need_blocks/1024) == 0) ?
-    (need_blocks/1024)+1 : (need_blocks/1024);
+  u_int32_t need_pgdir_blocks = (need_blocks + 1023) / 1024;
 
   u_int32_t pte;
   int pos;
   for (pos = 0; pos < need_pgdir_blocks; pos++) {
     u_int32_t* pg_tbl = kalloc(BLOCK_SIZE*2);
     pg_tbl = ((u_int32_t)pg_tbl & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+    memset(pg_tbl, 0, BLOCK_SIZE);
     int i;
     for (i=0; i<1024; i++) {
       if (pos*1024+i >= need_blocks) break;
@@ -94,34 +112,41 @@ PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
     return NULL;
   }
 
-  u_int32_t need_pgdir_blocks = ((need_blocks/1024) == 0) ?
-    (need_blocks/1024)+1 : (need_blocks/1024);
-
   u_int32_t pte;
-  int pgdir_start_pos, pgdir_end_pos, pgtbl_start_pos, pgtbl_end_pos;
+  u_int32_t mapped_blocks = 0;
+  int pgdir_start_pos, pgtbl_start_pos;
   pgdir_start_pos = new_start_vaddr/(BLOCK_SIZE*1024);
-  pgdir_end_pos = pgdir_start_pos + need_pgdir_blocks;
   int pd_pos;
-  for (pd_pos = pgdir_start_pos; pd_pos < pgdir_end_pos; pd_pos++) {
+  pgtbl_start_pos = (new_start_vaddr%(BLOCK_SIZE*1024))/BLOCK_SIZE;
+
+  for (pd_pos = pgdir_start_pos; mapped_blocks < need_blocks; pd_pos++) {
     u_int32_t* pg_tbl;
-    if (pg_dir[pd_pos] == NULL) {
+    int pt_start_pos;
+    int pt_end_pos;
+    int pt_pos;
+    if (pg_dir[pd_pos] == 0) {
       pg_tbl = kalloc(BLOCK_SIZE*2);
+      if (pg_tbl == NULL) {
+        _kprintf("%s: pg_tbl kalloc error\n", __func__);
+        return NULL;
+      }
       pg_tbl = ((u_int32_t)pg_tbl & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+      memset(pg_tbl, 0, BLOCK_SIZE);
     } else {
       pg_tbl = pg_dir[pd_pos]&~(BLOCK_SIZE-1);
       pg_tbl = (u_int32_t*)((u_int32_t)pg_tbl + (__PAGE_OFFSET));
     }
-    pgtbl_start_pos = (new_start_vaddr%(BLOCK_SIZE*1024))/BLOCK_SIZE;
-    if (pd_pos == pgdir_end_pos - 1)
-      pgtbl_end_pos = pgtbl_start_pos + need_blocks;
-    else
-      pgtbl_end_pos = 1024;
-    int pt_pos;
-    for (pt_pos = pgtbl_start_pos; pt_pos < pgtbl_end_pos; pt_pos++) {
-      pte = phy_proc_mem + ((pd_pos-pgdir_start_pos) * 1024 +
-                            (pt_pos-pgtbl_start_pos))*BLOCK_SIZE;
+
+    pt_start_pos = (pd_pos == pgdir_start_pos) ? pgtbl_start_pos : 0;
+    pt_end_pos = pt_start_pos + (need_blocks - mapped_blocks);
+    if (pt_end_pos > 1024)
+      pt_end_pos = 1024;
+
+    for (pt_pos = pt_start_pos; pt_pos < pt_end_pos; pt_pos++) {
+      pte = phy_proc_mem + mapped_blocks*BLOCK_SIZE;
       pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US);
       pg_tbl[pt_pos] = pte;
+      mapped_blocks++;
     }
     pte = (u_int32_t)pg_tbl - __PAGE_OFFSET;
     pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US);

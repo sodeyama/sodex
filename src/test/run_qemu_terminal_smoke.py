@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 
+from qemu_config import get_qemu_memory_mb
+
 DEFAULT_TIMEOUT = 45
 PROMPT_ROWS = 48
 LONG_OUTPUT_ENTERS = 64
@@ -167,12 +169,13 @@ def main() -> int:
 
     qemu_bin = os.environ.get("QEMU", "qemu-system-i386")
     timeout = int(os.environ.get("SODEX_QEMU_TIMEOUT", DEFAULT_TIMEOUT))
+    qemu_memory_mb = get_qemu_memory_mb()
     qemu_args = [
         qemu_bin,
         "-drive",
         f"file={fsboot},format=raw,if=ide",
         "-m",
-        "128",
+        str(qemu_memory_mb),
         "-display",
         "none",
         "-no-reboot",

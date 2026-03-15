@@ -14,6 +14,8 @@ import tempfile
 import time
 import hashlib
 
+from qemu_config import get_qemu_memory_mb
+
 BLOCK_SIZE = 4096
 INODE_SIZE = 128
 P_INODE_BLOCK = 16384
@@ -282,10 +284,11 @@ def main() -> int:
 
     qemu_bin = os.environ.get("QEMU", "qemu-system-i386")
     timeout = int(os.environ.get("SODEX_QEMU_TIMEOUT", DEFAULT_TIMEOUT))
+    qemu_memory_mb = get_qemu_memory_mb()
     qemu_args = [
         qemu_bin,
         "-drive", f"file={fsboot},format=raw,if=ide",
-        "-m", "128",
+        "-m", str(qemu_memory_mb),
         "-display", "none",
         "-no-reboot",
         "-serial", f"file:{serial_log}",

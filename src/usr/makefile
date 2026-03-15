@@ -2,7 +2,7 @@ include ../makefile.inc
 include makefile.inc
 
 SUB_OBJDIR = ${USR_OBJDIR}
-$(shell mkdir -p $(SUB_OBJDIR))
+$(shell mkdir -p $(SUB_OBJDIR) ${USRDIR}/bin)
 
 IDLE   = ${USRDIR}/bin/idle
 INIT   = ${USRDIR}/bin/init

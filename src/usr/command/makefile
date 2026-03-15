@@ -29,6 +29,7 @@ RMDIR   = ${USRDIR}/bin/rmdir
 MV      = ${USRDIR}/bin/mv
 VI      = ${USRDIR}/bin/vi
 UTF8DEMO = ${USRDIR}/bin/utf8demo
+MEMGROW = ${USRDIR}/bin/memgrow
 
 all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
@@ -52,6 +53,7 @@ all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/mv.o -o ${MV} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/vi.o -o ${VI} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/utf8demo.o -o ${UTF8DEMO} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/memgrow.o -o ${MEMGROW} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

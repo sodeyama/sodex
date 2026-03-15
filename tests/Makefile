@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
 
 .PHONY: all clean test
 
@@ -65,6 +65,20 @@ test_memory_memory.o: $(SRC)/memory.c
 		-c -o $@ $<
 
 test_memory_string.o: $(SRC)/lib/string.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
+
+# Memory layout policy test
+test_memory_layout: test_memory_layout.c test_memory_layout_layout.o test_memory_layout_string.o
+	$(CC) $(CFLAGS) -I$(SRC)/include -o $@ test_memory_layout.c test_memory_layout_layout.o test_memory_layout_string.o
+
+test_memory_layout_layout.o: $(SRC)/memory_layout.c
+	$(CC) $(CFLAGS) -DTEST_BUILD \
+		-I$(SRC)/include \
+		-Imocks \
+		-include mocks/mock_memory_deps.h \
+		-c -o $@ $<
+
+test_memory_layout_string.o: $(SRC)/lib/string.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -c -o $@ $<
 
 # VGA _kvsnprintf format test

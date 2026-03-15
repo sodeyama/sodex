@@ -143,6 +143,40 @@ TEST(rate_limit_allowlist_rejects_and_audits) {
     ASSERT(strstr(response, "auth_throttle peer=10.0.2.9 reason=allowlist count=4 retry=100") != 0);
 }
 
+TEST(rate_limit_shares_bucket_across_auth_failure_reasons) {
+    struct admin_request req;
+    u_int32_t peer_ip = test_ip(10, 0, 2, 9);
+    u_int32_t retry_after = 0;
+    const char *missing_token = "STATUS\n";
+    const char *bad_token = "TOKEN wrong-secret STATUS\n";
+    const char *good_token = "TOKEN status-secret STATUS\n";
+
+    admin_runtime_reset();
+    admin_runtime_set_tick(0);
+    admin_runtime_set_tokens("status-secret", "control-secret");
+    admin_runtime_set_allow_ip(test_ip(10, 0, 2, 2));
+
+    ASSERT_EQ(admin_authorize_peer(peer_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+    ASSERT_EQ(admin_authorize_peer(peer_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+
+    admin_runtime_set_allow_ip(peer_ip);
+
+    ASSERT_EQ(admin_parse_command(missing_token, (int)strlen(missing_token), &req), 0);
+    ASSERT_EQ(admin_authorize_request_detailed(&req, peer_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+
+    ASSERT_EQ(admin_parse_command(bad_token, (int)strlen(bad_token), &req), 0);
+    ASSERT_EQ(admin_authorize_request_detailed(&req, peer_ip, &retry_after), ADMIN_AUTH_THROTTLED);
+    ASSERT_EQ(retry_after, 100);
+
+    admin_runtime_set_tick(100);
+    ASSERT_EQ(admin_parse_command(good_token, (int)strlen(good_token), &req), 0);
+    ASSERT_EQ(admin_authorize_request_detailed(&req, peer_ip, &retry_after), ADMIN_AUTH_ALLOW);
+    ASSERT_EQ(retry_after, 0);
+}
+
 TEST(listener_ready_emits_serial_ready_marker_to_audit_ring) {
     struct admin_request req;
     char response[ADMIN_RESPONSE_MAX];
@@ -169,6 +203,7 @@ int main(void) {
     RUN_TEST(log_tail_uses_audit_ring);
     RUN_TEST(load_config_text_updates_runtime);
     RUN_TEST(rate_limit_allowlist_rejects_and_audits);
+    RUN_TEST(rate_limit_shares_bucket_across_auth_failure_reasons);
     RUN_TEST(listener_ready_emits_serial_ready_marker_to_audit_ring);
     TEST_REPORT();
 }

@@ -65,6 +65,11 @@
   - allowlist 外からの連打
   - throttle 後の回復
 
+2026-03-15 追記:
+
+- rate limit bucket は peer 単位で共有し、allowlist / token なし / token 不一致を同一 peer の失敗として数える
+- host test に、allowlist 拒否から token 認証失敗へ遷移しても同じ bucket で throttle されるケースを追加した
+
 ### SRT-10: `test-qemu-server` の CI / 継続運用導線
 
 - [x] host 手元 smoke と Docker/headless smoke を分けて定義する

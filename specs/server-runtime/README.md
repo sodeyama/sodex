@@ -122,6 +122,7 @@ Linux ホスト
 - HTTP の `GET /healthz`, `GET /status`, `POST /agent/start`, `POST /agent/stop`
 - `/etc/sodex-admin.conf` による起動時 token / allowlist 注入
 - allowlist と audit ring buffer
+- 認証失敗に対する peer 単位 rate limit と backoff
 - host Linux の `SSH` と guest `sodex` 管理 API の分離を継続し、guest 内 `SSH server` は当面見送る判断
 
 ## 完了条件

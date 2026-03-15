@@ -691,6 +691,9 @@ PRIVATE int admin_build_log_tail(char *response, int response_cap, int limit)
 PUBLIC void admin_runtime_reset(void)
 {
   memset(&admin_runtime, 0, sizeof(admin_runtime));
+#ifdef TEST_BUILD
+  kernel_tick = 0;
+#endif
   admin_copy_string(admin_runtime.status_token, sizeof(admin_runtime.status_token),
                     SODEX_ADMIN_STATUS_TOKEN);
   admin_copy_string(admin_runtime.control_token, sizeof(admin_runtime.control_token),

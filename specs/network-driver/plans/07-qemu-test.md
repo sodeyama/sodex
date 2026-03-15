@@ -5,6 +5,16 @@
 Plan 1.1〜1.6の実装を統合してQEMU上でテストし、pingが通ることを確認する。
 Phase 1全体の最終統合テスト。
 
+## 現状注記
+
+現時点では、QEMU 上の統合テスト基盤と `guestfwd` を使った TCP echo 検証はある。
+一方で、この plan がゴールにしている `ping` 疎通は、再現可能な標準手順としてはまだ閉じていない。
+
+- `src/test/run_qemu_ktest.py` は存在する
+- `src/test/ktest.c` は TCP 接続テストまで入っている
+- `src/usr/command/ping.c` は存在する
+- ただし `ping` をどう検証完了にするかは別途整理が必要
+
 ## QEMUネットワーク設定
 
 ### 起動コマンド
@@ -39,7 +49,8 @@ qemu-system-i386 \
 Sodex側から10.0.2.2（QEMUゲートウェイ）にICMP echo requestを送信し、
 echo replyが返ってくることを確認。
 
-ただしSodexにpingコマンドはまだないので、カーネル内でテストコードを書く:
+`ping` コマンド自体は存在するが、現状の QEMU 自動テストにどう組み込むかは未整理。
+必要に応じて、カーネル内テストまたはユーザ空間起動手順のどちらかに寄せる:
 
 ```c
 // kernel.c の start_kernel() 末尾等

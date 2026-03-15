@@ -19,8 +19,9 @@ REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")" || {
   echo "リポジトリルートが見つかりません: $SCRIPT_DIR" >&2
   exit 1
 }
-BUILD_BIN="$REPO_ROOT/build/bin"
-LOG_DIR="$REPO_ROOT/build/log"
+BUILD_ROOT="${SODEX_BUILD_ROOT:-$REPO_ROOT/build}"
+BUILD_BIN="${SODEX_BUILD_BIN:-$BUILD_ROOT/bin}"
+LOG_DIR="${SODEX_LOG_DIR:-$BUILD_ROOT/log}"
 QEMU_MEM_MB="${SODEX_QEMU_MEM_MB:-512}"
 HOST_BIND_ADDR="${SODEX_HOST_BIND_ADDR:-127.0.0.1}"
 HOST_HTTP_PORT="${SODEX_HOST_HTTP_PORT:-18080}"
@@ -66,7 +67,7 @@ case "${1:-user}" in
         -drive file=$BUILD_BIN/fsboot.bin,format=raw,if=ide \
         -m "$QEMU_MEM_MB" \
         -serial stdio \
-        -monitor none \
+        -monitor unix:$LOG_DIR/monitor.sock,server,nowait \
         -d int,cpu_reset -D "$LOG_DIR/qemu_debug.log" \
         $COMMON_ACCEL_OPTS \
         -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023 \

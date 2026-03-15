@@ -39,6 +39,17 @@ enum admin_action {
   ADMIN_ACTION_LOG_TAIL
 };
 
+enum admin_auth_result {
+  ADMIN_AUTH_DENY = 0,
+  ADMIN_AUTH_ALLOW = 1,
+  ADMIN_AUTH_THROTTLED = 2
+};
+
+enum admin_listener_kind {
+  ADMIN_LISTENER_ADMIN = 1,
+  ADMIN_LISTENER_HTTP = 2
+};
+
 struct admin_request {
   int action;
   int required_role;
@@ -67,6 +78,12 @@ PUBLIC int admin_execute_request(const struct admin_request *req,
                                  int json_mode);
 PUBLIC int admin_role_from_token(const char *token);
 PUBLIC int admin_is_source_allowed(u_int32_t peer_addr);
+PUBLIC int admin_authorize_peer(u_int32_t peer_addr,
+                                u_int32_t *retry_after_ticks);
+PUBLIC int admin_authorize_request_detailed(const struct admin_request *req,
+                                            u_int32_t peer_addr,
+                                            u_int32_t *retry_after_ticks);
+PUBLIC void admin_runtime_note_listener_ready(int listener_kind);
 
 PUBLIC int http_parse_request(const char *data, int len,
                               struct http_request *out);

@@ -67,11 +67,19 @@ Docker 上で server runtime を常駐させたい場合:
 
 ```sh
 docker build -f docker/server-runtime/Dockerfile -t sodex-server-runtime .
-docker run --rm -p 18080:18080 -p 10023:10023 sodex-server-runtime
+mkdir -p build/log/server-runtime
+docker run --rm \
+  -p 18080:18080 \
+  -p 10023:10023 \
+  -v "$(pwd)/build/log/server-runtime:/var/log/sodex" \
+  sodex-server-runtime
 ```
 
 この image は `linux/amd64` 前提です。Apple Silicon などの arm64 host では Docker の emulation 経由で動かします。
-published port の疎通は Linux host を前提にしています。Docker Desktop/macOS 上の nested slirp は未確認です。
+published port の疎通と常駐運用は Linux host を前提にしています。Docker Desktop/macOS の nested slirp はサポート対象外です。
+
+ready 条件は container の serial/stdout に `AUDIT server_runtime_ready ...` が出た時点です。
+`qemu_debug.log` と `monitor.sock` は mount した `/var/log/sodex` 配下に出ます。
 
 `/dev/kvm` を使える Linux なら、`--device /dev/kvm -e SODEX_QEMU_ACCEL=kvm` を追加できます。
 
@@ -99,6 +107,12 @@ make -C src test-qemu-fs
 make -C src test-qemu-shell-io
 make -C src test-qemu-vi
 make -C src test-qemu-ime
+```
+
+Docker/headless server runtime smoke:
+
+```sh
+make test-docker-server
 ```
 
 `make -C src test-qemu-memory` は `128/256/512/1024MB` の memory scaling matrix を回します。

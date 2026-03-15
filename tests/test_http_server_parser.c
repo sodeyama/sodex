@@ -87,11 +87,54 @@ TEST(build_http_response) {
     ASSERT(strstr(response, "\r\n\r\nok\n") != 0);
 }
 
+TEST(http_auth_rate_limit_recovers_after_backoff) {
+    struct http_request http_req;
+    struct admin_request admin_req;
+    u_int32_t allowed_ip = test_ip(10, 0, 2, 2);
+    u_int32_t retry_after = 0;
+    const char *bad_raw =
+        "GET /status HTTP/1.1\r\n"
+        "Authorization: Bearer wrong-secret\r\n"
+        "\r\n";
+    const char *good_raw =
+        "GET /status HTTP/1.1\r\n"
+        "Authorization: Bearer status-secret\r\n"
+        "\r\n";
+
+    admin_runtime_reset();
+    admin_runtime_set_tick(0);
+    admin_runtime_set_tokens("status-secret", "control-secret");
+    admin_runtime_set_allow_ip(allowed_ip);
+
+    ASSERT_EQ(http_parse_request(bad_raw, (int)strlen(bad_raw), &http_req), 0);
+    ASSERT_EQ(http_map_request(&http_req, &admin_req), 0);
+
+    ASSERT_EQ(admin_authorize_request_detailed(&admin_req, allowed_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+    ASSERT_EQ(admin_authorize_request_detailed(&admin_req, allowed_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+    ASSERT_EQ(admin_authorize_request_detailed(&admin_req, allowed_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+    ASSERT_EQ(admin_authorize_request_detailed(&admin_req, allowed_ip, &retry_after), ADMIN_AUTH_THROTTLED);
+    ASSERT_EQ(retry_after, 100);
+
+    admin_runtime_set_tick(99);
+    ASSERT_EQ(http_parse_request(good_raw, (int)strlen(good_raw), &http_req), 0);
+    ASSERT_EQ(http_map_request(&http_req, &admin_req), 0);
+    ASSERT_EQ(admin_authorize_request_detailed(&admin_req, allowed_ip, &retry_after), ADMIN_AUTH_THROTTLED);
+    ASSERT_EQ(retry_after, 1);
+
+    admin_runtime_set_tick(100);
+    ASSERT_EQ(admin_authorize_request_detailed(&admin_req, allowed_ip, &retry_after), ADMIN_AUTH_ALLOW);
+    ASSERT_EQ(retry_after, 0);
+}
+
 int main(void) {
     RUN_TEST(parse_health_request);
     RUN_TEST(parse_authorization_header);
     RUN_TEST(map_http_to_admin_actions);
     RUN_TEST(status_request_roundtrip);
     RUN_TEST(build_http_response);
+    RUN_TEST(http_auth_rate_limit_recovers_after_backoff);
     TEST_REPORT();
 }

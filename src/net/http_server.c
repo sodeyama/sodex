@@ -21,6 +21,7 @@ typedef uint32_t u_int32_t;
 #else
 #include <string.h>
 #include <io.h>
+#include <rs232c.h>
 #include <uip.h>
 #include <socket.h>
 EXTERN volatile u_int32_t kernel_tick;
@@ -131,6 +132,8 @@ PRIVATE const char *http_status_text(int status_code)
     return "Not Found";
   case 413:
     return "Payload Too Large";
+  case 429:
+    return "Too Many Requests";
   default:
     return "Internal Server Error";
   }
@@ -338,6 +341,7 @@ PRIVATE int http_create_listener(void)
   if (fd < 0) {
     if (http_listener_state_log != 1) {
       _kprintf("http listener create failed: socket\n");
+      com1_puts("http listener create failed: socket\n");
       http_listener_state_log = 1;
     }
     return -1;
@@ -347,6 +351,7 @@ PRIVATE int http_create_listener(void)
   if (kern_bind(fd, &addr) < 0) {
     if (http_listener_state_log != 2) {
       _kprintf("http listener create failed: bind\n");
+      com1_puts("http listener create failed: bind\n");
       http_listener_state_log = 2;
     }
     kern_close_socket(fd);
@@ -355,6 +360,7 @@ PRIVATE int http_create_listener(void)
   if (kern_listen(fd, SOCK_ACCEPT_BACKLOG_SIZE) < 0) {
     if (http_listener_state_log != 3) {
       _kprintf("http listener create failed: listen\n");
+      com1_puts("http listener create failed: listen\n");
       http_listener_state_log = 3;
     }
     kern_close_socket(fd);
@@ -364,6 +370,7 @@ PRIVATE int http_create_listener(void)
     _kprintf("http listener ready fd=%d\n", fd);
     http_listener_state_log = 4;
   }
+  admin_runtime_note_listener_ready(ADMIN_LISTENER_HTTP);
   return fd;
 }
 
@@ -394,6 +401,7 @@ PRIVATE void http_accept_pending_connections(void)
     struct sockaddr_in peer;
     int child_fd;
     int slot;
+    int auth_result;
 
     disableInterrupt();
     child_fd = socket_try_accept(http_listener_fd, &peer);
@@ -401,11 +409,16 @@ PRIVATE void http_accept_pending_connections(void)
     if (child_fd < 0)
       return;
 
-    if (!admin_is_source_allowed(peer.sin_addr)) {
+    auth_result = admin_authorize_peer(peer.sin_addr, 0);
+    if (auth_result != ADMIN_AUTH_ALLOW) {
       char body[64];
       char response[ADMIN_RESPONSE_MAX];
-      http_copy_string(body, sizeof(body), "forbidden\n");
-      http_build_response(403, body, response, sizeof(response), "text/plain");
+      http_copy_string(body, sizeof(body),
+                       auth_result == ADMIN_AUTH_THROTTLED
+                           ? "throttled\n"
+                           : "forbidden\n");
+      http_build_response(auth_result == ADMIN_AUTH_THROTTLED ? 429 : 403,
+                          body, response, sizeof(response), "text/plain");
       kern_send(child_fd, response, (int)strlen(response), 0);
       kern_close_socket(child_fd);
       continue;
@@ -435,6 +448,7 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
   int read_len;
   int status_code = 200;
   const char *content_type = "application/json";
+  int auth_result;
 
   if (conn == 0 || !conn->in_use)
     return;
@@ -491,8 +505,13 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
     return;
   }
 
-  if (!admin_authorize_request(&conn->admin_request, conn->peer_addr)) {
-    http_build_response(403, "forbidden\n",
+  auth_result = admin_authorize_request_detailed(&conn->admin_request,
+                                                 conn->peer_addr, 0);
+  if (auth_result != ADMIN_AUTH_ALLOW) {
+    http_build_response(auth_result == ADMIN_AUTH_THROTTLED ? 429 : 403,
+                        auth_result == ADMIN_AUTH_THROTTLED
+                            ? "throttled\n"
+                            : "forbidden\n",
                         conn->response, sizeof(conn->response), "text/plain");
     http_send_and_close(conn, conn->response);
     return;

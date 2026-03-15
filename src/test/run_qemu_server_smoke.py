@@ -17,6 +17,8 @@ HOST_HTTP_PORT = 18080
 HOST_ADMIN_PORT = 10023
 STATUS_TOKEN = os.environ.get("SODEX_ADMIN_STATUS_TOKEN", "status-secret")
 CONTROL_TOKEN = os.environ.get("SODEX_ADMIN_CONTROL_TOKEN", "control-secret")
+READY_MARKER = "AUDIT server_runtime_ready"
+FAILURE_MARKERS = ("PF:", "PageFault", "General Protection Exception")
 
 
 def dump_file(path: pathlib.Path) -> None:
@@ -25,6 +27,12 @@ def dump_file(path: pathlib.Path) -> None:
     data = path.read_text(errors="replace")
     if data:
         print(data, end="")
+
+
+def read_text(path: pathlib.Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(errors="replace")
 
 
 def query_monitor(sock_path: pathlib.Path) -> str:
@@ -92,14 +100,20 @@ def send_admin(line: str) -> str:
     return b"".join(chunks).decode(errors="replace")
 
 
-def wait_until_ready(deadline: float) -> None:
+def assert_no_guest_failure(serial_log: pathlib.Path, qemu_log: pathlib.Path) -> None:
+    serial_text = read_text(serial_log)
+    qemu_text = read_text(qemu_log)
+
+    for marker in FAILURE_MARKERS:
+        if marker in serial_text or marker in qemu_text:
+            raise AssertionError(f"guest failure marker detected: {marker}")
+
+
+def wait_until_ready(deadline: float, serial_log: pathlib.Path,
+                     qemu_log: pathlib.Path) -> None:
     while time.time() < deadline:
-        try:
-            head, body = send_http("GET", "/healthz")
-        except OSError:
-            time.sleep(0.5)
-            continue
-        if "200 OK" in head and body == "ok\n":
+        assert_no_guest_failure(serial_log, qemu_log)
+        if READY_MARKER in read_text(serial_log):
             return
         time.sleep(0.5)
     raise AssertionError("server runtime did not become ready in time")
@@ -161,7 +175,7 @@ def main() -> int:
 
     try:
         deadline = time.time() + timeout
-        wait_until_ready(deadline)
+        wait_until_ready(deadline, serial_log, qemu_log)
 
         head, body = send_http("GET", "/healthz")
         assert_contains(head, "200 OK", "health head")
@@ -200,6 +214,9 @@ def main() -> int:
 
         admin = send_admin(f"TOKEN {STATUS_TOKEN} LOG TAIL 5\n")
         assert_contains(admin, "agent_start", "admin log tail")
+        assert_contains(admin, "server_runtime_ready", "admin ready log tail")
+
+        assert_no_guest_failure(serial_log, qemu_log)
 
         print("=== SERVER RUNTIME SMOKE DONE ===")
         dump_file(serial_log)

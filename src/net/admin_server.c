@@ -25,6 +25,7 @@ static u_int32_t kernel_tick = 0;
 #include <string.h>
 #include <vga.h>
 #include <io.h>
+#include <rs232c.h>
 #include <uip.h>
 #include <ext3fs.h>
 #include <fs.h>
@@ -65,6 +66,20 @@ EXTERN volatile u_int32_t kernel_tick;
 #define ADMIN_IDLE_TIMEOUT_TICKS 500
 #define ADMIN_CONFIG_MAX 256
 #define ADMIN_CLOSE_DRAIN_TICKS 60
+#define ADMIN_AUTH_BUCKETS 8
+#define ADMIN_AUTH_WINDOW_TICKS 300
+#define ADMIN_AUTH_FAILURE_THRESHOLD 3
+#define ADMIN_AUTH_BACKOFF_BASE_TICKS 100
+#define ADMIN_AUTH_BACKOFF_MAX_SHIFT 3
+
+struct admin_auth_bucket {
+  int in_use;
+  u_int32_t peer_addr;
+  u_int32_t window_start_tick;
+  u_int32_t last_seen_tick;
+  int failure_count;
+  u_int32_t blocked_until_tick;
+};
 
 struct admin_runtime_state {
   char status_token[ADMIN_TOKEN_MAX];
@@ -77,6 +92,9 @@ struct admin_runtime_state {
   char audit_lines[ADMIN_AUDIT_LINES][ADMIN_AUDIT_LINE_SIZE];
   int audit_head;
   int audit_count;
+  struct admin_auth_bucket auth_buckets[ADMIN_AUTH_BUCKETS];
+  int listener_ready_mask;
+  int listener_ready_announced;
 };
 
 struct admin_runtime_state admin_runtime;
@@ -267,10 +285,12 @@ PRIVATE void admin_audit_line(const char *line)
 
 #ifndef TEST_BUILD
   _kprintf("AUDIT %s\n", admin_runtime.audit_lines[slot]);
+  com1_puts("AUDIT ");
+  com1_puts((char *)admin_runtime.audit_lines[slot]);
+  com1_puts("\n");
 #endif
 }
 
-#ifndef TEST_BUILD
 PRIVATE void admin_format_ip(u_int32_t peer_addr, char *buf, int cap)
 {
   u_int8_t *raw = (u_int8_t *)&peer_addr;
@@ -287,6 +307,7 @@ PRIVATE void admin_format_ip(u_int32_t peer_addr, char *buf, int cap)
   admin_append_int(buf, cap, pos, raw[3]);
 }
 
+#ifndef TEST_BUILD
 PRIVATE void admin_audit_peer(const char *prefix, u_int32_t peer_addr)
 {
   char message[ADMIN_AUDIT_LINE_SIZE];
@@ -301,6 +322,208 @@ PRIVATE void admin_audit_peer(const char *prefix, u_int32_t peer_addr)
   admin_audit_line(message);
 }
 #endif
+
+PRIVATE void admin_audit_auth_event(const char *prefix, const char *reason,
+                                    u_int32_t peer_addr, int count,
+                                    u_int32_t retry_after_ticks)
+{
+  char message[ADMIN_AUDIT_LINE_SIZE];
+  char ipbuf[24];
+  int pos = 0;
+
+  admin_format_ip(peer_addr, ipbuf, sizeof(ipbuf));
+  pos = admin_append_text(message, sizeof(message), pos, prefix);
+  pos = admin_append_text(message, sizeof(message), pos, " peer=");
+  pos = admin_append_text(message, sizeof(message), pos, ipbuf);
+  if (reason != 0 && reason[0] != '\0') {
+    pos = admin_append_text(message, sizeof(message), pos, " reason=");
+    pos = admin_append_text(message, sizeof(message), pos, reason);
+  }
+  if (count > 0) {
+    pos = admin_append_text(message, sizeof(message), pos, " count=");
+    pos = admin_append_int(message, sizeof(message), pos, count);
+  }
+  if (retry_after_ticks > 0) {
+    pos = admin_append_text(message, sizeof(message), pos, " retry=");
+    pos = admin_append_int(message, sizeof(message), pos, (int)retry_after_ticks);
+  }
+  message[pos] = '\0';
+  admin_audit_line(message);
+}
+
+PRIVATE struct admin_auth_bucket *admin_find_auth_bucket(u_int32_t peer_addr,
+                                                         int create)
+{
+  int i;
+  int free_slot = -1;
+  int oldest_slot = -1;
+
+  for (i = 0; i < ADMIN_AUTH_BUCKETS; i++) {
+    struct admin_auth_bucket *bucket = &admin_runtime.auth_buckets[i];
+
+    if (bucket->in_use) {
+      if (bucket->peer_addr == peer_addr)
+        return bucket;
+      if (oldest_slot < 0 ||
+          bucket->last_seen_tick <
+              admin_runtime.auth_buckets[oldest_slot].last_seen_tick) {
+        oldest_slot = i;
+      }
+    } else if (free_slot < 0) {
+      free_slot = i;
+    }
+  }
+
+  if (!create)
+    return 0;
+
+  if (free_slot >= 0)
+    oldest_slot = free_slot;
+  if (oldest_slot < 0)
+    return 0;
+
+  memset(&admin_runtime.auth_buckets[oldest_slot], 0,
+         sizeof(struct admin_auth_bucket));
+  admin_runtime.auth_buckets[oldest_slot].in_use = TRUE;
+  admin_runtime.auth_buckets[oldest_slot].peer_addr = peer_addr;
+  admin_runtime.auth_buckets[oldest_slot].window_start_tick = kernel_tick;
+  admin_runtime.auth_buckets[oldest_slot].last_seen_tick = kernel_tick;
+  return &admin_runtime.auth_buckets[oldest_slot];
+}
+
+PRIVATE void admin_refresh_auth_bucket(struct admin_auth_bucket *bucket)
+{
+  if (bucket == 0 || !bucket->in_use)
+    return;
+
+  if ((int)(kernel_tick - bucket->window_start_tick) > ADMIN_AUTH_WINDOW_TICKS) {
+    bucket->window_start_tick = kernel_tick;
+    bucket->failure_count = 0;
+  }
+  if (bucket->blocked_until_tick != 0 &&
+      bucket->blocked_until_tick <= kernel_tick) {
+    bucket->blocked_until_tick = 0;
+  }
+  bucket->last_seen_tick = kernel_tick;
+}
+
+PRIVATE u_int32_t admin_auth_backoff_ticks(int failure_count)
+{
+  u_int32_t backoff = ADMIN_AUTH_BACKOFF_BASE_TICKS;
+  int extra_failures = failure_count - ADMIN_AUTH_FAILURE_THRESHOLD - 1;
+  int shift = 0;
+
+  if (failure_count <= ADMIN_AUTH_FAILURE_THRESHOLD)
+    return 0;
+
+  while (extra_failures > 0 && shift < ADMIN_AUTH_BACKOFF_MAX_SHIFT) {
+    backoff <<= 1;
+    extra_failures--;
+    shift++;
+  }
+  return backoff;
+}
+
+PRIVATE int admin_is_peer_throttled(u_int32_t peer_addr,
+                                    u_int32_t *retry_after_ticks)
+{
+  struct admin_auth_bucket *bucket = admin_find_auth_bucket(peer_addr, FALSE);
+
+  if (retry_after_ticks != 0)
+    *retry_after_ticks = 0;
+  if (bucket == 0)
+    return FALSE;
+
+  admin_refresh_auth_bucket(bucket);
+  if (bucket->blocked_until_tick == 0)
+    return FALSE;
+
+  if (retry_after_ticks != 0)
+    *retry_after_ticks = bucket->blocked_until_tick - kernel_tick;
+  admin_audit_auth_event("auth_throttle", "backoff", peer_addr,
+                         bucket->failure_count,
+                         retry_after_ticks ? *retry_after_ticks : 0);
+  return TRUE;
+}
+
+PRIVATE int admin_record_auth_failure(u_int32_t peer_addr, const char *reason,
+                                      u_int32_t *retry_after_ticks)
+{
+  struct admin_auth_bucket *bucket = admin_find_auth_bucket(peer_addr, TRUE);
+  u_int32_t backoff;
+
+  if (retry_after_ticks != 0)
+    *retry_after_ticks = 0;
+  if (bucket == 0)
+    return ADMIN_AUTH_DENY;
+
+  admin_refresh_auth_bucket(bucket);
+  bucket->failure_count++;
+
+  backoff = admin_auth_backoff_ticks(bucket->failure_count);
+  if (backoff > 0) {
+    bucket->blocked_until_tick = kernel_tick + backoff;
+    if (retry_after_ticks != 0)
+      *retry_after_ticks = backoff;
+    admin_audit_auth_event("auth_throttle", reason, peer_addr,
+                           bucket->failure_count, backoff);
+    return ADMIN_AUTH_THROTTLED;
+  }
+
+  admin_audit_auth_event("auth_reject", reason, peer_addr,
+                         bucket->failure_count, 0);
+  return ADMIN_AUTH_DENY;
+}
+
+PRIVATE void admin_record_auth_success(u_int32_t peer_addr)
+{
+  struct admin_auth_bucket *bucket = admin_find_auth_bucket(peer_addr, FALSE);
+
+  if (bucket == 0)
+    return;
+
+  bucket->failure_count = 0;
+  bucket->blocked_until_tick = 0;
+  bucket->window_start_tick = kernel_tick;
+  bucket->last_seen_tick = kernel_tick;
+}
+
+PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
+{
+  char message[ADMIN_AUDIT_LINE_SIZE];
+  char ipbuf[24];
+  int pos = 0;
+  int listener_bit;
+
+  if (listener_kind == ADMIN_LISTENER_ADMIN) {
+    listener_bit = ADMIN_LISTENER_ADMIN;
+    admin_audit_line("listener_ready kind=admin port=10023");
+  } else if (listener_kind == ADMIN_LISTENER_HTTP) {
+    listener_bit = ADMIN_LISTENER_HTTP;
+    admin_audit_line("listener_ready kind=http port=8080");
+  } else {
+    return;
+  }
+
+  if ((admin_runtime.listener_ready_mask & listener_bit) != 0)
+    return;
+  admin_runtime.listener_ready_mask |= listener_bit;
+
+  if (admin_runtime.listener_ready_announced ||
+      admin_runtime.listener_ready_mask !=
+          (ADMIN_LISTENER_ADMIN | ADMIN_LISTENER_HTTP)) {
+    return;
+  }
+
+  admin_runtime.listener_ready_announced = TRUE;
+  admin_format_ip(admin_runtime.allow_ip, ipbuf, sizeof(ipbuf));
+  pos = admin_append_text(message, sizeof(message), pos,
+                          "server_runtime_ready allow_ip=");
+  pos = admin_append_text(message, sizeof(message), pos, ipbuf);
+  pos = admin_append_text(message, sizeof(message), pos, " admin=10023 http=8080");
+  message[pos] = '\0';
+  admin_audit_line(message);
+}
 
 PRIVATE int admin_apply_config_line(const char *line)
 {
@@ -593,17 +816,56 @@ PUBLIC int admin_parse_command(const char *line, int len,
 PUBLIC int admin_authorize_request(const struct admin_request *req,
                                    u_int32_t peer_addr)
 {
+  return admin_authorize_request_detailed(req, peer_addr, 0) == ADMIN_AUTH_ALLOW;
+}
+
+PUBLIC int admin_authorize_peer(u_int32_t peer_addr,
+                                u_int32_t *retry_after_ticks)
+{
+  if (admin_is_peer_throttled(peer_addr, retry_after_ticks))
+    return ADMIN_AUTH_THROTTLED;
+
+  if (!admin_is_source_allowed(peer_addr))
+    return admin_record_auth_failure(peer_addr, "allowlist",
+                                     retry_after_ticks);
+
+  if (retry_after_ticks != 0)
+    *retry_after_ticks = 0;
+  return ADMIN_AUTH_ALLOW;
+}
+
+PUBLIC int admin_authorize_request_detailed(const struct admin_request *req,
+                                            u_int32_t peer_addr,
+                                            u_int32_t *retry_after_ticks)
+{
   int role;
 
-  if (req == 0) return FALSE;
+  if (retry_after_ticks != 0)
+    *retry_after_ticks = 0;
+  if (req == 0)
+    return ADMIN_AUTH_DENY;
+  if (admin_is_peer_throttled(peer_addr, retry_after_ticks))
+    return ADMIN_AUTH_THROTTLED;
   if (!admin_is_source_allowed(peer_addr))
-    return FALSE;
+    return admin_record_auth_failure(peer_addr, "allowlist",
+                                     retry_after_ticks);
 
-  if (req->required_role <= ADMIN_ROLE_HEALTH)
-    return TRUE;
+  if (req->required_role <= ADMIN_ROLE_HEALTH) {
+    admin_record_auth_success(peer_addr);
+    return ADMIN_AUTH_ALLOW;
+  }
 
   role = admin_role_from_token(req->token);
-  return role >= req->required_role;
+  if (role >= req->required_role) {
+    admin_record_auth_success(peer_addr);
+    return ADMIN_AUTH_ALLOW;
+  }
+
+  return admin_record_auth_failure(peer_addr,
+                                   req->token[0] == '\0'
+                                       ? "token_missing"
+                                       : "token",
+                                   retry_after_ticks);
 }
 
 PUBLIC int admin_execute_request(const struct admin_request *req,
@@ -698,6 +960,7 @@ PRIVATE int admin_create_listener(void)
   if (fd < 0) {
     if (admin_listener_state_log != 1) {
       _kprintf("admin listener create failed: socket\n");
+      com1_puts("admin listener create failed: socket\n");
       admin_listener_state_log = 1;
     }
     return -1;
@@ -707,6 +970,7 @@ PRIVATE int admin_create_listener(void)
   if (kern_bind(fd, &addr) < 0) {
     if (admin_listener_state_log != 2) {
       _kprintf("admin listener create failed: bind\n");
+      com1_puts("admin listener create failed: bind\n");
       admin_listener_state_log = 2;
     }
     kern_close_socket(fd);
@@ -715,6 +979,7 @@ PRIVATE int admin_create_listener(void)
   if (kern_listen(fd, SOCK_ACCEPT_BACKLOG_SIZE) < 0) {
     if (admin_listener_state_log != 3) {
       _kprintf("admin listener create failed: listen\n");
+      com1_puts("admin listener create failed: listen\n");
       admin_listener_state_log = 3;
     }
     kern_close_socket(fd);
@@ -725,7 +990,7 @@ PRIVATE int admin_create_listener(void)
     _kprintf("admin listener ready fd=%d\n", fd);
     admin_listener_state_log = 4;
   }
-  admin_audit_line("admin_listener_ready");
+  admin_runtime_note_listener_ready(ADMIN_LISTENER_ADMIN);
   return fd;
 }
 
@@ -767,6 +1032,7 @@ PRIVATE void admin_accept_pending_connections(void)
     struct sockaddr_in peer;
     int child_fd;
     int slot;
+    int auth_result;
 
     disableInterrupt();
     child_fd = socket_try_accept(admin_listener_fd, &peer);
@@ -774,9 +1040,12 @@ PRIVATE void admin_accept_pending_connections(void)
     if (child_fd < 0)
       return;
 
-    if (!admin_is_source_allowed(peer.sin_addr)) {
-      admin_audit_peer("reject_allowlist", peer.sin_addr);
-      kern_send(child_fd, "ERR forbidden\n", 14, 0);
+    auth_result = admin_authorize_peer(peer.sin_addr, 0);
+    if (auth_result != ADMIN_AUTH_ALLOW) {
+      if (auth_result == ADMIN_AUTH_THROTTLED)
+        kern_send(child_fd, "ERR throttled\n", 14, 0);
+      else
+        kern_send(child_fd, "ERR forbidden\n", 14, 0);
       kern_close_socket(child_fd);
       continue;
     }
@@ -804,6 +1073,7 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
   char chunk[64];
   int read_len;
   int line_len;
+  int auth_result;
 
   if (conn == 0 || !conn->in_use)
     return;
@@ -857,9 +1127,13 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
     return;
   }
 
-  if (!admin_authorize_request(&conn->request, conn->peer_addr)) {
-    admin_audit_peer("unauthorized_admin", conn->peer_addr);
-    admin_send_and_close(conn, "ERR unauthorized\n");
+  auth_result = admin_authorize_request_detailed(&conn->request,
+                                                 conn->peer_addr, 0);
+  if (auth_result != ADMIN_AUTH_ALLOW) {
+    admin_send_and_close(conn,
+                         auth_result == ADMIN_AUTH_THROTTLED
+                             ? "ERR throttled\n"
+                             : "ERR unauthorized\n");
     return;
   }
 

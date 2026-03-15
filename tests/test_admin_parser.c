@@ -116,6 +116,51 @@ TEST(load_config_text_updates_runtime) {
     ASSERT(admin_authorize_request(&req, test_ip(10, 0, 2, 9)));
 }
 
+TEST(rate_limit_allowlist_rejects_and_audits) {
+    char response[ADMIN_RESPONSE_MAX];
+    struct admin_request log_req;
+    u_int32_t blocked_ip = test_ip(10, 0, 2, 9);
+    u_int32_t retry_after = 0;
+
+    admin_runtime_reset();
+    admin_runtime_set_allow_ip(test_ip(10, 0, 2, 2));
+
+    ASSERT_EQ(admin_authorize_peer(blocked_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+    ASSERT_EQ(admin_authorize_peer(blocked_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+    ASSERT_EQ(admin_authorize_peer(blocked_ip, &retry_after), ADMIN_AUTH_DENY);
+    ASSERT_EQ(retry_after, 0);
+    ASSERT_EQ(admin_authorize_peer(blocked_ip, &retry_after), ADMIN_AUTH_THROTTLED);
+    ASSERT_EQ(retry_after, 100);
+
+    memset(&log_req, 0, sizeof(log_req));
+    log_req.action = ADMIN_ACTION_LOG_TAIL;
+    log_req.arg = 8;
+
+    ASSERT(admin_execute_request(&log_req, response, sizeof(response), 0) > 0);
+    ASSERT(strstr(response, "auth_reject peer=10.0.2.9 reason=allowlist count=1") != 0);
+    ASSERT(strstr(response, "auth_throttle peer=10.0.2.9 reason=allowlist count=4 retry=100") != 0);
+}
+
+TEST(listener_ready_emits_serial_ready_marker_to_audit_ring) {
+    struct admin_request req;
+    char response[ADMIN_RESPONSE_MAX];
+
+    admin_runtime_reset();
+    admin_runtime_note_listener_ready(ADMIN_LISTENER_ADMIN);
+    admin_runtime_note_listener_ready(ADMIN_LISTENER_HTTP);
+
+    memset(&req, 0, sizeof(req));
+    req.action = ADMIN_ACTION_LOG_TAIL;
+    req.arg = 8;
+
+    ASSERT(admin_execute_request(&req, response, sizeof(response), 0) > 0);
+    ASSERT(strstr(response, "listener_ready kind=admin port=10023") != 0);
+    ASSERT(strstr(response, "listener_ready kind=http port=8080") != 0);
+    ASSERT(strstr(response, "server_runtime_ready allow_ip=10.0.2.2 admin=10023 http=8080") != 0);
+}
+
 int main(void) {
     RUN_TEST(parse_ping_without_token);
     RUN_TEST(parse_status_with_token_prefix);
@@ -123,5 +168,7 @@ int main(void) {
     RUN_TEST(execute_agent_start_and_status);
     RUN_TEST(log_tail_uses_audit_ring);
     RUN_TEST(load_config_text_updates_runtime);
+    RUN_TEST(rate_limit_allowlist_rejects_and_audits);
+    RUN_TEST(listener_ready_emits_serial_ready_marker_to_audit_ring);
     TEST_REPORT();
 }

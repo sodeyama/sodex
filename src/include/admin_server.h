@@ -18,8 +18,10 @@ typedef uint32_t u_int32_t;
 #define SODEX_ADMIN_CONFIG_PATH "/etc/sodex-admin.conf"
 
 #define ADMIN_TOKEN_MAX 64
-#define ADMIN_SECRET_MAX 128
+#define ADMIN_SECRET_MAX 192
 #define ADMIN_HEX_SEED_MAX 65
+#define ADMIN_HEX_PUBLICKEY_MAX 65
+#define ADMIN_HEX_SECRETKEY_MAX 129
 #define ADMIN_TEXT_REQUEST_MAX 192
 #define ADMIN_HTTP_REQUEST_MAX 384
 #define ADMIN_RESPONSE_MAX 512
@@ -91,7 +93,10 @@ PUBLIC int admin_runtime_debug_shell_port(void);
 PUBLIC int admin_runtime_ssh_enabled(void);
 PUBLIC int admin_runtime_ssh_port(void);
 PUBLIC const char *admin_runtime_ssh_password(void);
+PUBLIC int admin_runtime_ssh_signer_port(void);
 PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_seed(void);
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_public(void);
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_secret(void);
 PUBLIC const char *admin_runtime_ssh_rng_seed(void);
 PUBLIC void admin_runtime_audit_line(const char *line);
 PUBLIC void admin_runtime_note_listener_ready(int listener_kind);
@@ -117,6 +122,8 @@ PUBLIC void admin_runtime_set_ssh_port(int port);
 PUBLIC void admin_runtime_set_ssh_password(const char *password);
 PUBLIC void admin_runtime_set_ssh_seeds(const char *hostkey_seed,
                                         const char *rng_seed);
+PUBLIC void admin_runtime_set_ssh_raw_hostkey(const char *public_key,
+                                              const char *secret_key);
 #endif
 
 #endif

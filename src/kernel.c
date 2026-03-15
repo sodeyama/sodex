@@ -164,6 +164,7 @@ PUBLIC void start_kernel()
     http_server_tick();
     debug_shell_server_tick();
     ssh_server_tick();
+    socket_service_pending_tcp();
     asm("sti\n\thlt");
   }
 }

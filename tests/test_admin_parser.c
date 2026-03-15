@@ -121,12 +121,14 @@ TEST(load_config_text_updates_ssh_runtime) {
     const char *config =
         "ssh_port = 10022\n"
         "ssh_password = root-secret\n"
+        "ssh_signer_port = 10026\n"
         "ssh_hostkey_ed25519_seed = 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n"
         "ssh_rng_seed = ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100\n";
 
     admin_runtime_reset();
     ASSERT(admin_runtime_load_config_text(config, (int)strlen(config)) > 0);
     ASSERT_EQ(admin_runtime_ssh_port(), 10022);
+    ASSERT_EQ(admin_runtime_ssh_signer_port(), 10026);
     ASSERT(admin_runtime_ssh_enabled());
     ASSERT_STR_EQ(admin_runtime_ssh_password(), "root-secret");
     ASSERT_STR_EQ(
@@ -135,6 +137,27 @@ TEST(load_config_text_updates_ssh_runtime) {
     ASSERT_STR_EQ(
         admin_runtime_ssh_rng_seed(),
         "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100");
+}
+
+TEST(load_config_text_updates_raw_ssh_hostkey) {
+    const char *config =
+        "ssh_port = 10022\n"
+        "ssh_password = root-secret\n"
+        "ssh_hostkey_ed25519_public = d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a\n"
+        "ssh_hostkey_ed25519_secret = 9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a\n"
+        "ssh_rng_seed = ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100\n";
+
+    admin_runtime_reset();
+    ASSERT(admin_runtime_load_config_text(config, (int)strlen(config)) > 0);
+    ASSERT_EQ(admin_runtime_ssh_port(), 10022);
+    ASSERT(admin_runtime_ssh_enabled());
+    ASSERT_STR_EQ(
+        admin_runtime_ssh_hostkey_ed25519_public(),
+        "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+    ASSERT_STR_EQ(
+        admin_runtime_ssh_hostkey_ed25519_secret(),
+        "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
+        "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
 }
 
 TEST(load_config_text_rejects_invalid_ssh_seed) {
@@ -232,6 +255,7 @@ int main(void) {
     RUN_TEST(log_tail_uses_audit_ring);
     RUN_TEST(load_config_text_updates_runtime);
     RUN_TEST(load_config_text_updates_ssh_runtime);
+    RUN_TEST(load_config_text_updates_raw_ssh_hostkey);
     RUN_TEST(load_config_text_rejects_invalid_ssh_seed);
     RUN_TEST(rate_limit_allowlist_rejects_and_audits);
     RUN_TEST(rate_limit_shares_bucket_across_auth_failure_reasons);

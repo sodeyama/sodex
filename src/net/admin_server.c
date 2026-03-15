@@ -68,6 +68,10 @@ EXTERN volatile u_int32_t kernel_tick;
 #define SODEX_SSH_PASSWORD ""
 #endif
 
+#ifndef SODEX_SSH_SIGNER_PORT
+#define SODEX_SSH_SIGNER_PORT 0
+#endif
+
 #ifndef SODEX_SSH_HOSTKEY_ED25519_SEED
 #define SODEX_SSH_HOSTKEY_ED25519_SEED ""
 #endif
@@ -80,7 +84,7 @@ EXTERN volatile u_int32_t kernel_tick;
 #define ADMIN_AUDIT_LINE_SIZE 96
 #define ADMIN_MAX_CONNECTIONS 2
 #define ADMIN_IDLE_TIMEOUT_TICKS 500
-#define ADMIN_CONFIG_MAX 256
+#define ADMIN_CONFIG_MAX 1024
 #define ADMIN_CLOSE_DRAIN_TICKS 60
 #define ADMIN_AUTH_BUCKETS 8
 #define ADMIN_AUTH_WINDOW_TICKS 300
@@ -103,8 +107,11 @@ struct admin_runtime_state {
   u_int32_t allow_ip;
   u_int16_t debug_shell_port;
   u_int16_t ssh_port;
+  u_int16_t ssh_signer_port;
   char ssh_password[ADMIN_SECRET_MAX];
   char ssh_hostkey_ed25519_seed[ADMIN_HEX_SEED_MAX];
+  char ssh_hostkey_ed25519_public[ADMIN_HEX_PUBLICKEY_MAX];
+  char ssh_hostkey_ed25519_secret[ADMIN_HEX_SECRETKEY_MAX];
   char ssh_rng_seed[ADMIN_HEX_SEED_MAX];
   int agent_running;
   int agent_start_count;
@@ -232,6 +239,15 @@ PRIVATE int admin_parse_positive_int(const char *text)
   return value;
 }
 
+PRIVATE int admin_runtime_has_ssh_hostkey(void)
+{
+  if (admin_runtime.ssh_hostkey_ed25519_public[0] != '\0' &&
+      admin_runtime.ssh_hostkey_ed25519_secret[0] != '\0') {
+    return TRUE;
+  }
+  return admin_runtime.ssh_hostkey_ed25519_seed[0] != '\0';
+}
+
 PRIVATE int admin_is_hex_string(const char *text)
 {
   int i = 0;
@@ -325,7 +341,7 @@ PRIVATE void admin_audit_line(const char *line)
     admin_runtime.audit_count++;
 
 #ifndef TEST_BUILD
-  _kprintf("AUDIT %s\n", admin_runtime.audit_lines[slot]);
+  /* 高頻度 audit は serial のみに流し、console 描画の再入を避ける。 */
   com1_puts("AUDIT ");
   com1_puts((char *)admin_runtime.audit_lines[slot]);
   com1_puts("\n");
@@ -635,6 +651,13 @@ PRIVATE int admin_apply_config_line(const char *line)
                       sizeof(admin_runtime.ssh_password), value);
     return 1;
   }
+  if (strcmp(key, "ssh_signer_port") == 0) {
+    port = admin_parse_positive_int(value);
+    if (port < 0 || port > 65535)
+      return -1;
+    admin_runtime.ssh_signer_port = (u_int16_t)port;
+    return 1;
+  }
   if (strcmp(key, "ssh_hostkey_ed25519_seed") == 0) {
     if ((int)strlen(value) != ADMIN_HEX_SEED_MAX - 1 ||
         !admin_is_hex_string(value)) {
@@ -642,6 +665,24 @@ PRIVATE int admin_apply_config_line(const char *line)
     }
     admin_copy_string(admin_runtime.ssh_hostkey_ed25519_seed,
                       sizeof(admin_runtime.ssh_hostkey_ed25519_seed), value);
+    return 1;
+  }
+  if (strcmp(key, "ssh_hostkey_ed25519_public") == 0) {
+    if ((int)strlen(value) != ADMIN_HEX_PUBLICKEY_MAX - 1 ||
+        !admin_is_hex_string(value)) {
+      return -1;
+    }
+    admin_copy_string(admin_runtime.ssh_hostkey_ed25519_public,
+                      sizeof(admin_runtime.ssh_hostkey_ed25519_public), value);
+    return 1;
+  }
+  if (strcmp(key, "ssh_hostkey_ed25519_secret") == 0) {
+    if ((int)strlen(value) != ADMIN_HEX_SECRETKEY_MAX - 1 ||
+        !admin_is_hex_string(value)) {
+      return -1;
+    }
+    admin_copy_string(admin_runtime.ssh_hostkey_ed25519_secret,
+                      sizeof(admin_runtime.ssh_hostkey_ed25519_secret), value);
     return 1;
   }
   if (strcmp(key, "ssh_rng_seed") == 0) {
@@ -795,12 +836,17 @@ PUBLIC void admin_runtime_reset(void)
     raw[3] = SODEX_ADMIN_ALLOW_IP3;
   }
   admin_runtime.ssh_port = (u_int16_t)SODEX_SSH_PORT;
+  admin_runtime.ssh_signer_port = (u_int16_t)SODEX_SSH_SIGNER_PORT;
   admin_copy_string(admin_runtime.ssh_password,
                     sizeof(admin_runtime.ssh_password),
                     SODEX_SSH_PASSWORD);
   admin_copy_string(admin_runtime.ssh_hostkey_ed25519_seed,
                     sizeof(admin_runtime.ssh_hostkey_ed25519_seed),
                     SODEX_SSH_HOSTKEY_ED25519_SEED);
+  admin_copy_string(admin_runtime.ssh_hostkey_ed25519_public,
+                    sizeof(admin_runtime.ssh_hostkey_ed25519_public), "");
+  admin_copy_string(admin_runtime.ssh_hostkey_ed25519_secret,
+                    sizeof(admin_runtime.ssh_hostkey_ed25519_secret), "");
   admin_copy_string(admin_runtime.ssh_rng_seed,
                     sizeof(admin_runtime.ssh_rng_seed),
                     SODEX_SSH_RNG_SEED);
@@ -808,6 +854,8 @@ PUBLIC void admin_runtime_reset(void)
   {
     struct task_struct boot_task;
     struct task_struct *saved_current = current;
+    char message[ADMIN_AUDIT_LINE_SIZE];
+    int message_pos;
     int fd;
 
     memset(&boot_task, 0, sizeof(boot_task));
@@ -821,23 +869,63 @@ PUBLIC void admin_runtime_reset(void)
       ext3_inode *inode = FD_TOINODE(fd, current);
       int size = inode->i_size;
       char config[ADMIN_CONFIG_MAX];
+      int applied = 0;
 
       memset(config, 0, sizeof(config));
       if (size >= (int)sizeof(config)) {
         _kprintf("server config too large: %s\n", SODEX_ADMIN_CONFIG_PATH);
+        admin_audit_line("config_read too_large");
       } else {
         int read_len = ext3_read(fd, config, size);
         if (read_len > 0) {
           config[read_len] = '\0';
-          admin_apply_config_text(config, read_len);
+          applied = admin_apply_config_text(config, read_len);
         }
+        message_pos = 0;
+        message_pos = admin_append_text(message, sizeof(message), message_pos,
+                                        "config_read bytes=");
+        message_pos = admin_append_int(message, sizeof(message), message_pos,
+                                       read_len);
+        message_pos = admin_append_text(message, sizeof(message), message_pos,
+                                        " applied=");
+        message_pos = admin_append_int(message, sizeof(message), message_pos,
+                                       applied);
+        message[message_pos] = '\0';
+        admin_audit_line(message);
       }
       close(fd);
+    } else {
+      admin_audit_line("config_read open_failed");
     }
 
     files_close_all(&gtask);
     memset(&gtask, 0, sizeof(gtask));
     current = saved_current;
+  }
+#endif
+
+#ifndef TEST_BUILD
+  if (admin_runtime.ssh_port != 0) {
+    char message[ADMIN_AUDIT_LINE_SIZE];
+    int pos = 0;
+
+    pos = admin_append_text(message, sizeof(message), pos, "ssh_config port=");
+    pos = admin_append_int(message, sizeof(message), pos,
+                           (int)admin_runtime.ssh_port);
+    pos = admin_append_text(message, sizeof(message), pos, " password=");
+    pos = admin_append_text(message, sizeof(message), pos,
+                            admin_runtime.ssh_password[0] ? "yes" : "no");
+    pos = admin_append_text(message, sizeof(message), pos, " hostkey=");
+    pos = admin_append_text(message, sizeof(message), pos,
+                            admin_runtime_has_ssh_hostkey() ? "yes" : "no");
+    pos = admin_append_text(message, sizeof(message), pos, " rng=");
+    pos = admin_append_text(message, sizeof(message), pos,
+                            admin_runtime.ssh_rng_seed[0] ? "yes" : "no");
+    pos = admin_append_text(message, sizeof(message), pos, " enabled=");
+    pos = admin_append_text(message, sizeof(message), pos,
+                            admin_runtime_ssh_enabled() ? "yes" : "no");
+    message[pos] = '\0';
+    admin_audit_line(message);
   }
 #endif
 }
@@ -873,7 +961,7 @@ PUBLIC int admin_runtime_ssh_enabled(void)
 {
   return admin_runtime.ssh_port != 0 &&
          admin_runtime.ssh_password[0] != '\0' &&
-         admin_runtime.ssh_hostkey_ed25519_seed[0] != '\0' &&
+         admin_runtime_has_ssh_hostkey() &&
          admin_runtime.ssh_rng_seed[0] != '\0';
 }
 
@@ -887,9 +975,24 @@ PUBLIC const char *admin_runtime_ssh_password(void)
   return admin_runtime.ssh_password;
 }
 
+PUBLIC int admin_runtime_ssh_signer_port(void)
+{
+  return (int)admin_runtime.ssh_signer_port;
+}
+
 PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_seed(void)
 {
   return admin_runtime.ssh_hostkey_ed25519_seed;
+}
+
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_public(void)
+{
+  return admin_runtime.ssh_hostkey_ed25519_public;
+}
+
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_secret(void)
+{
+  return admin_runtime.ssh_hostkey_ed25519_secret;
 }
 
 PUBLIC const char *admin_runtime_ssh_rng_seed(void)
@@ -1386,5 +1489,16 @@ PUBLIC void admin_runtime_set_ssh_seeds(const char *hostkey_seed,
   admin_copy_string(admin_runtime.ssh_rng_seed,
                     sizeof(admin_runtime.ssh_rng_seed),
                     rng_seed ? rng_seed : "");
+}
+
+PUBLIC void admin_runtime_set_ssh_raw_hostkey(const char *public_key,
+                                              const char *secret_key)
+{
+  admin_copy_string(admin_runtime.ssh_hostkey_ed25519_public,
+                    sizeof(admin_runtime.ssh_hostkey_ed25519_public),
+                    public_key ? public_key : "");
+  admin_copy_string(admin_runtime.ssh_hostkey_ed25519_secret,
+                    sizeof(admin_runtime.ssh_hostkey_ed25519_secret),
+                    secret_key ? secret_key : "");
 }
 #endif

@@ -10,6 +10,90 @@ typedef int64_t i64;
 typedef i64 gf[16];
 extern void randombytes(u8 *,u64);
 
+struct crypto_sign_keypair_workspace {
+  u8 d[64];
+  gf p[4];
+};
+
+struct crypto_sign_workspace {
+  u8 d[64];
+  u8 h[64];
+  u8 r[64];
+  i64 x[64];
+  gf p[4];
+};
+
+struct crypto_hashblocks_workspace {
+  u64 z[8];
+  u64 b[8];
+  u64 a[8];
+  u64 w[16];
+};
+
+struct crypto_hash_workspace {
+  u8 h[64];
+  u8 x[256];
+};
+
+struct pack_workspace {
+  gf tx;
+  gf ty;
+  gf zi;
+};
+
+struct scalarbase_workspace {
+  gf q[4];
+};
+
+struct scalarmult_workspace {
+  u8 z[32];
+  i64 x[80];
+  gf a;
+  gf b;
+  gf c;
+  gf d;
+  gf e;
+  gf f;
+};
+
+struct reduce_workspace {
+  i64 x[64];
+};
+
+struct pack25519_workspace {
+  gf m;
+  gf t;
+};
+
+struct gf_single_workspace {
+  gf c;
+};
+
+struct add_workspace {
+  gf a;
+  gf b;
+  gf c;
+  gf d;
+  gf t;
+  gf e;
+  gf f;
+  gf g;
+  gf h;
+};
+
+static struct crypto_sign_keypair_workspace crypto_sign_keypair_ws;
+static struct crypto_sign_workspace crypto_sign_ws;
+static struct crypto_hashblocks_workspace crypto_hashblocks_ws;
+static struct crypto_hash_workspace crypto_hash_ws;
+static struct pack_workspace pack_ws;
+static struct scalarbase_workspace scalarbase_ws;
+static struct scalarmult_workspace scalarmult_ws;
+static struct reduce_workspace reduce_ws;
+static struct pack25519_workspace pack25519_ws;
+static struct gf_single_workspace inv25519_ws;
+static struct gf_single_workspace pow2523_ws;
+static struct add_workspace add_ws;
+
 static const u8
   _0[16],
   _9[32] = {9};
@@ -35,7 +119,8 @@ static u32 ld32(const u8 *x)
 
 static u64 dl64(const u8 *x)
 {
-  u64 i,u=0;
+  int i;
+  u64 u=0;
   FOR(i,8) u=(u<<8)|x[i];
   return u;
 }
@@ -285,7 +370,8 @@ sv car25519(gf o)
 
 sv sel25519(gf p,gf q,int b)
 {
-  i64 t,i,c=~(b-1);
+  i64 t,c=~(b-1);
+  int i;
   FOR(i,16) {
     t= c&(p[i]^q[i]);
     p[i]^=t;
@@ -296,25 +382,26 @@ sv sel25519(gf p,gf q,int b)
 sv pack25519(u8 *o,const gf n)
 {
   int i,j,b;
-  gf m,t;
-  FOR(i,16) t[i]=n[i];
-  car25519(t);
-  car25519(t);
-  car25519(t);
+  gf *m = &pack25519_ws.m;
+  gf *t = &pack25519_ws.t;
+  FOR(i,16) (*t)[i]=n[i];
+  car25519(*t);
+  car25519(*t);
+  car25519(*t);
   FOR(j,2) {
-    m[0]=t[0]-0xffed;
+    (*m)[0]=(*t)[0]-0xffed;
     for(i=1;i<15;i++) {
-      m[i]=t[i]-0xffff-((m[i-1]>>16)&1);
-      m[i-1]&=0xffff;
+      (*m)[i]=(*t)[i]-0xffff-(((*m)[i-1]>>16)&1);
+      (*m)[i-1]&=0xffff;
     }
-    m[15]=t[15]-0x7fff-((m[14]>>16)&1);
-    b=(m[15]>>16)&1;
-    m[14]&=0xffff;
-    sel25519(t,m,1-b);
+    (*m)[15]=(*t)[15]-0x7fff-(((*m)[14]>>16)&1);
+    b=((*m)[15]>>16)&1;
+    (*m)[14]&=0xffff;
+    sel25519(*t,*m,1-b);
   }
   FOR(i,16) {
-    o[2*i]=t[i]&0xff;
-    o[2*i+1]=t[i]>>8;
+    o[2*i]=(*t)[i]&0xff;
+    o[2*i+1]=(*t)[i]>>8;
   }
 }
 
@@ -354,7 +441,8 @@ sv Z(gf o,const gf a,const gf b)
 
 sv M(gf o,const gf a,const gf b)
 {
-  i64 i,j,t[31];
+  i64 t[31];
+  int i,j;
   FOR(i,31) t[i]=0;
   FOR(i,16) FOR(j,16) t[i+j]+=a[i]*b[j];
   FOR(i,15) t[i]+=38*t[i+16];
@@ -370,72 +458,79 @@ sv S(gf o,const gf a)
 
 sv inv25519(gf o,const gf i)
 {
-  gf c;
+  gf *c = &inv25519_ws.c;
   int a;
-  FOR(a,16) c[a]=i[a];
+  FOR(a,16) (*c)[a]=i[a];
   for(a=253;a>=0;a--) {
-    S(c,c);
-    if(a!=2&&a!=4) M(c,c,i);
+    S(*c,*c);
+    if(a!=2&&a!=4) M(*c,*c,i);
   }
-  FOR(a,16) o[a]=c[a];
+  FOR(a,16) o[a]=(*c)[a];
 }
 
 sv pow2523(gf o,const gf i)
 {
-  gf c;
+  gf *c = &pow2523_ws.c;
   int a;
-  FOR(a,16) c[a]=i[a];
+  FOR(a,16) (*c)[a]=i[a];
   for(a=250;a>=0;a--) {
-    S(c,c);
-    if(a!=1) M(c,c,i);
+    S(*c,*c);
+    if(a!=1) M(*c,*c,i);
   }
-  FOR(a,16) o[a]=c[a];
+  FOR(a,16) o[a]=(*c)[a];
 }
 
 int crypto_scalarmult(u8 *q,const u8 *n,const u8 *p)
 {
-  u8 z[32];
-  i64 x[80],r,i;
-  gf a,b,c,d,e,f;
+  u8 *z = scalarmult_ws.z;
+  i64 *x = scalarmult_ws.x;
+  gf *a = &scalarmult_ws.a;
+  gf *b = &scalarmult_ws.b;
+  gf *c = &scalarmult_ws.c;
+  gf *d = &scalarmult_ws.d;
+  gf *e = &scalarmult_ws.e;
+  gf *f = &scalarmult_ws.f;
+  i64 r;
+  int i;
   FOR(i,31) z[i]=n[i];
   z[31]=(n[31]&127)|64;
   z[0]&=248;
   unpack25519(x,p);
   FOR(i,16) {
-    b[i]=x[i];
-    d[i]=a[i]=c[i]=0;
+    (*b)[i]=x[i];
+    (*d)[i]=(*a)[i]=(*c)[i]=0;
   }
-  a[0]=d[0]=1;
+  (*a)[0]=(*d)[0]=1;
   for(i=254;i>=0;--i) {
     r=(z[i>>3]>>(i&7))&1;
-    sel25519(a,b,r);
-    sel25519(c,d,r);
-    A(e,a,c);
-    Z(a,a,c);
-    A(c,b,d);
-    Z(b,b,d);
-    S(d,e);
-    S(f,a);
-    M(a,c,a);
-    M(c,b,e);
-    A(e,a,c);
-    Z(a,a,c);
-    S(b,a);
-    Z(c,d,f);
-    M(a,c,_121665);
-    A(a,a,d);
-    M(c,c,a);
-    M(a,d,f);
-    M(d,b,x);
-    S(b,e);
-    sel25519(a,b,r);
-    sel25519(c,d,r);
+    sel25519(*a,*b,r);
+    sel25519(*c,*d,r);
+    A(*e,*a,*c);
+    Z(*a,*a,*c);
+    A(*c,*b,*d);
+    Z(*b,*b,*d);
+    S(*d,*e);
+    S(*f,*a);
+    M(*a,*c,*a);
+    M(*c,*b,*e);
+    A(*e,*a,*c);
+    Z(*a,*a,*c);
+    S(*b,*a);
+    Z(*c,*d,*f);
+    M(*a,*c,_121665);
+    A(*a,*a,*d);
+    M(*c,*c,*a);
+    M(*a,*d,*f);
+    M(*d,*b,x);
+    S(*b,*e);
+    sel25519(*a,*b,r);
+    sel25519(*c,*d,r);
   }
   FOR(i,16) {
-    x[i+16]=a[i];
-    x[i+32]=c[i];
-    x[i+48]=b[i];
-    x[i+64]=d[i];
+    x[i+16]=(*a)[i];
+    x[i+32]=(*c)[i];
+    x[i+48]=(*b)[i];
+    x[i+64]=(*d)[i];
   }
   inv25519(x+32,x+32);
   M(x+16,x+16,x+32);
@@ -519,7 +614,11 @@ static const u64 K[80] =
 
 int crypto_hashblocks(u8 *x,const u8 *m,u64 n)
 {
-  u64 z[8],b[8],a[8],w[16],t;
+  u64 *z = crypto_hashblocks_ws.z;
+  u64 *b = crypto_hashblocks_ws.b;
+  u64 *a = crypto_hashblocks_ws.a;
+  u64 *w = crypto_hashblocks_ws.w;
+  u64 t;
   int i,j;
 
   FOR(i,8) z[i] = a[i] = dl64(x + 8 * i);
@@ -562,8 +661,10 @@ static const u8 iv[64] = {
 
 int crypto_hash(u8 *out,const u8 *m,u64 n)
 {
-  u8 h[64],x[256];
-  u64 i,b = n;
+  u8 *h = crypto_hash_ws.h;
+  u8 *x = crypto_hash_ws.x;
+  u64 b = n;
+  int i;
 
   FOR(i,64) h[i] = iv[i];
 
@@ -588,27 +689,35 @@ int crypto_hash(u8 *out,const u8 *m,u64 n)
 
 sv add(gf p[4],gf q[4])
 {
-  gf a,b,c,d,t,e,f,g,h;
-  
-  Z(a, p[1], p[0]);
-  Z(t, q[1], q[0]);
-  M(a, a, t);
-  A(b, p[0], p[1]);
-  A(t, q[0], q[1]);
-  M(b, b, t);
-  M(c, p[3], q[3]);
-  M(c, c, D2);
-  M(d, p[2], q[2]);
-  A(d, d, d);
-  Z(e, b, a);
-  Z(f, d, c);
-  A(g, d, c);
-  A(h, b, a);
+  gf *a = &add_ws.a;
+  gf *b = &add_ws.b;
+  gf *c = &add_ws.c;
+  gf *d = &add_ws.d;
+  gf *t = &add_ws.t;
+  gf *e = &add_ws.e;
+  gf *f = &add_ws.f;
+  gf *g = &add_ws.g;
+  gf *h = &add_ws.h;
 
-  M(p[0], e, f);
-  M(p[1], h, g);
-  M(p[2], g, f);
-  M(p[3], e, h);
+  Z(*a, p[1], p[0]);
+  Z(*t, q[1], q[0]);
+  M(*a, *a, *t);
+  A(*b, p[0], p[1]);
+  A(*t, q[0], q[1]);
+  M(*b, *b, *t);
+  M(*c, p[3], q[3]);
+  M(*c, *c, D2);
+  M(*d, p[2], q[2]);
+  A(*d, *d, *d);
+  Z(*e, *b, *a);
+  Z(*f, *d, *c);
+  A(*g, *d, *c);
+  A(*h, *b, *a);
+
+  M(p[0], *e, *f);
+  M(p[1], *h, *g);
+  M(p[2], *g, *f);
+  M(p[3], *e, *h);
 }
 
 sv cswap(gf p[4],gf q[4],u8 b)
@@ -620,12 +729,14 @@ sv cswap(gf p[4],gf q[4],u8 b)
 
 sv pack(u8 *r,gf p[4])
 {
-  gf tx, ty, zi;
-  inv25519(zi, p[2]); 
-  M(tx, p[0], zi);
-  M(ty, p[1], zi);
-  pack25519(r, ty);
-  r[31] ^= par25519(tx) << 7;
+  gf *tx = &pack_ws.tx;
+  gf *ty = &pack_ws.ty;
+  gf *zi = &pack_ws.zi;
+  inv25519(*zi, p[2]); 
+  M(*tx, p[0], *zi);
+  M(*ty, p[1], *zi);
+  pack25519(r, *ty);
+  r[31] ^= par25519(*tx) << 7;
 }
 
 sv scalarmult(gf p[4],gf q[4],const u8 *s)
@@ -646,7 +757,7 @@ sv scalarmult(gf p[4],gf q[4],const u8 *s)
 
 sv scalarbase(gf p[4],const u8 *s)
 {
-  gf q[4];
+  gf *q = scalarbase_ws.q;
   set25519(q[0],X);
   set25519(q[1],Y);
   set25519(q[2],gf1);
@@ -656,8 +767,8 @@ sv scalarbase(gf p[4],const u8 *s)
 
 int crypto_sign_keypair(u8 *pk, u8 *sk)
 {
-  u8 d[64];
-  gf p[4];
+  u8 *d = crypto_sign_keypair_ws.d;
+  gf *p = crypto_sign_keypair_ws.p;
   int i;
 
   randombytes(sk, 32);
@@ -677,7 +788,8 @@ static const u64 L[32] = {0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 
 
 sv modL(u8 *r,i64 x[64])
 {
-  i64 carry,i,j;
+  i64 carry;
+  int i,j;
   for (i = 63;i >= 32;--i) {
     carry = 0;
     for (j = i - 32;j < i - 12;++j) {
@@ -703,7 +815,8 @@ sv modL(u8 *r,i64 x[64])
 
 sv reduce(u8 *r)
 {
-  i64 x[64],i;
+  i64 *x = reduce_ws.x;
+  int i;
   FOR(i,64) x[i] = (u64) r[i];
   FOR(i,64) r[i] = 0;
   modL(r,x);
@@ -711,9 +824,12 @@ sv reduce(u8 *r)
 
 int crypto_sign(u8 *sm,u64 *smlen,const u8 *m,u64 n,const u8 *sk)
 {
-  u8 d[64],h[64],r[64];
-  i64 i,j,x[64];
-  gf p[4];
+  u8 *d = crypto_sign_ws.d;
+  u8 *h = crypto_sign_ws.h;
+  u8 *r = crypto_sign_ws.r;
+  i64 *x = crypto_sign_ws.x;
+  int i,j;
+  gf *p = crypto_sign_ws.p;
 
   crypto_hash(d, sk, 32);
   d[0] &= 248;

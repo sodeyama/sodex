@@ -18,7 +18,8 @@ struct tty;
 
 #define PROC_STACK  0xC0000000
 #define PROC_STACK_SIZE 0x4000
-#define PROC_KERNEL_STACK_PAGES 4
+/* SSH の KEX と audit 出力で kernel stack が深くなるため余裕を持たせる。 */
+#define PROC_KERNEL_STACK_PAGES 8
 
 #define PROC_LEN_FILENAME 32
 

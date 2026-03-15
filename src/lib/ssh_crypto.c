@@ -21,6 +21,8 @@ struct ssh_random_state {
 };
 
 PRIVATE struct ssh_random_state ssh_random_state;
+PRIVATE uint8_t ssh_ed25519_signed_message[SSH_ED25519_SIGN_INPUT_MAX +
+                                           SSH_CRYPTO_ED25519_SIGNATURE_BYTES];
 
 void randombytes(unsigned char *buf, unsigned long long len);
 
@@ -156,13 +158,11 @@ PUBLIC int ssh_crypto_ed25519_sign(
     const uint8_t *message, size_t message_len)
 {
   unsigned long long signed_len = 0;
-  uint8_t signed_message[SSH_ED25519_SIGN_INPUT_MAX +
-                         SSH_CRYPTO_ED25519_SIGNATURE_BYTES];
 
   if (message_len > SSH_ED25519_SIGN_INPUT_MAX)
     return -1;
 
-  if (crypto_sign(signed_message, &signed_len,
+  if (crypto_sign(ssh_ed25519_signed_message, &signed_len,
                   message, (unsigned long long)message_len,
                   secret_key) != 0) {
     return -1;
@@ -170,7 +170,8 @@ PUBLIC int ssh_crypto_ed25519_sign(
   if (signed_len < SSH_CRYPTO_ED25519_SIGNATURE_BYTES)
     return -1;
 
-  memcpy(signature, signed_message, SSH_CRYPTO_ED25519_SIGNATURE_BYTES);
+  memcpy(signature, ssh_ed25519_signed_message,
+         SSH_CRYPTO_ED25519_SIGNATURE_BYTES);
   return 0;
 }
 

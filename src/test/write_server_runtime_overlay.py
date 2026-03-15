@@ -6,7 +6,36 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
+
+
+def derive_ssh_hostkey(seed_hex: str) -> tuple[str, str]:
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    tool_path = repo_root / "tests" / "derive_ssh_keypair"
+
+    if not tool_path.exists():
+      subprocess.run(
+          ["make", "-C", str(repo_root / "tests"), "derive_ssh_keypair"],
+          check=True,
+      )
+
+    proc = subprocess.run(
+        [str(tool_path), seed_hex],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    public_hex = ""
+    secret_hex = ""
+    for line in proc.stdout.splitlines():
+        if line.startswith("public="):
+            public_hex = line.split("=", 1)[1].strip()
+        if line.startswith("secret="):
+            secret_hex = line.split("=", 1)[1].strip()
+    if not public_hex or not secret_hex:
+        raise RuntimeError("derive_ssh_keypair output is incomplete")
+    return public_hex, secret_hex
 
 
 def main() -> int:
@@ -24,8 +53,14 @@ def main() -> int:
     debug_shell_port = os.environ.get("SODEX_DEBUG_SHELL_PORT", "")
     ssh_port = os.environ.get("SODEX_SSH_PORT", "")
     ssh_password = os.environ.get("SODEX_SSH_PASSWORD", "")
+    ssh_signer_port = os.environ.get("SODEX_SSH_SIGNER_PORT", "")
     ssh_hostkey_seed = os.environ.get("SODEX_SSH_HOSTKEY_ED25519_SEED", "")
+    ssh_hostkey_public = os.environ.get("SODEX_SSH_HOSTKEY_ED25519_PUBLIC", "")
+    ssh_hostkey_secret = os.environ.get("SODEX_SSH_HOSTKEY_ED25519_SECRET", "")
     ssh_rng_seed = os.environ.get("SODEX_SSH_RNG_SEED", "")
+
+    if ssh_hostkey_seed and (not ssh_hostkey_public or not ssh_hostkey_secret):
+        ssh_hostkey_public, ssh_hostkey_secret = derive_ssh_hostkey(ssh_hostkey_seed)
 
     if overlay_dir.exists():
         shutil.rmtree(overlay_dir)
@@ -42,8 +77,14 @@ def main() -> int:
         lines.append(f"ssh_port={ssh_port}")
     if ssh_password:
         lines.append(f"ssh_password={ssh_password}")
+    if ssh_signer_port and ssh_signer_port != "0":
+        lines.append(f"ssh_signer_port={ssh_signer_port}")
     if ssh_hostkey_seed:
         lines.append(f"ssh_hostkey_ed25519_seed={ssh_hostkey_seed}")
+    if ssh_hostkey_public:
+        lines.append(f"ssh_hostkey_ed25519_public={ssh_hostkey_public}")
+    if ssh_hostkey_secret:
+        lines.append(f"ssh_hostkey_ed25519_secret={ssh_hostkey_secret}")
     if ssh_rng_seed:
         lines.append(f"ssh_rng_seed={ssh_rng_seed}")
     lines.append("")

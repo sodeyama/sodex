@@ -7,7 +7,7 @@ SRC = ../src
 
 TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_ssh_crypto test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
 
-.PHONY: all clean test
+.PHONY: all clean test derive_ssh_keypair ssh_signer
 
 all: $(TESTS)
 
@@ -231,6 +231,12 @@ test_ssh_crypto_sha256.o: $(SRC)/lib/sha256.c
 test_ssh_crypto_aes.o: $(SRC)/lib/aes.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
 
+derive_ssh_keypair: derive_ssh_keypair.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ derive_ssh_keypair.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+
+ssh_signer: ssh_signer.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ ssh_signer.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+
 # vi buffer tests
 test_vi_buffer: test_vi_buffer.c test_vi_buffer_vi_buffer.o test_vi_buffer_utf8.o test_vi_buffer_wcwidth.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vi_buffer.c test_vi_buffer_vi_buffer.o test_vi_buffer_utf8.o test_vi_buffer_wcwidth.o
@@ -299,4 +305,4 @@ test_eshell_parser_parser.o: $(SRC)/usr/lib/libc/eshell_parser.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:
-	rm -f $(TESTS) *.o
+	rm -f $(TESTS) derive_ssh_keypair ssh_signer *.o

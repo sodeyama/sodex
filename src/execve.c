@@ -74,6 +74,8 @@ PUBLIC pid_t kernel_execve_tty(const char *filename, char *const argv[],
   }
 
   dlist_insert_after(&(kern_task->run_list), &(current->run_list));
+  /* debug shell / SSH の top-level shell は親 wait なしで片付ける。 */
+  kern_task->auto_reap = TRUE;
   enable_pic_interrupt(IRQ_TIMER);
   return kern_task->pid;
 }

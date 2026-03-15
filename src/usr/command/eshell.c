@@ -59,6 +59,12 @@ int main(int argc, char** argv)
       memset(buf, 0, input_buf_size);
       continue;
     }
+    if (pipeline.command_count == 1 &&
+        pipeline.commands[0].argv[0] != NULL &&
+        strcmp(pipeline.commands[0].argv[0], "exit") == 0) {
+      exit(0);
+      return 0;
+    }
 
     if (pipeline.command_count == 1)
       run_single_command(&pipeline.commands[0]);

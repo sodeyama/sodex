@@ -1681,6 +1681,9 @@ PRIVATE int ssh_handle_payload(struct ssh_connection *conn,
     return -1;
 
   switch (payload[0]) {
+  case SSH_MSG_DISCONNECT:
+    ssh_queue_close(conn, "peer_disconnect");
+    return 0;
   case SSH_MSG_IGNORE:
   case SSH_MSG_UNIMPLEMENTED:
     return 0;
@@ -1997,10 +2000,19 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
 
 PRIVATE void ssh_poll_shell(struct ssh_connection *conn)
 {
-  (void)conn;
-  /* `eshell` には明示的な exit request がなく、`process_has_pid()` だけで
-   * shell 終了を判定すると command 実行中に誤って close することがある。
-   * cleanup は peer close / socket close / timeout 側へ寄せる。 */
+  if (conn->channel.shell_pid <= 0)
+    return;
+  if (conn->channel.tty != 0 && conn->channel.tty->active != FALSE)
+    return;
+  if (process_has_pid(conn->channel.shell_pid))
+    return;
+
+  conn->channel.shell_pid = -1;
+  conn->channel.tty = 0;
+  ssh_queue_exit_status(conn, 0);
+  ssh_queue_channel_eof(conn);
+  ssh_queue_channel_close(conn);
+  ssh_queue_close(conn, "shell_exit");
 }
 
 PRIVATE void ssh_accept_pending_connections(void)

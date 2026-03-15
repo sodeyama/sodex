@@ -92,6 +92,7 @@ struct task_struct {
   u_int32_t         utime;
   u_int32_t         stime;
   u_int32_t         state;
+  int               auto_reap;
   u_int32_t         signal;
   struct sigaction* sigactions[MAX_SIGNALS];
 };

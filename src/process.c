@@ -149,6 +149,10 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
     // delete the current
     _exit();
   } else if (state == TASK_ZOMBIE) {
+    if (current->auto_reap) {
+      process_in_timer_interrupt = FALSE;
+      _exit();
+    }
     // skip the current
     current = dlist_entry(current->run_list.next,
                           struct task_struct, run_list);

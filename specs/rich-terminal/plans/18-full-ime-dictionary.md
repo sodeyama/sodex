@@ -26,6 +26,7 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
 - runtime は on-disk lookup + small cache + fallback 辞書で候補を引く
 - 候補 UI は page 単位で表示でき、host/QEMU の回帰 test も入っている
 - 現在の生成規模は約 11 万読み / 14 万候補、blob は約 5.2MiB である
+- tuning として reading fingerprint、4KiB block cache、recent-reading result cache、overlay 差分描画、renderer 高速化を追加した
 
 ## 方針
 
@@ -70,6 +71,7 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
 6. shell と `vi` で基本語彙の保存導線を確認する
 7. host test で blob lookup、cache hit/miss、候補順、memory budget を固定する
 8. QEMU smoke で大規模辞書の代表語彙変換と保存を固定する
+9. tuning として lookup の無駄 read、同一変換の繰り返し、overlay redraw、framebuffer 描画の hot path を順に削る
 
 ## 変更対象
 
@@ -96,6 +98,8 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
 - RAM 常駐量が budget を超えない
 - 辞書 blob 欠落時に最小固定辞書 fallback が働く
 - shell と `vi` の両方で確定保存し、`cat` で再確認できる
+- 同一読みの連続変換で runtime cache hit を観測できる
+- overlay と framebuffer 描画の変更後も host/QEMU の表示回帰が出ない
 
 ## 完了条件
 

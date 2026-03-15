@@ -198,6 +198,15 @@
 | [x] | RT-97 | 5MiB fixture を image に載せ、guest から検証する QEMU smoke を追加する | RT-93, RT-95, RT-96 | ext3 large file の主要導線を QEMU 上で固定できる |
 | [x] | RT-98 | Plan 18 の blocker を更新し、large dictionary blob 搭載前提の fs 制約を解消する | RT-97 | 大規模辞書側が fs 制約ではなく辞書 source 側へ論点を移せる |
 
+## M16: IME performance tuning
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | RT-99 | IME blob format に reading fingerprint と ext3 block size 揃えの cache geometry を入れ、lookup 時の無駄 read を減らす | RT-86, RT-92 | bucket 内の不一致候補を data read 前に弾け、cache block が 4KiB 単位で効く |
+| [x] | RT-100 | `ime_dictionary` に最近読んだ読みの小さい result cache を追加し、同一変換の繰り返しを blob read なしで返せるようにする | RT-99 | 同じ読みを続けて変換した時に runtime cache hit を観測できる |
+| [x] | RT-101 | `term` の IME overlay を差分描画化し、overlay 内容や下地が変わらない frame の再描画を避ける | RT-80, RT-100 | 候補表示中でも不要な右上 redraw を抑えられる |
+| [x] | RT-102 | framebuffer `cell_renderer` を行単位の塗りつぶしと glyph 転送へ寄せ、IME 候補表示時の描画オーバーヘッドを下げる | RT-101 | IME 候補表示の hot path が 1px ごとの関数呼び出しに依存しない |
+
 ## 先送りする項目
 
 - 複数 terminal セッション

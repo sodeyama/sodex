@@ -11,9 +11,10 @@
 #endif
 
 #define IME_DICT_BLOB_MAGIC "IMED"
-#define IME_DICT_BLOB_ENTRY_SIZE 16
+#define IME_DICT_BLOB_ENTRY_SIZE 20
 
 struct ime_dict_blob_entry {
+  u_int32_t reading_hash;
   u_int32_t reading_offset;
   u_int32_t candidate_offset;
   u_int16_t reading_len;
@@ -34,7 +35,9 @@ static int ime_dict_blob_read_entry(struct ime_dict_blob_context *ctx,
                                     struct ime_dict_blob_entry *entry);
 static int ime_dict_blob_match_reading(struct ime_dict_blob_context *ctx,
                                        const struct ime_dict_blob_entry *entry,
-                                       const char *reading);
+                                       const char *reading,
+                                       u_int32_t reading_hash,
+                                       int reading_len);
 static int ime_dict_blob_parse_candidates(char *storage, int candidate_bytes,
                                           const char **out_candidates,
                                           int candidate_cap,
@@ -120,9 +123,11 @@ int ime_dict_blob_lookup(struct ime_dict_blob_context *ctx,
 {
   struct ime_dict_blob_entry entry;
   u_int32_t bucket;
+  u_int32_t reading_hash;
   u_int32_t index;
   u_int32_t start;
   u_int32_t end;
+  int reading_len;
   int i;
 
   if (ctx == NULL || reading == NULL || storage == NULL || storage_cap <= 0 ||
@@ -138,7 +143,9 @@ int ime_dict_blob_lookup(struct ime_dict_blob_context *ctx,
     return 0;
 
   ctx->metrics.lookups++;
-  bucket = ime_dict_blob_hash(reading) % ctx->header.bucket_count;
+  reading_len = (int)strlen(reading);
+  reading_hash = ime_dict_blob_hash(reading);
+  bucket = reading_hash % ctx->header.bucket_count;
   start = ctx->bucket_offsets[bucket];
   end = ctx->bucket_offsets[bucket + 1U];
 
@@ -147,7 +154,8 @@ int ime_dict_blob_lookup(struct ime_dict_blob_context *ctx,
 
     if (ime_dict_blob_read_entry(ctx, index, &entry) < 0)
       return -1;
-    matched = ime_dict_blob_match_reading(ctx, &entry, reading);
+    matched = ime_dict_blob_match_reading(ctx, &entry, reading,
+                                          reading_hash, reading_len);
     if (matched < 0)
       return -1;
     if (matched == 0)
@@ -330,16 +338,18 @@ static int ime_dict_blob_read_entry(struct ime_dict_blob_context *ctx,
 
 static int ime_dict_blob_match_reading(struct ime_dict_blob_context *ctx,
                                        const struct ime_dict_blob_entry *entry,
-                                       const char *reading)
+                                       const char *reading,
+                                       u_int32_t reading_hash,
+                                       int reading_len)
 {
   char chunk[32];
-  int reading_len;
   int total = 0;
 
   if (ctx == NULL || entry == NULL || reading == NULL)
     return -1;
 
-  reading_len = (int)strlen(reading);
+  if (entry->reading_hash != reading_hash)
+    return 0;
   if ((u_int16_t)reading_len != entry->reading_len)
     return 0;
   if (ctx->header.data_offset + entry->reading_offset + entry->reading_len >

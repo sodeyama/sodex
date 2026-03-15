@@ -13,6 +13,8 @@ struct ime_dictionary_metrics {
   u_int32_t lookups;
   u_int32_t blob_lookups;
   u_int32_t fallback_lookups;
+  u_int32_t result_cache_hits;
+  u_int32_t result_cache_misses;
   u_int32_t memory_budget;
   int last_source;
 };

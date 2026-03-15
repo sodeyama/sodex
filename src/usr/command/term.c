@@ -60,9 +60,11 @@ struct term_app {
   int master_fd;
   int use_framebuffer;
   int cursor_valid;
+  int ime_overlay_valid;
   int last_cursor_col;
   int last_cursor_row;
   int last_ime_overlay_width;
+  int last_ime_overlay_start_col;
   int last_scroll_count;
   u_int32_t long_output_base;
   struct fb_info fb;
@@ -74,6 +76,7 @@ struct term_app {
   int scroll_head;
   int scroll_len;
   struct ime_state ime;
+  struct term_cell last_ime_overlay_cells[TERM_IME_OVERLAY_MAX_CELLS];
 };
 
 PRIVATE struct term_app term_state;
@@ -101,11 +104,16 @@ PRIVATE int flush_ime(struct term_app *app, char *buf, int len);
 PRIVATE enum term_ime_action ime_action_for_event(const struct ime_state *ime,
                                                   const struct key_event *event);
 PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action);
-PRIVATE void render_ime_overlay(struct term_app *app);
+PRIVATE void render_ime_overlay(struct term_app *app, int force);
 PRIVATE void render_conversion_target(struct term_app *app);
 PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap);
 PRIVATE int build_ime_overlay_cells(struct term_app *app,
                                     struct term_cell *cells, int cap);
+PRIVATE int ime_overlay_cells_equal(const struct term_cell *a,
+                                    const struct term_cell *b, int len);
+PRIVATE int ime_overlay_region_needs_redraw(const struct term_app *app,
+                                            int start_col, int width,
+                                            int force);
 PRIVATE int utf8_display_width(const char *text);
 PRIVATE int append_overlay_ascii(struct term_cell *cells, int len, int cap,
                                  const char *text,
@@ -202,6 +210,9 @@ PRIVATE int term_init(struct term_app *app)
   app->scroll_head = 0;
   app->scroll_len = 0;
   app->cursor_valid = 0;
+  app->ime_overlay_valid = 0;
+  app->last_ime_overlay_width = 0;
+  app->last_ime_overlay_start_col = 0;
   app->last_scroll_count = 0;
   app->long_output_base = 0;
   ime_init(&app->ime);
@@ -251,6 +262,9 @@ PRIVATE int sync_viewport(struct term_app *app)
   if (terminal_surface_resize(&app->surface, cols, rows, &blank) < 0)
     return 0;
 
+  app->ime_overlay_valid = 0;
+  app->last_ime_overlay_width = 0;
+  app->last_ime_overlay_start_col = 0;
   if (app->use_framebuffer == 0)
     console_clear();
   replay_scrollback(app);
@@ -533,7 +547,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
     app->last_cursor_col = app->surface.cursor_col;
     app->last_cursor_row = app->surface.cursor_row;
     app->cursor_valid = 1;
-    render_ime_overlay(app);
+    render_ime_overlay(app, force);
     app->metrics.render_cells += rendered;
     if (force != FALSE || dirty_before == total_cells)
       app->metrics.full_redraws++;
@@ -594,7 +608,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
     emit_metric(app, "full_redraw", 0, rendered);
   terminal_surface_clear_damage(&app->surface);
   render_conversion_target(app);
-  render_ime_overlay(app);
+  render_ime_overlay(app, force);
   console_set_cursor(app->surface.cursor_col, app->surface.cursor_row);
 }
 
@@ -836,7 +850,7 @@ PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action
   }
 }
 
-PRIVATE void render_ime_overlay(struct term_app *app)
+PRIVATE void render_ime_overlay(struct term_app *app, int force)
 {
   struct term_cell cell;
   struct term_cell cells[TERM_IME_OVERLAY_MAX_CELLS];
@@ -848,6 +862,7 @@ PRIVATE void render_ime_overlay(struct term_app *app)
   int right_edge_col;
   int width;
   int start_col;
+  int needs_redraw;
   int i;
   int text_len;
   int cell_len;
@@ -879,6 +894,16 @@ PRIVATE void render_ime_overlay(struct term_app *app)
       clear_width = right_edge_col;
     clear_start_col = right_edge_col - clear_width;
     overlay_start_col = right_edge_col - overlay_width;
+    needs_redraw = force != FALSE ||
+                   app->ime_overlay_valid == 0 ||
+                   app->last_ime_overlay_width != overlay_width ||
+                   app->last_ime_overlay_start_col != overlay_start_col ||
+                   ime_overlay_region_needs_redraw(app, clear_start_col,
+                                                   clear_width, force) != 0 ||
+                   ime_overlay_cells_equal(cells, app->last_ime_overlay_cells,
+                                           overlay_width) == 0;
+    if (needs_redraw == 0)
+      return;
     for (i = 0; i < clear_width; i++) {
       cell_renderer_draw_cell(&app->renderer, clear_start_col + i, 0,
                               &cell, FALSE);
@@ -889,7 +914,11 @@ PRIVATE void render_ime_overlay(struct term_app *app)
       cell_renderer_draw_cell(&app->renderer, overlay_start_col + i, 0,
                               &cells[i], FALSE);
     }
+    memcpy(app->last_ime_overlay_cells, cells,
+           sizeof(struct term_cell) * (size_t)overlay_width);
+    app->ime_overlay_valid = 1;
     app->last_ime_overlay_width = overlay_width;
+    app->last_ime_overlay_start_col = overlay_start_col;
     return;
   }
 
@@ -912,6 +941,51 @@ PRIVATE void render_ime_overlay(struct term_app *app)
     console_putc_at(start_col + i, 0, render_color(&cell), ch);
   }
   app->last_ime_overlay_width = width;
+}
+
+PRIVATE int ime_overlay_cells_equal(const struct term_cell *a,
+                                    const struct term_cell *b, int len)
+{
+  int i;
+
+  if (a == NULL || b == NULL || len < 0)
+    return FALSE;
+  for (i = 0; i < len; i++) {
+    if (a[i].ch != b[i].ch || a[i].fg != b[i].fg || a[i].bg != b[i].bg ||
+        a[i].attr != b[i].attr || a[i].width != b[i].width)
+      return FALSE;
+  }
+  return TRUE;
+}
+
+PRIVATE int ime_overlay_region_needs_redraw(const struct term_app *app,
+                                            int start_col, int width,
+                                            int force)
+{
+  int end_col;
+  int col;
+
+  if (app == NULL || width <= 0)
+    return TRUE;
+  if (force != FALSE)
+    return TRUE;
+
+  end_col = start_col + width;
+  if (app->surface.cursor_row == 0 &&
+      app->surface.cursor_col >= start_col &&
+      app->surface.cursor_col < end_col)
+    return TRUE;
+  if (app->cursor_valid != 0 &&
+      app->last_cursor_row == 0 &&
+      app->last_cursor_col >= start_col &&
+      app->last_cursor_col < end_col)
+    return TRUE;
+
+  for (col = start_col; col < end_col; col++) {
+    if (terminal_surface_is_dirty(&app->surface, col, 0) != FALSE)
+      return TRUE;
+  }
+  return FALSE;
 }
 
 PRIVATE void render_conversion_target(struct term_app *app)

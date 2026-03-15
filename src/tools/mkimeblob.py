@@ -8,8 +8,9 @@ import struct
 from pathlib import Path
 
 HEADER_STRUCT = struct.Struct("<4s7I")
-ENTRY_STRUCT = struct.Struct("<IIHHI")
+ENTRY_STRUCT = struct.Struct("<IIIHHI")
 MAGIC = b"IMED"
+VERSION = 2
 MIN_BUCKETS = 64
 MAX_BUCKETS = 16384
 TARGET_ENTRIES_PER_BUCKET = 16
@@ -75,16 +76,17 @@ def choose_bucket_count(entry_count: int, requested: int) -> int:
 
 
 def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
-    entries: list[tuple[int, bytes, list[str]]] = []
+    entries: list[tuple[int, int, bytes, list[str]]] = []
     bucket_sizes = [0] * bucket_count
 
     for reading, candidates in grouped.items():
         reading_bytes = reading.encode("utf-8")
-        bucket = fnv1a(reading_bytes) % bucket_count
-        entries.append((bucket, reading_bytes, candidates))
+        reading_hash = fnv1a(reading_bytes)
+        bucket = reading_hash % bucket_count
+        entries.append((bucket, reading_hash, reading_bytes, candidates))
         bucket_sizes[bucket] += 1
 
-    entries.sort(key=lambda item: (item[0], item[1]))
+    entries.sort(key=lambda item: (item[0], item[2]))
 
     bucket_offsets = [0] * (bucket_count + 1)
     running = 0
@@ -95,7 +97,7 @@ def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
 
     data_blob = bytearray()
     entry_blob = bytearray()
-    for _bucket, reading_bytes, candidates in entries:
+    for _bucket, reading_hash, reading_bytes, candidates in entries:
         reading_offset = len(data_blob)
         data_blob.extend(reading_bytes)
 
@@ -108,6 +110,7 @@ def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
 
         entry_blob.extend(
             ENTRY_STRUCT.pack(
+                reading_hash,
                 reading_offset,
                 candidate_offset,
                 len(reading_bytes),
@@ -124,7 +127,7 @@ def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
 
     header = HEADER_STRUCT.pack(
         MAGIC,
-        1,
+        VERSION,
         bucket_count,
         len(entries),
         bucket_offset,

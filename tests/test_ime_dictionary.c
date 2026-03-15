@@ -80,6 +80,26 @@ TEST(blob_lookup_finds_large_dictionary_terms) {
     ASSERT_STR_EQ(candidates[0], "総理大臣");
 }
 
+TEST(repeated_lookup_hits_runtime_result_cache) {
+    struct ime_dictionary_metrics metrics;
+    char storage[IME_CANDIDATE_STORAGE_MAX];
+    const char *candidates[IME_CANDIDATE_MAX];
+    int count = 0;
+
+    ASSERT_EQ(use_blob_fixture(), 0);
+    ASSERT_EQ(ime_dictionary_lookup("てんき", storage, sizeof(storage),
+                                    candidates, IME_CANDIDATE_MAX, &count), 0);
+    ime_dictionary_get_metrics(&metrics);
+    ASSERT_EQ(metrics.result_cache_hits, 0);
+    ASSERT(metrics.result_cache_misses >= 1);
+
+    ASSERT_EQ(ime_dictionary_lookup("てんき", storage, sizeof(storage),
+                                    candidates, IME_CANDIDATE_MAX, &count), 0);
+    ime_dictionary_get_metrics(&metrics);
+    ASSERT(metrics.result_cache_hits >= 1);
+    ASSERT_EQ(ime_dictionary_last_source(), IME_DICTIONARY_SOURCE_BLOB);
+}
+
 TEST(fallback_lookup_works_when_blob_missing) {
     char storage[IME_CANDIDATE_STORAGE_MAX];
     const char *candidates[IME_CANDIDATE_MAX];
@@ -114,6 +134,7 @@ int main(void)
     RUN_TEST(blob_lookup_preserves_candidate_order);
     RUN_TEST(blob_lookup_finds_added_basic_terms);
     RUN_TEST(blob_lookup_finds_large_dictionary_terms);
+    RUN_TEST(repeated_lookup_hits_runtime_result_cache);
     RUN_TEST(fallback_lookup_works_when_blob_missing);
     RUN_TEST(lookup_returns_not_found_for_unknown_reading);
 

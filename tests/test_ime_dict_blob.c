@@ -40,6 +40,7 @@ TEST(blob_contains_hundreds_of_basic_entries) {
 
     ime_dict_blob_init(&ctx);
     ASSERT_EQ(ime_dict_blob_open(&ctx, TEST_BLOB_PATH), 0);
+    ASSERT_EQ(ctx.header.version, IME_DICT_BLOB_VERSION);
     ASSERT(ctx.header.entry_count >= 100000);
     ASSERT(ctx.header.bucket_count >= 4096);
     bucket_max = max_bucket_size(&ctx);

@@ -271,14 +271,21 @@ struct http_connection {
   int in_use;
   int fd;
   int closing;
+  int close_started_tick;
+  int close_initiated;
   u_int32_t peer_addr;
   u_int32_t accepted_tick;
   int length;
   char buffer[ADMIN_HTTP_REQUEST_MAX];
+  char response[ADMIN_RESPONSE_MAX];
+  char body[ADMIN_RESPONSE_MAX];
+  struct http_request request;
+  struct admin_request admin_request;
 };
 
 PRIVATE int http_listener_fd = -1;
 PRIVATE struct http_connection http_connections[HTTP_MAX_CONNECTIONS];
+PRIVATE int http_listener_state_log = 0;
 
 PRIVATE void http_fill_bind_addr(struct sockaddr_in *addr, u_int16_t port)
 {
@@ -327,17 +334,34 @@ PRIVATE int http_create_listener(void)
   struct sockaddr_in addr;
   int fd = kern_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-  if (fd < 0)
+  if (fd < 0) {
+    if (http_listener_state_log != 1) {
+      _kprintf("http listener create failed: socket\n");
+      http_listener_state_log = 1;
+    }
     return -1;
+  }
 
   http_fill_bind_addr(&addr, SODEX_HTTP_PORT);
   if (kern_bind(fd, &addr) < 0) {
+    if (http_listener_state_log != 2) {
+      _kprintf("http listener create failed: bind\n");
+      http_listener_state_log = 2;
+    }
     kern_close_socket(fd);
     return -1;
   }
   if (kern_listen(fd, SOCK_ACCEPT_BACKLOG_SIZE) < 0) {
+    if (http_listener_state_log != 3) {
+      _kprintf("http listener create failed: listen\n");
+      http_listener_state_log = 3;
+    }
     kern_close_socket(fd);
     return -1;
+  }
+  if (http_listener_state_log != 4) {
+    _kprintf("http listener ready fd=%d\n", fd);
+    http_listener_state_log = 4;
   }
   return fd;
 }
@@ -349,8 +373,9 @@ PRIVATE void http_send_and_close(struct http_connection *conn,
   if (response != 0) {
     kern_send(conn->fd, (void *)response, (int)strlen(response), 0);
   }
-  socket_begin_close(conn->fd);
   conn->closing = TRUE;
+  conn->close_started_tick = kernel_tick;
+  conn->close_initiated = FALSE;
 }
 
 PRIVATE void http_release_connection(struct http_connection *conn)
@@ -407,10 +432,6 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
 {
   char chunk[96];
   int read_len;
-  struct http_request http_req;
-  struct admin_request admin_req;
-  char body[ADMIN_RESPONSE_MAX];
-  char response[ADMIN_RESPONSE_MAX];
   int status_code = 200;
   const char *content_type = "application/json";
 
@@ -424,12 +445,20 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
 
   if (!conn->closing &&
       (int)(kernel_tick - conn->accepted_tick) > HTTP_IDLE_TIMEOUT_TICKS) {
-    http_build_response(403, "timeout\n", response, sizeof(response), "text/plain");
-    http_send_and_close(conn, response);
+    http_build_response(403, "timeout\n",
+                        conn->response, sizeof(conn->response), "text/plain");
+    http_send_and_close(conn, conn->response);
   }
 
   if (conn->closing)
+  {
+    if (!conn->close_initiated &&
+        (int)(kernel_tick - conn->close_started_tick) >= 2) {
+      socket_begin_close(conn->fd);
+      conn->close_initiated = TRUE;
+    }
     return;
+  }
 
   for (;;) {
     disableInterrupt();
@@ -439,8 +468,9 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
       break;
 
     if (conn->length + read_len >= ADMIN_HTTP_REQUEST_MAX) {
-      http_build_response(413, "too_large\n", response, sizeof(response), "text/plain");
-      http_send_and_close(conn, response);
+      http_build_response(413, "too_large\n",
+                          conn->response, sizeof(conn->response), "text/plain");
+      http_send_and_close(conn, conn->response);
       return;
     }
 
@@ -452,30 +482,33 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
   if (!http_headers_complete(conn->buffer, conn->length))
     return;
 
-  if (http_parse_request(conn->buffer, conn->length, &http_req) < 0 ||
-      http_map_request(&http_req, &admin_req) < 0) {
-    http_build_response(400, "bad_request\n", response, sizeof(response), "text/plain");
-    http_send_and_close(conn, response);
+  if (http_parse_request(conn->buffer, conn->length, &conn->request) < 0 ||
+      http_map_request(&conn->request, &conn->admin_request) < 0) {
+    http_build_response(400, "bad_request\n",
+                        conn->response, sizeof(conn->response), "text/plain");
+    http_send_and_close(conn, conn->response);
     return;
   }
 
-  if (!admin_authorize_request(&admin_req, conn->peer_addr)) {
-    http_build_response(403, "forbidden\n", response, sizeof(response), "text/plain");
-    http_send_and_close(conn, response);
+  if (!admin_authorize_request(&conn->admin_request, conn->peer_addr)) {
+    http_build_response(403, "forbidden\n",
+                        conn->response, sizeof(conn->response), "text/plain");
+    http_send_and_close(conn, conn->response);
     return;
   }
 
-  if (admin_req.action == ADMIN_ACTION_HEALTH) {
+  if (conn->admin_request.action == ADMIN_ACTION_HEALTH) {
     content_type = "text/plain";
   }
 
-  admin_execute_request(&admin_req, body, sizeof(body),
-                        admin_req.action == ADMIN_ACTION_HEALTH ? FALSE : TRUE);
-  if (admin_req.action == ADMIN_ACTION_HEALTH) {
+  admin_execute_request(&conn->admin_request, conn->body, sizeof(conn->body),
+                        conn->admin_request.action == ADMIN_ACTION_HEALTH ? FALSE : TRUE);
+  if (conn->admin_request.action == ADMIN_ACTION_HEALTH) {
     status_code = 200;
   }
-  http_build_response(status_code, body, response, sizeof(response), content_type);
-  http_send_and_close(conn, response);
+  http_build_response(status_code, conn->body,
+                      conn->response, sizeof(conn->response), content_type);
+  http_send_and_close(conn, conn->response);
 }
 
 PUBLIC void http_server_init(void)

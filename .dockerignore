@@ -1,0 +1,5 @@
+.git
+build
+src/test/__pycache__
+tests/__pycache__
+.claude

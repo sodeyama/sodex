@@ -151,7 +151,7 @@ $(OBJDIR)/%.o: %.S
 tools: ${KMKFS} ${GETSIZE}
 
 ${KMKFS} : ${TOOLDIR}/kmkfs.cpp
-	$(C++) -D PATH_USRBIN=\"${BASEDIR}/src/usr/bin/\" -o $@ ${TOOLDIR}/kmkfs.cpp
+	$(CXX) -D PATH_USRBIN=\"${BASEDIR}/src/usr/bin/\" -o $@ ${TOOLDIR}/kmkfs.cpp
 	chmod 755 $@
 
 ${GETSIZE} : ${TOOLDIR}/getsize.c

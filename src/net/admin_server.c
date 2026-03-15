@@ -85,6 +85,8 @@ struct admin_connection {
   int in_use;
   int fd;
   int closing;
+  int close_started_tick;
+  int close_initiated;
   u_int32_t peer_addr;
   u_int32_t accepted_tick;
   int length;
@@ -93,6 +95,7 @@ struct admin_connection {
 
 PRIVATE int admin_listener_fd = -1;
 PRIVATE struct admin_connection admin_connections[ADMIN_MAX_CONNECTIONS];
+PRIVATE int admin_listener_state_log = 0;
 #endif
 
 PRIVATE void admin_copy_string(char *dest, int cap, const char *src)
@@ -689,19 +692,36 @@ PRIVATE int admin_create_listener(void)
   struct sockaddr_in addr;
   int fd = kern_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-  if (fd < 0)
+  if (fd < 0) {
+    if (admin_listener_state_log != 1) {
+      _kprintf("admin listener create failed: socket\n");
+      admin_listener_state_log = 1;
+    }
     return -1;
+  }
 
   admin_fill_bind_addr(&addr, SODEX_ADMIN_PORT);
   if (kern_bind(fd, &addr) < 0) {
+    if (admin_listener_state_log != 2) {
+      _kprintf("admin listener create failed: bind\n");
+      admin_listener_state_log = 2;
+    }
     kern_close_socket(fd);
     return -1;
   }
   if (kern_listen(fd, SOCK_ACCEPT_BACKLOG_SIZE) < 0) {
+    if (admin_listener_state_log != 3) {
+      _kprintf("admin listener create failed: listen\n");
+      admin_listener_state_log = 3;
+    }
     kern_close_socket(fd);
     return -1;
   }
 
+  if (admin_listener_state_log != 4) {
+    _kprintf("admin listener ready fd=%d\n", fd);
+    admin_listener_state_log = 4;
+  }
   admin_audit_line("admin_listener_ready");
   return fd;
 }
@@ -713,8 +733,9 @@ PRIVATE void admin_send_and_close(struct admin_connection *conn,
   if (response != 0) {
     kern_send(conn->fd, (void *)response, (int)strlen(response), 0);
   }
-  socket_begin_close(conn->fd);
   conn->closing = TRUE;
+  conn->close_started_tick = kernel_tick;
+  conn->close_initiated = FALSE;
 }
 
 PRIVATE void admin_release_connection(struct admin_connection *conn)
@@ -798,7 +819,14 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
   }
 
   if (conn->closing)
+  {
+    if (!conn->close_initiated &&
+        (int)(kernel_tick - conn->close_started_tick) >= 2) {
+      socket_begin_close(conn->fd);
+      conn->close_initiated = TRUE;
+    }
     return;
+  }
 
   for (;;) {
     disableInterrupt();

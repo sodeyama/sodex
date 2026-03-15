@@ -152,6 +152,18 @@ sodex (guest)
 - まずはコンテナ再起動で十分
 - 後で watchdog やヘルスチェックを追加する
 
+## 現在の Docker 導線
+
+2026-03-15 時点で、最小の headless Docker 導線を追加した。
+
+- `docker/server-runtime/Dockerfile`
+- `docker/server-runtime/entrypoint.sh`
+- container 起動時に `/etc/sodex-admin.conf` 用 overlay を生成
+- `make -C src SODEX_ROOTFS_OVERLAY=... all` で guest image を組み立て
+- `bin/start.sh server-headless` で QEMU を foreground 実行
+
+Linux で `/dev/kvm` を渡せる場合は `SODEX_QEMU_ACCEL=kvm` を使う。
+
 ## 性能の見立て
 
 ### 現実的に期待できること

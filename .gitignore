@@ -2,6 +2,7 @@ build/
 *.o
 *.a
 *.log
+__pycache__/
 *.dSYM/
 .claude/sessions/
 .claude/tmp/

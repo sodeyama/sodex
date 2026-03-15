@@ -48,7 +48,7 @@ make
 bin/start.sh
 ```
 
-この起動スクリプトは現在 `-display cocoa` を使うため、macOS 前提です。別環境で使う場合は [bin/start.sh](bin/start.sh) の display 設定を調整してください。
+通常の `bin/start.sh` は `-display cocoa` を使うため、macOS 前提です。headless 実行は `bin/start.sh server-headless` を使ってください。
 既定の QEMU RAM は `512MB` です。`SODEX_QEMU_MEM_MB=1024 bin/start.sh` のように上書きできます。
 
 ネットワーク付きで起動したい場合:
@@ -56,6 +56,24 @@ bin/start.sh
 ```sh
 bin/start.sh net
 ```
+
+server runtime を headless で起動したい場合:
+
+```sh
+bin/start.sh server-headless
+```
+
+Docker 上で server runtime を常駐させたい場合:
+
+```sh
+docker build -f docker/server-runtime/Dockerfile -t sodex-server-runtime .
+docker run --rm -p 18080:18080 -p 10023:10023 sodex-server-runtime
+```
+
+この image は `linux/amd64` 前提です。Apple Silicon などの arm64 host では Docker の emulation 経由で動かします。
+published port の疎通は Linux host を前提にしています。Docker Desktop/macOS 上の nested slirp は未確認です。
+
+`/dev/kvm` を使える Linux なら、`--device /dev/kvm -e SODEX_QEMU_ACCEL=kvm` を追加できます。
 
 ## テスト
 

@@ -12,6 +12,10 @@ from PIL import Image, ImageDraw, ImageFont
 ASCII_FIRST = 32
 ASCII_LAST = 126
 RESAMPLE_LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
+PUNCTUATION_SCALE_OVERRIDES = {
+    0x3001: 1.35,
+    0x3002: 1.35,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,11 +58,50 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def render_glyph(font: ImageFont.FreeTypeFont, ch: str,
+def emphasize_small_punctuation(image: Image.Image,
+                                codepoint: int,
+                                cell_width: int,
+                                cell_height: int) -> Image.Image:
+    scale = PUNCTUATION_SCALE_OVERRIDES.get(codepoint)
+    bbox: tuple[int, int, int, int] | None
+    crop: Image.Image
+    target_width: int
+    target_height: int
+    margin_bottom: int
+    x: int
+    y: int
+
+    if scale is None:
+        return image
+
+    bbox = image.getbbox()
+    if bbox is None:
+        return image
+
+    crop = image.crop(bbox)
+    target_width = min(cell_width, max(crop.width, int(round(crop.width * scale))))
+    target_height = min(cell_height, max(crop.height, int(round(crop.height * scale))))
+    if target_width == crop.width and target_height == crop.height:
+        return image
+
+    margin_bottom = cell_height - bbox[3]
+    x = bbox[0]
+    y = cell_height - margin_bottom - target_height
+    y = max(0, y)
+    if x + target_width > cell_width:
+        x = cell_width - target_width
+
+    adjusted = Image.new("L", (cell_width, cell_height), 0)
+    adjusted.paste(crop.resize((target_width, target_height), RESAMPLE_LANCZOS), (x, y))
+    return adjusted
+
+
+def render_glyph(font: ImageFont.FreeTypeFont, codepoint: int,
                  cell_width: int, cell_height: int,
                  advance_width: int, baseline: int,
                  threshold: int,
                  supersample: int) -> list[int]:
+    ch = chr(codepoint)
     render_width = cell_width * supersample
     render_height = cell_height * supersample
     image = Image.new("L", (render_width, render_height), 0)
@@ -70,6 +113,7 @@ def render_glyph(font: ImageFont.FreeTypeFont, ch: str,
     draw.text((origin_x, baseline), ch, fill=255, font=font, anchor="ls")
     if supersample > 1:
         image = image.resize((cell_width, cell_height), RESAMPLE_LANCZOS)
+    image = emphasize_small_punctuation(image, codepoint, cell_width, cell_height)
     image = image.point(lambda value: 255 if value >= threshold else 0)
 
     pixels = image.load()
@@ -248,7 +292,7 @@ def main() -> int:
                 codepoint,
                 render_glyph(
                     font,
-                    chr(codepoint),
+                    codepoint,
                     args.cell_width,
                     args.cell_height,
                     advance_width,

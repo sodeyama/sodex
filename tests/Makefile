@@ -4,6 +4,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 	-Wno-incompatible-library-redeclaration
 
 SRC = ../src
+FONT_HEADERS = $(SRC)/include/font_default.h $(SRC)/include/font8x16_data.h $(SRC)/include/font16x16_data.h
 
 TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser
 
@@ -126,11 +127,11 @@ test_terminal_surface_surface.o: $(SRC)/usr/lib/libc/terminal_surface.c
 test_cell_renderer: test_cell_renderer.c test_cell_renderer_renderer.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_cell_renderer.c test_cell_renderer_renderer.o
 
-test_cell_renderer_renderer.o: $(SRC)/usr/lib/libc/cell_renderer.c
+test_cell_renderer_renderer.o: $(SRC)/usr/lib/libc/cell_renderer.c $(FONT_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Shared default font lookup tests
-test_font_default: test_font_default.c
+test_font_default: test_font_default.c $(FONT_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_font_default.c
 
 # VT parser tests

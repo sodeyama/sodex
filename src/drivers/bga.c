@@ -112,6 +112,7 @@ PRIVATE int bga_try_mode(const struct bga_mode *mode)
 PUBLIC int bga_init(struct fb_info *info)
 {
   static const struct bga_mode modes[] = {
+    {1280, 800, 32},
     {1024, 768, 32},
     {800, 600, 32},
     {640, 480, 32}
@@ -143,6 +144,7 @@ PUBLIC int bga_init(struct fb_info *info)
     u_int32_t page_offset;
     u_int16_t pitch_pixels;
     u_int32_t fb_size;
+    u_int32_t map_size;
 
     if (bga_try_mode(&modes[i]) < 0)
       continue;
@@ -155,11 +157,18 @@ PUBLIC int bga_init(struct fb_info *info)
       pitch_pixels = modes[i].width;
     fb_size = (u_int32_t)pitch_pixels * modes[i].height *
               (modes[i].bpp / 8);
-    if (page_offset + fb_size > PSE_PAGE_SIZE)
+    map_size = page_offset + fb_size;
+    if (map_size > PSE_PAGE_SIZE * 2)
       continue;
 
     pg_set_kernel_4m_page(BGA_FB_VADDR, phys_page,
                           PAGE_PRESENT | PAGE_RW | PAGE_US | PAGE_GLOBAL);
+    if (map_size > PSE_PAGE_SIZE) {
+      /* 高解像度時は LFB が 4MB を跨ぐので次の 4MB も続けて張る。 */
+      pg_set_kernel_4m_page(BGA_FB_VADDR + PSE_PAGE_SIZE,
+                            phys_page + PSE_PAGE_SIZE,
+                            PAGE_PRESENT | PAGE_RW | PAGE_US | PAGE_GLOBAL);
+    }
     info->available = TRUE;
     info->width = modes[i].width;
     info->height = modes[i].height;

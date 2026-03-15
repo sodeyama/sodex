@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TrueType フォントから 8x16 の端末用ビットマップヘッダを生成する。"""
+"""TrueType フォントから端末用ビットマップヘッダを生成する。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ASCII_FIRST = 32
 ASCII_LAST = 126
+RESAMPLE_LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,6 +24,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cell-width", type=int, default=8, help="セル幅")
     parser.add_argument("--cell-height", type=int, default=16, help="セル高さ")
     parser.add_argument("--threshold", type=int, default=96, help="2値化しきい値")
+    parser.add_argument(
+        "--supersample",
+        type=int,
+        default=1,
+        help="高解像度で一度描いて縮小する倍率",
+    )
     parser.add_argument(
         "--codepoint-ranges",
         default="",
@@ -50,14 +57,19 @@ def parse_args() -> argparse.Namespace:
 def render_glyph(font: ImageFont.FreeTypeFont, ch: str,
                  cell_width: int, cell_height: int,
                  advance_width: int, baseline: int,
-                 threshold: int) -> list[int]:
-    image = Image.new("L", (cell_width, cell_height), 0)
+                 threshold: int,
+                 supersample: int) -> list[int]:
+    render_width = cell_width * supersample
+    render_height = cell_height * supersample
+    image = Image.new("L", (render_width, render_height), 0)
     draw = ImageDraw.Draw(image)
-    origin_x = max(0, (cell_width - advance_width) // 2)
+    origin_x = max(0, (render_width - advance_width) // 2)
 
     # 各文字を個別に中央寄せすると "." や "g" が不自然に浮くため、
     # フォントの advance と baseline を全 glyph で共有する。
     draw.text((origin_x, baseline), ch, fill=255, font=font, anchor="ls")
+    if supersample > 1:
+        image = image.resize((cell_width, cell_height), RESAMPLE_LANCZOS)
     image = image.point(lambda value: 255 if value >= threshold else 0)
 
     pixels = image.load()
@@ -139,7 +151,7 @@ def build_header(source_name: str,
         f"#define FONT8X16_WIDTH {cell_width}",
         f"#define FONT8X16_HEIGHT {cell_height}",
         "",
-        "static const unsigned char font8x16_printable[95][FONT8X16_HEIGHT] = {",
+        "static const unsigned int font8x16_printable[95][FONT8X16_HEIGHT] = {",
     ]
 
     for codepoint, rows in glyphs:
@@ -212,10 +224,14 @@ def main() -> int:
 
     codepoints = set(parse_codepoint_ranges(args.codepoint_ranges))
     codepoints.update(load_text_source_codepoints(args.text_source))
-    font = ImageFont.truetype(str(font_path), size=args.font_size)
+    if args.supersample <= 0:
+        print("supersample は 1 以上である必要があります", file=sys.stderr)
+        return 1
+
+    font = ImageFont.truetype(str(font_path), size=args.font_size * args.supersample)
     ascent, descent = font.getmetrics()
     line_height = ascent + descent
-    top_padding = max(0, (args.cell_height - line_height) // 2)
+    top_padding = max(0, (args.cell_height * args.supersample - line_height) // 2)
     baseline = top_padding + ascent
     advance_width = 0
     if codepoints:
@@ -238,6 +254,7 @@ def main() -> int:
                     advance_width,
                     baseline,
                     args.threshold,
+                    args.supersample,
                 ),
             )
         )

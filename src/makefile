@@ -20,6 +20,13 @@ FONT8X16_HEADER = ${INCLUDE}/font8x16_data.h
 FONT16X16_HEADER = ${INCLUDE}/font16x16_data.h
 FONT_HEADERS = ${FONT8X16_HEADER} ${FONT16X16_HEADER}
 FONT16X16_BASE_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6
+FONT_NARROW_CELL_WIDTH = 12
+FONT_NARROW_CELL_HEIGHT = 24
+FONT_WIDE_CELL_WIDTH = 24
+FONT_WIDE_CELL_HEIGHT = 24
+FONT_NARROW_SIZE = 19
+FONT_WIDE_SIZE = 21
+FONT_SUPERSAMPLE = 3
 IME_DICT_SOURCE = ${TOOLDIR}/ime_dictionary_source.tsv
 IME_DICT_TOOL = ${TOOLDIR}/mkimeblob.py
 IME_DICT_BLOB = ${USRDIR}/bin/ime_dictionary.blob
@@ -71,7 +78,8 @@ $(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/
 # === Main targets ===
 
 .PHONY: all usr-build regen-font8x16 regen-font16x16 regen-fonts
-all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} ${KERNEL} ${ACIENT} ${MIDDLE} tools
+.PHONY: kernel-subdirs drivers-build lib-build net-build display-build tty-build
+all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} kernel-subdirs ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
@@ -88,7 +96,11 @@ usr-build: ${FONT_HEADERS}
 ${FONT8X16_HEADER}: ${TOOLDIR}/mkfontpack.py ${UDEV_GOTHIC_TTF}
 	python3 ${TOOLDIR}/mkfontpack.py \
 		--font-path ${UDEV_GOTHIC_TTF} \
-		--font-size 13 \
+		--cell-width ${FONT_NARROW_CELL_WIDTH} \
+		--cell-height ${FONT_NARROW_CELL_HEIGHT} \
+		--font-size ${FONT_NARROW_SIZE} \
+		--supersample ${FONT_SUPERSAMPLE} \
+		--threshold 88 \
 		--output-header $@ \
 		--source-name UDEVGothic-Regular.ttf
 
@@ -96,9 +108,11 @@ ${FONT16X16_HEADER}: ${TOOLDIR}/mkfontpack.py ${UDEV_GOTHIC_TTF} ${IME_DICT_SOUR
 	python3 ${TOOLDIR}/mkfontpack.py \
 		--font-path ${UDEV_GOTHIC_TTF} \
 		--output-header $@ \
-		--cell-width 16 \
-		--cell-height 16 \
-		--font-size 14 \
+		--cell-width ${FONT_WIDE_CELL_WIDTH} \
+		--cell-height ${FONT_WIDE_CELL_HEIGHT} \
+		--font-size ${FONT_WIDE_SIZE} \
+		--supersample ${FONT_SUPERSAMPLE} \
+		--threshold 88 \
 		--codepoint-ranges ${FONT16X16_BASE_RANGES} \
 		--text-source ${IME_DICT_SOURCE} \
 		--symbol-name font16x16_glyphs \
@@ -108,23 +122,25 @@ ${IME_DICT_BLOB}: ${IME_DICT_SOURCE} ${IME_DICT_TOOL}
 	mkdir -p ${USRDIR}/bin
 	python3 ${IME_DICT_TOOL} --input ${IME_DICT_SOURCE} --output $@
 
-${KERNEL} : ${FONT_HEADERS} ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${BUILDDIR}/boot.ld
-	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} -o $@
+kernel-subdirs: drivers-build lib-build net-build display-build tty-build
 
-${DRIVER_OBJS} :
+drivers-build:
 	cd drivers; make
 
-${KLIB_OBJS} :
+lib-build:
 	cd lib; make
 
-${NET_OBJS} :
+net-build:
 	cd net; make
 
-${DISPLAY_OBJS} :
+display-build:
 	cd display; make
 
-${TTY_OBJS} :
+tty-build:
 	cd tty; make
+
+${KERNEL} : kernel-subdirs ${FONT_HEADERS} ${OBJS} ${ASMOBJS} ${BUILDDIR}/boot.ld
+	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} -o $@
 
 # === Boot loader ===
 
@@ -225,7 +241,7 @@ ktest-build:
 	$(MAKE) clean
 	$(MAKE) EXTRA_CFLAGS="-DKTEST_BUILD" ktest-link
 
-ktest-link: ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
+ktest-link: kernel-subdirs ${OBJS} ${ASMOBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
 	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
 	$(MAKE) usr-build
 	$(MAKE) tools

@@ -151,7 +151,7 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
                              const struct term_cell *cell,
                              int cursor)
 {
-  const unsigned char *glyph;
+  const unsigned int *glyph;
   const unsigned int *wide_glyph;
   u_int32_t fg;
   u_int32_t bg;

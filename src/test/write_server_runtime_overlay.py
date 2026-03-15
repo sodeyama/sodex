@@ -22,6 +22,10 @@ def main() -> int:
     control_token = os.environ.get("SODEX_ADMIN_CONTROL_TOKEN", "control-secret")
     allow_ip = os.environ.get("SODEX_ADMIN_ALLOW_IP", "10.0.2.2")
     debug_shell_port = os.environ.get("SODEX_DEBUG_SHELL_PORT", "")
+    ssh_port = os.environ.get("SODEX_SSH_PORT", "")
+    ssh_password = os.environ.get("SODEX_SSH_PASSWORD", "")
+    ssh_hostkey_seed = os.environ.get("SODEX_SSH_HOSTKEY_ED25519_SEED", "")
+    ssh_rng_seed = os.environ.get("SODEX_SSH_RNG_SEED", "")
 
     if overlay_dir.exists():
         shutil.rmtree(overlay_dir)
@@ -34,6 +38,14 @@ def main() -> int:
     ]
     if debug_shell_port and debug_shell_port != "0":
         lines.append(f"debug_shell_port={debug_shell_port}")
+    if ssh_port and ssh_port != "0":
+        lines.append(f"ssh_port={ssh_port}")
+    if ssh_password:
+        lines.append(f"ssh_password={ssh_password}")
+    if ssh_hostkey_seed:
+        lines.append(f"ssh_hostkey_ed25519_seed={ssh_hostkey_seed}")
+    if ssh_rng_seed:
+        lines.append(f"ssh_rng_seed={ssh_rng_seed}")
     lines.append("")
 
     config_path.write_text("\n".join(lines), encoding="ascii")

@@ -117,6 +117,34 @@ TEST(load_config_text_updates_runtime) {
     ASSERT(admin_authorize_request(&req, test_ip(10, 0, 2, 9)));
 }
 
+TEST(load_config_text_updates_ssh_runtime) {
+    const char *config =
+        "ssh_port = 10022\n"
+        "ssh_password = root-secret\n"
+        "ssh_hostkey_ed25519_seed = 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n"
+        "ssh_rng_seed = ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100\n";
+
+    admin_runtime_reset();
+    ASSERT(admin_runtime_load_config_text(config, (int)strlen(config)) > 0);
+    ASSERT_EQ(admin_runtime_ssh_port(), 10022);
+    ASSERT(admin_runtime_ssh_enabled());
+    ASSERT_STR_EQ(admin_runtime_ssh_password(), "root-secret");
+    ASSERT_STR_EQ(
+        admin_runtime_ssh_hostkey_ed25519_seed(),
+        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+    ASSERT_STR_EQ(
+        admin_runtime_ssh_rng_seed(),
+        "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100");
+}
+
+TEST(load_config_text_rejects_invalid_ssh_seed) {
+    const char *config = "ssh_hostkey_ed25519_seed = not-hex\n";
+
+    admin_runtime_reset();
+    ASSERT_EQ(admin_runtime_load_config_text(config, (int)strlen(config)), 0);
+    ASSERT(!admin_runtime_ssh_enabled());
+}
+
 TEST(rate_limit_allowlist_rejects_and_audits) {
     char response[ADMIN_RESPONSE_MAX];
     struct admin_request log_req;
@@ -203,6 +231,8 @@ int main(void) {
     RUN_TEST(execute_agent_start_and_status);
     RUN_TEST(log_tail_uses_audit_ring);
     RUN_TEST(load_config_text_updates_runtime);
+    RUN_TEST(load_config_text_updates_ssh_runtime);
+    RUN_TEST(load_config_text_rejects_invalid_ssh_seed);
     RUN_TEST(rate_limit_allowlist_rejects_and_audits);
     RUN_TEST(rate_limit_shares_bucket_across_auth_failure_reasons);
     RUN_TEST(listener_ready_emits_serial_ready_marker_to_audit_ring);

@@ -18,6 +18,8 @@ typedef uint32_t u_int32_t;
 #define SODEX_ADMIN_CONFIG_PATH "/etc/sodex-admin.conf"
 
 #define ADMIN_TOKEN_MAX 64
+#define ADMIN_SECRET_MAX 128
+#define ADMIN_HEX_SEED_MAX 65
 #define ADMIN_TEXT_REQUEST_MAX 192
 #define ADMIN_HTTP_REQUEST_MAX 384
 #define ADMIN_RESPONSE_MAX 512
@@ -47,7 +49,8 @@ enum admin_auth_result {
 
 enum admin_listener_kind {
   ADMIN_LISTENER_ADMIN = 1,
-  ADMIN_LISTENER_HTTP = 2
+  ADMIN_LISTENER_HTTP = 2,
+  ADMIN_LISTENER_SSH = 4
 };
 
 struct admin_request {
@@ -85,6 +88,11 @@ PUBLIC int admin_authorize_request_detailed(const struct admin_request *req,
                                             u_int32_t *retry_after_ticks);
 PUBLIC int admin_runtime_debug_shell_enabled(void);
 PUBLIC int admin_runtime_debug_shell_port(void);
+PUBLIC int admin_runtime_ssh_enabled(void);
+PUBLIC int admin_runtime_ssh_port(void);
+PUBLIC const char *admin_runtime_ssh_password(void);
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_seed(void);
+PUBLIC const char *admin_runtime_ssh_rng_seed(void);
 PUBLIC void admin_runtime_audit_line(const char *line);
 PUBLIC void admin_runtime_note_listener_ready(int listener_kind);
 
@@ -105,6 +113,10 @@ PUBLIC void admin_runtime_set_agent_running(int running);
 PUBLIC void admin_runtime_append_test_audit(const char *message);
 PUBLIC int admin_runtime_load_config_text(const char *text, int len);
 PUBLIC void admin_runtime_set_debug_shell_port(int port);
+PUBLIC void admin_runtime_set_ssh_port(int port);
+PUBLIC void admin_runtime_set_ssh_password(const char *password);
+PUBLIC void admin_runtime_set_ssh_seeds(const char *hostkey_seed,
+                                        const char *rng_seed);
 #endif
 
 #endif

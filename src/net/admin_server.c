@@ -60,6 +60,22 @@ EXTERN volatile u_int32_t kernel_tick;
 #define SODEX_ADMIN_ALLOW_IP3 2
 #endif
 
+#ifndef SODEX_SSH_PORT
+#define SODEX_SSH_PORT 0
+#endif
+
+#ifndef SODEX_SSH_PASSWORD
+#define SODEX_SSH_PASSWORD ""
+#endif
+
+#ifndef SODEX_SSH_HOSTKEY_ED25519_SEED
+#define SODEX_SSH_HOSTKEY_ED25519_SEED ""
+#endif
+
+#ifndef SODEX_SSH_RNG_SEED
+#define SODEX_SSH_RNG_SEED ""
+#endif
+
 #define ADMIN_AUDIT_LINES 16
 #define ADMIN_AUDIT_LINE_SIZE 96
 #define ADMIN_MAX_CONNECTIONS 2
@@ -86,6 +102,10 @@ struct admin_runtime_state {
   char control_token[ADMIN_TOKEN_MAX];
   u_int32_t allow_ip;
   u_int16_t debug_shell_port;
+  u_int16_t ssh_port;
+  char ssh_password[ADMIN_SECRET_MAX];
+  char ssh_hostkey_ed25519_seed[ADMIN_HEX_SEED_MAX];
+  char ssh_rng_seed[ADMIN_HEX_SEED_MAX];
   int agent_running;
   int agent_start_count;
   int agent_stop_count;
@@ -210,6 +230,26 @@ PRIVATE int admin_parse_positive_int(const char *text)
     i++;
   }
   return value;
+}
+
+PRIVATE int admin_is_hex_string(const char *text)
+{
+  int i = 0;
+
+  if (text == 0 || text[0] == '\0')
+    return FALSE;
+
+  while (text[i] != '\0') {
+    char c = text[i];
+
+    if (!((c >= '0' && c <= '9') ||
+          (c >= 'a' && c <= 'f') ||
+          (c >= 'A' && c <= 'F'))) {
+      return FALSE;
+    }
+    i++;
+  }
+  return TRUE;
 }
 
 PRIVATE int admin_parse_ipv4(const char *text, u_int32_t *out)
@@ -495,6 +535,7 @@ PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
   char ipbuf[24];
   int pos = 0;
   int listener_bit;
+  int ready_mask;
 
   if (listener_kind == ADMIN_LISTENER_ADMIN) {
     listener_bit = ADMIN_LISTENER_ADMIN;
@@ -502,6 +543,14 @@ PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
   } else if (listener_kind == ADMIN_LISTENER_HTTP) {
     listener_bit = ADMIN_LISTENER_HTTP;
     admin_audit_line("listener_ready kind=http port=8080");
+  } else if (listener_kind == ADMIN_LISTENER_SSH) {
+    listener_bit = ADMIN_LISTENER_SSH;
+    pos = admin_append_text(message, sizeof(message), pos,
+                            "listener_ready kind=ssh port=");
+    pos = admin_append_int(message, sizeof(message), pos,
+                           (int)admin_runtime.ssh_port);
+    message[pos] = '\0';
+    admin_audit_line(message);
   } else {
     return;
   }
@@ -510,9 +559,10 @@ PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
     return;
   admin_runtime.listener_ready_mask |= listener_bit;
 
+  ready_mask = admin_runtime.listener_ready_mask &
+               (ADMIN_LISTENER_ADMIN | ADMIN_LISTENER_HTTP);
   if (admin_runtime.listener_ready_announced ||
-      admin_runtime.listener_ready_mask !=
-          (ADMIN_LISTENER_ADMIN | ADMIN_LISTENER_HTTP)) {
+      ready_mask != (ADMIN_LISTENER_ADMIN | ADMIN_LISTENER_HTTP)) {
     return;
   }
 
@@ -529,7 +579,7 @@ PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
 PRIVATE int admin_apply_config_line(const char *line)
 {
   char key[32];
-  char value[ADMIN_TOKEN_MAX];
+  char value[ADMIN_SECRET_MAX];
   char raw[ADMIN_TEXT_REQUEST_MAX];
   char *sep;
   u_int32_t allow_ip;
@@ -571,6 +621,36 @@ PRIVATE int admin_apply_config_line(const char *line)
     if (port < 0 || port > 65535)
       return -1;
     admin_runtime.debug_shell_port = (u_int16_t)port;
+    return 1;
+  }
+  if (strcmp(key, "ssh_port") == 0) {
+    port = admin_parse_positive_int(value);
+    if (port < 0 || port > 65535)
+      return -1;
+    admin_runtime.ssh_port = (u_int16_t)port;
+    return 1;
+  }
+  if (strcmp(key, "ssh_password") == 0) {
+    admin_copy_string(admin_runtime.ssh_password,
+                      sizeof(admin_runtime.ssh_password), value);
+    return 1;
+  }
+  if (strcmp(key, "ssh_hostkey_ed25519_seed") == 0) {
+    if ((int)strlen(value) != ADMIN_HEX_SEED_MAX - 1 ||
+        !admin_is_hex_string(value)) {
+      return -1;
+    }
+    admin_copy_string(admin_runtime.ssh_hostkey_ed25519_seed,
+                      sizeof(admin_runtime.ssh_hostkey_ed25519_seed), value);
+    return 1;
+  }
+  if (strcmp(key, "ssh_rng_seed") == 0) {
+    if ((int)strlen(value) != ADMIN_HEX_SEED_MAX - 1 ||
+        !admin_is_hex_string(value)) {
+      return -1;
+    }
+    admin_copy_string(admin_runtime.ssh_rng_seed,
+                      sizeof(admin_runtime.ssh_rng_seed), value);
     return 1;
   }
 
@@ -714,6 +794,16 @@ PUBLIC void admin_runtime_reset(void)
     raw[2] = SODEX_ADMIN_ALLOW_IP2;
     raw[3] = SODEX_ADMIN_ALLOW_IP3;
   }
+  admin_runtime.ssh_port = (u_int16_t)SODEX_SSH_PORT;
+  admin_copy_string(admin_runtime.ssh_password,
+                    sizeof(admin_runtime.ssh_password),
+                    SODEX_SSH_PASSWORD);
+  admin_copy_string(admin_runtime.ssh_hostkey_ed25519_seed,
+                    sizeof(admin_runtime.ssh_hostkey_ed25519_seed),
+                    SODEX_SSH_HOSTKEY_ED25519_SEED);
+  admin_copy_string(admin_runtime.ssh_rng_seed,
+                    sizeof(admin_runtime.ssh_rng_seed),
+                    SODEX_SSH_RNG_SEED);
 #ifndef TEST_BUILD
   {
     struct task_struct boot_task;
@@ -777,6 +867,34 @@ PUBLIC int admin_runtime_debug_shell_enabled(void)
 PUBLIC int admin_runtime_debug_shell_port(void)
 {
   return (int)admin_runtime.debug_shell_port;
+}
+
+PUBLIC int admin_runtime_ssh_enabled(void)
+{
+  return admin_runtime.ssh_port != 0 &&
+         admin_runtime.ssh_password[0] != '\0' &&
+         admin_runtime.ssh_hostkey_ed25519_seed[0] != '\0' &&
+         admin_runtime.ssh_rng_seed[0] != '\0';
+}
+
+PUBLIC int admin_runtime_ssh_port(void)
+{
+  return (int)admin_runtime.ssh_port;
+}
+
+PUBLIC const char *admin_runtime_ssh_password(void)
+{
+  return admin_runtime.ssh_password;
+}
+
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_seed(void)
+{
+  return admin_runtime.ssh_hostkey_ed25519_seed;
+}
+
+PUBLIC const char *admin_runtime_ssh_rng_seed(void)
+{
+  return admin_runtime.ssh_rng_seed;
 }
 
 PUBLIC void admin_runtime_audit_line(const char *line)
@@ -1241,5 +1359,32 @@ PUBLIC void admin_runtime_set_debug_shell_port(int port)
   if (port > 65535)
     port = 65535;
   admin_runtime.debug_shell_port = (u_int16_t)port;
+}
+
+PUBLIC void admin_runtime_set_ssh_port(int port)
+{
+  if (port < 0)
+    port = 0;
+  if (port > 65535)
+    port = 65535;
+  admin_runtime.ssh_port = (u_int16_t)port;
+}
+
+PUBLIC void admin_runtime_set_ssh_password(const char *password)
+{
+  admin_copy_string(admin_runtime.ssh_password,
+                    sizeof(admin_runtime.ssh_password),
+                    password ? password : "");
+}
+
+PUBLIC void admin_runtime_set_ssh_seeds(const char *hostkey_seed,
+                                        const char *rng_seed)
+{
+  admin_copy_string(admin_runtime.ssh_hostkey_ed25519_seed,
+                    sizeof(admin_runtime.ssh_hostkey_ed25519_seed),
+                    hostkey_seed ? hostkey_seed : "");
+  admin_copy_string(admin_runtime.ssh_rng_seed,
+                    sizeof(admin_runtime.ssh_rng_seed),
+                    rng_seed ? rng_seed : "");
 }
 #endif

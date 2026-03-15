@@ -35,6 +35,7 @@ PUBLIC int sys_kill(pid_t pid, int signum)
     return -1;
 
   proc->signal |= (1<<(signum-1));
+  proc->state = TASK_RUNNING;
   return 0;
 }
 

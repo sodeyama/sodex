@@ -29,6 +29,7 @@
 
 EXTERN void network_poll(void);
 EXTERN volatile u_int32_t kernel_tick;
+PUBLIC volatile int process_in_timer_interrupt = FALSE;
 
 PRIVATE TSS tss;
 
@@ -112,6 +113,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
 {
   pic_eoi(IRQ_TIMER);
   kernel_tick++;
+  process_in_timer_interrupt = TRUE;
   save_process(is_usermode, iret_eip, iret_cs, iret_eflags,
                iret_esp, iret_ss, ebp);
   network_poll();
@@ -139,6 +141,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
 
   int state = current->state;
   if (state == TASK_STOPPED) {
+    process_in_timer_interrupt = FALSE;
     //_kprintf("pid:%x task stopped\n", current->pid);
     // delete the current
     _exit();
@@ -156,6 +159,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
              state);
   }
 
+  process_in_timer_interrupt = FALSE;
   schedule();
 }
 
@@ -330,9 +334,13 @@ PUBLIC void sleep_on(struct wait_queue **wq)
 
   current->state = TASK_INTERRUPTIBLE;
 
-  /* Yield CPU by enabling interrupts and spinning until woken up */
+  /* signal 待ちのまま眠り続けないよう、pending signal でも抜ける。 */
   enableInterrupt();
   while (current->state == TASK_INTERRUPTIBLE) {
+    if (current->signal != 0) {
+      current->state = TASK_RUNNING;
+      break;
+    }
     /* Timer interrupt will call schedule() and skip this process */
   }
 
@@ -368,6 +376,10 @@ PUBLIC void sleep_on_timeout(struct wait_queue **wq, u_int32_t ticks)
   deadline = kernel_tick + ticks;
   enableInterrupt();
   while (current->state == TASK_INTERRUPTIBLE) {
+    if (current->signal != 0) {
+      current->state = TASK_RUNNING;
+      break;
+    }
     if (kernel_tick >= deadline) {
       current->state = TASK_RUNNING;
       break;
@@ -393,4 +405,21 @@ PUBLIC void wakeup(struct wait_queue **wq)
     p = p->next;
   }
   *wq = (struct wait_queue *)0;
+}
+
+PUBLIC int process_has_pid(pid_t pid)
+{
+  struct dlist_set *plist;
+  struct dlist_set *pos;
+
+  if (pid <= 0 || current == (struct task_struct *)0)
+    return FALSE;
+
+  plist = &(current->run_list);
+  dlist_for_each(pos, plist) {
+    struct task_struct *proc = dlist_entry(pos, struct task_struct, run_list);
+    if (proc->pid == pid)
+      return TRUE;
+  }
+  return FALSE;
 }

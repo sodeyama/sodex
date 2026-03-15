@@ -46,9 +46,16 @@ PUBLIC pid_t sys_fork()
 PUBLIC void kernel_execve(const char *filename, char *const argv[],
                           char *const envp[])
 {
-  struct task_struct* kern_task = __execve(filename, argv, envp, NULL);
-  enable_pic_interrupt(IRQ_TIMER);
+  struct task_struct* kern_task;
+
+  disable_pic_interrupt(IRQ_TIMER);
+  kern_task = __execve(filename, argv, envp, NULL);
+  if (kern_task == NULL) {
+    enable_pic_interrupt(IRQ_TIMER);
+    return;
+  }
   current = kern_task;
+  enable_pic_interrupt(IRQ_TIMER);
 }
 
 PUBLIC pid_t kernel_execve_tty(const char *filename, char *const argv[],
@@ -117,7 +124,7 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
                                      struct tty *stdio_tty)
 {
   struct tty *child_tty;
-  disable_pic_interrupt(IRQ_TIMER);
+  /* timer IRQ の mask は caller 側で握り、run list 更新までまとめて保護する。 */
   /* set the memory translation using page feature for user process */
   // alloc 4096Byte from kernel memory manager
   u_int32_t* pg_dir = kalloc(BLOCK_SIZE*2);
@@ -201,14 +208,16 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
 
   set_default_sigaction(kern_task);
 
-  kern_task->esp0 = kalloc(BLOCK_SIZE*2);
+  kern_task->esp0 = kalloc(BLOCK_SIZE * (PROC_KERNEL_STACK_PAGES + 1));
   if (kern_task->esp0 == NULL) {
     _kprintf("%s: kern_task->esp0 kalloc error\n", __func__);
     return NULL;
   }
-  kern_task->esp0 = (kern_task->esp0 & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+  // 割り込みと exec の深い call stack に備えて、kernel stack は複数 page 分を確保する。
+  kern_task->esp0 =
+      (kern_task->esp0 & ~(BLOCK_SIZE - 1)) +
+      (BLOCK_SIZE * PROC_KERNEL_STACK_PAGES);
 
-  enable_pic_interrupt(IRQ_TIMER);
   return kern_task;
 }
 

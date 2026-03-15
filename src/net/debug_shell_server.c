@@ -104,6 +104,8 @@ struct debug_shell_connection {
   int in_use;
   int fd;
   int authenticated;
+  int start_pending;
+  int start_in_progress;
   int closing;
   int close_started_tick;
   int close_initiated;
@@ -119,6 +121,8 @@ struct debug_shell_connection {
 PRIVATE int debug_shell_listener_fd = -1;
 PRIVATE int debug_shell_listener_port = 0;
 PRIVATE struct debug_shell_connection debug_shell_conn;
+PRIVATE struct tty *debug_shell_cleanup_tty = 0;
+PRIVATE pid_t debug_shell_cleanup_pid = -1;
 
 PRIVATE void debug_shell_format_ip(u_int32_t peer_addr, char *buf, int cap)
 {
@@ -319,14 +323,40 @@ PRIVATE void debug_shell_send_and_close(struct debug_shell_connection *conn,
   conn->close_initiated = FALSE;
 }
 
+PRIVATE void debug_shell_queue_response(struct debug_shell_connection *conn,
+                                        const char *response)
+{
+  struct kern_socket *sk;
+  int len;
+
+  if (conn == 0 || conn->fd < 0 || response == 0)
+    return;
+
+  sk = &socket_table[conn->fd];
+  if (sk->state == SOCK_STATE_UNUSED)
+    return;
+
+  len = (int)strlen(response);
+  if (len > SOCK_TXBUF_SIZE)
+    len = SOCK_TXBUF_SIZE;
+  memcpy(sk->tx_buf, response, len);
+  sk->tx_len = (u_int16_t)len;
+  sk->tx_pending = 1;
+}
+
 PRIVATE void debug_shell_release_connection(struct debug_shell_connection *conn,
                                             const char *reason)
 {
   if (conn == 0 || !conn->in_use)
     return;
 
-  if (conn->shell_pid > 0)
+  if (conn->shell_pid > 0) {
     sys_kill(conn->shell_pid, SIGKILL);
+    debug_shell_cleanup_pid = conn->shell_pid;
+    debug_shell_cleanup_tty = conn->tty;
+    conn->shell_pid = -1;
+    conn->tty = 0;
+  }
   if (conn->fd >= 0)
     kern_close_socket(conn->fd);
   if (conn->tty != 0)
@@ -334,6 +364,19 @@ PRIVATE void debug_shell_release_connection(struct debug_shell_connection *conn,
 
   debug_shell_audit_close(conn->peer_addr, reason);
   debug_shell_reset_connection(conn);
+}
+
+PRIVATE void debug_shell_poll_cleanup(void)
+{
+  if (debug_shell_cleanup_pid <= 0)
+    return;
+  if (process_has_pid(debug_shell_cleanup_pid))
+    return;
+
+  if (debug_shell_cleanup_tty != 0)
+    tty_release(debug_shell_cleanup_tty);
+  debug_shell_cleanup_tty = 0;
+  debug_shell_cleanup_pid = -1;
 }
 
 PRIVATE int debug_shell_start_session(struct debug_shell_connection *conn)
@@ -346,11 +389,13 @@ PRIVATE int debug_shell_start_session(struct debug_shell_connection *conn)
   if (tty == 0)
     return -1;
 
+  conn->start_in_progress = TRUE;
   tty_set_winsize(tty, DEBUG_SHELL_WINSIZE_COLS, DEBUG_SHELL_WINSIZE_ROWS);
   shell_argv[0] = "eshell";
   shell_argv[1] = 0;
   pid = kernel_execve_tty("/usr/bin/eshell", shell_argv, tty);
   if (pid < 0) {
+    conn->start_in_progress = FALSE;
     tty_release(tty);
     return -1;
   }
@@ -358,9 +403,11 @@ PRIVATE int debug_shell_start_session(struct debug_shell_connection *conn)
   conn->tty = tty;
   conn->shell_pid = pid;
   conn->authenticated = TRUE;
+  conn->start_pending = FALSE;
+  conn->start_in_progress = FALSE;
   conn->last_activity_tick = kernel_tick;
   debug_shell_audit_start(conn->peer_addr, pid);
-  kern_send(conn->fd, "OK shell\n", 9, 0);
+  debug_shell_queue_response(conn, "OK shell\n");
   return 0;
 }
 
@@ -402,6 +449,8 @@ PRIVATE void debug_shell_accept_pending_connections(void)
     debug_shell_conn.last_activity_tick = kernel_tick;
     debug_shell_conn.length = 0;
     debug_shell_conn.authenticated = FALSE;
+    debug_shell_conn.start_pending = FALSE;
+    debug_shell_conn.start_in_progress = FALSE;
     debug_shell_conn.closing = FALSE;
     debug_shell_conn.tty = 0;
     debug_shell_conn.shell_pid = -1;
@@ -442,17 +491,17 @@ PRIVATE void debug_shell_handle_preface(struct debug_shell_connection *conn)
   /* 最小 bridge として、upgrade 後の同一 packet 残り入力は後回しにする。 */
   conn->length = 0;
   conn->buffer[0] = '\0';
-  if (debug_shell_start_session(conn) < 0) {
-    debug_shell_audit_peer("debug_shell_spawn_failed", conn->peer_addr);
-    debug_shell_send_and_close(conn, "ERR unavailable\n");
-    return;
-  }
+  conn->start_pending = TRUE;
+  conn->last_activity_tick = kernel_tick;
 }
 
 PRIVATE void debug_shell_pump_socket_to_tty(struct debug_shell_connection *conn)
 {
   char chunk[DEBUG_SHELL_IO_CHUNK];
   int read_len;
+
+  if (conn->start_pending || conn->start_in_progress)
+    return;
 
   for (;;) {
     disableInterrupt();
@@ -529,6 +578,19 @@ PRIVATE void debug_shell_poll_connection(struct debug_shell_connection *conn)
     return;
   }
 
+  if (conn->start_in_progress)
+    return;
+
+  if (conn->start_pending) {
+    if (debug_shell_start_session(conn) < 0) {
+      debug_shell_audit_peer("debug_shell_spawn_failed", conn->peer_addr);
+      conn->start_pending = FALSE;
+      conn->start_in_progress = FALSE;
+      debug_shell_send_and_close(conn, "ERR unavailable\n");
+    }
+    return;
+  }
+
   debug_shell_pump_socket_to_tty(conn);
   if (conn->closing)
     return;
@@ -540,6 +602,8 @@ PUBLIC void debug_shell_server_init(void)
   debug_shell_listener_fd = -1;
   debug_shell_listener_port = 0;
   debug_shell_reset_connection(&debug_shell_conn);
+  debug_shell_cleanup_tty = 0;
+  debug_shell_cleanup_pid = -1;
 }
 
 PUBLIC void debug_shell_server_tick(void)
@@ -562,6 +626,7 @@ PUBLIC void debug_shell_server_tick(void)
       return;
   }
 
+  debug_shell_poll_cleanup();
   debug_shell_accept_pending_connections();
   debug_shell_poll_connection(&debug_shell_conn);
 }

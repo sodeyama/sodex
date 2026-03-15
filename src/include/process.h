@@ -18,6 +18,7 @@ struct tty;
 
 #define PROC_STACK  0xC0000000
 #define PROC_STACK_SIZE 0x4000
+#define PROC_KERNEL_STACK_PAGES 4
 
 #define PROC_LEN_FILENAME 32
 
@@ -152,8 +153,10 @@ PUBLIC int sys_waitpid(pid_t pid, int *status, int options);
 PUBLIC void sleep_on(struct wait_queue **wq);
 PUBLIC void sleep_on_timeout(struct wait_queue **wq, u_int32_t ticks);
 PUBLIC void wakeup(struct wait_queue **wq);
+PUBLIC int process_has_pid(pid_t pid);
 
 PUBLIC volatile u_int32_t kernel_tick;
+PUBLIC volatile int process_in_timer_interrupt;
 
 #define SAME_PRIVILEGE 0
 #define OUTER_PRIVILEGE 1

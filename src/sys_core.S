@@ -352,7 +352,6 @@ switch_to_outer_privilege:
         movl    NEXT_EDI(%ebp), %edi
         movl    NEXT_EAX(%ebp), %eax        
         movl    NEXT_EBP(%ebp), %ebp
-        sti
         iret
 
 /* 
@@ -426,7 +425,6 @@ switch_to_same_privilege:
         movl    NEXT_EDI(%ebp), %edi
         movl    NEXT_EAX(%ebp), %eax        
         movl    NEXT_EBP(%ebp), %ebp
-        sti
         iret
 
         

@@ -11,9 +11,10 @@
  */
         
 BOOTSEG          = 0x07C0
-INITSEG          = 0x9000
+INITSEG          = 0x9800
 KERNEL_SEG       = 0x0100       
-KERNEL_STACK_SEG = 0x8000
+KERNEL_STACK_SEG = 0x9000
+KERNEL_STACK_PTR = 0x8000
 
 READ_MAX_SECTS   = 0x40
 
@@ -57,7 +58,7 @@ next:
         movw    %ax, %ds
         movw    $KERNEL_STACK_SEG, %ax
         movw    %ax, %ss
-        xorw    %sp, %sp
+        movw    $KERNEL_STACK_PTR, %sp
         
         movb    (drive), %dl
         cmp     $0x80, %dl
@@ -71,7 +72,7 @@ next:
         movl    $64 , (lba)
         movw    $4, (sector_nums)
         movw    $INITSEG, (buf_segment)
-        movw    $0x200, (buf_offset)        
+        movw    $0x400, (buf_offset)        
         call    read_disk
         print   $read_success
 
@@ -83,7 +84,7 @@ next:
         call    read_disk
         print   $read_success
         
-        ljmp    $0x9000, $0x0200        
+        ljmp    $INITSEG, $0x0400        
 
 read_disk:
         movw    (sector_nums), %cx

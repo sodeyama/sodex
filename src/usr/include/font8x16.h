@@ -3,7 +3,7 @@
 
 #include <font_default.h>
 
-static inline const unsigned char *font8x16_glyph(unsigned char ch)
+static inline const unsigned int *font8x16_glyph(unsigned char ch)
 {
   return font_default_narrow_glyph(ch);
 }

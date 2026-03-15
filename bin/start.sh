@@ -104,6 +104,7 @@ SSH_HOSTFWD_OPTS=""
 if [ "$ENABLE_SSH" -eq 1 ]; then
   SSH_HOSTFWD_OPTS=",hostfwd=tcp:$HOST_BIND_ADDR:$HOST_SSH_PORT-10.0.2.15:$GUEST_SSH_PORT"
 fi
+QEMU_DISPLAY="${QEMU_DISPLAY:-cocoa,zoom-to-fit=off}"
 
 case "$MODE" in
   server)
@@ -120,7 +121,7 @@ case "$MODE" in
         $COMMON_ACCEL_OPTS \
         -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \
-        -display cocoa
+        -display "$QEMU_DISPLAY"
     ;;
   server-headless)
     echo "=== headless server mode with hostfwd ==="
@@ -158,7 +159,7 @@ case "$MODE" in
         $COMMON_ACCEL_OPTS \
         -netdev vmnet-shared,id=net0,start-address=10.0.2.1,end-address=10.0.2.254,subnet-mask=255.255.255.0 \
         $NIC_OPTS \
-        -display cocoa
+        -display "$QEMU_DISPLAY"
     ;;
   *)
     echo "=== user net mode ==="
@@ -174,6 +175,6 @@ case "$MODE" in
         $COMMON_ACCEL_OPTS \
         -netdev user,id=net0$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \
-        -display cocoa
+        -display "$QEMU_DISPLAY"
     ;;
 esac

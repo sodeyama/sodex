@@ -212,7 +212,7 @@ def main() -> int:
         admin = send_admin("NOPE\n")
         assert_contains(admin, "ERR invalid_command", "admin invalid")
 
-        admin = send_admin(f"TOKEN {STATUS_TOKEN} LOG TAIL 5\n")
+        admin = send_admin(f"TOKEN {STATUS_TOKEN} LOG TAIL 32\n")
         assert_contains(admin, "agent_start", "admin log tail")
         assert_contains(admin, "server_runtime_ready", "admin ready log tail")
 

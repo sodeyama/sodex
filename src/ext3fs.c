@@ -63,6 +63,7 @@ PRIVATE void ext3_mark_block_dirty(u_int32_t iblock, char *block);
 PRIVATE int ext3_padded_name_len(int len);
 PRIVATE void ext3_write_dirent(char *dst, ext3_dentry *dentry, u_int16_t rec_len);
 PRIVATE void ext3_rebuild_dirblock(ext3_dentry *parent);
+PRIVATE u_int32_t* ext3_load_block_table(u_int32_t iblock);
 PRIVATE int ext3_inode_get_block(ext3_inode *inode, int lblock);
 PRIVATE int ext3_inode_ensure_block(ext3_dentry *dentry, int lblock);
 PRIVATE void ext3_free_block(u_int32_t block);
@@ -408,6 +409,23 @@ PRIVATE void ext3_rebuild_dirblock(ext3_dentry *parent)
   ext3_mark_block_dirty(parent->d_inode->i_block[0], parent->d_dirblock);
 }
 
+PRIVATE u_int32_t* ext3_load_block_table(u_int32_t iblock)
+{
+  u_int32_t *table;
+
+  if (iblock == 0)
+    return NULL;
+
+  table = kalloc(BLOCK_SIZE);
+  if (table == NULL) {
+    _kprintf("%s kalloc error\n", __func__);
+    return NULL;
+  }
+  rawdev.raw_read(iblock * BLOCK_SIZE / FDC_SECTOR_SIZE,
+                  BLOCK_SIZE / FDC_SECTOR_SIZE, table);
+  return table;
+}
+
 PRIVATE int ext3_inode_get_block(ext3_inode *inode, int lblock)
 {
   int real_block = 0;
@@ -419,23 +437,47 @@ PRIVATE int ext3_inode_get_block(ext3_inode *inode, int lblock)
     return inode->i_block[lblock];
   if (lblock <= BLOCK_FIRST_STAGE) {
     u_int32_t *table;
-    int first_stage = inode->i_block[BLOCK_ZERO_STAGE + 1];
+    int first_stage = inode->i_block[EXT3_IND_BLOCK];
 
     if (first_stage == 0)
       return 0;
-    table = kalloc(BLOCK_SIZE);
+    table = ext3_load_block_table((u_int32_t)first_stage);
     if (table == NULL) {
-      _kprintf("%s kalloc error\n", __func__);
       return 0;
     }
-    rawdev.raw_read(first_stage * BLOCK_SIZE / FDC_SECTOR_SIZE,
-                    BLOCK_SIZE / FDC_SECTOR_SIZE, table);
     real_block = table[lblock - BLOCK_ZERO_STAGE - 1];
     kfree(table);
     return real_block;
   }
+  if (lblock <= BLOCK_SECOND_STAGE) {
+    u_int32_t *table;
+    u_int32_t *leaf;
+    u_int32_t leaf_block;
+    int table_index;
+    int leaf_index;
+    int second_stage = inode->i_block[EXT3_DIND_BLOCK];
+    int offset = lblock - BLOCK_FIRST_STAGE - 1;
 
-  _kputs("We don't implement the second stage of i_blocks");
+    if (second_stage == 0)
+      return 0;
+    table = ext3_load_block_table((u_int32_t)second_stage);
+    if (table == NULL)
+      return 0;
+    table_index = offset / EXT3_PTRS_PER_BLOCK;
+    leaf_index = offset % EXT3_PTRS_PER_BLOCK;
+    leaf_block = table[table_index];
+    kfree(table);
+    if (leaf_block == 0)
+      return 0;
+    leaf = ext3_load_block_table(leaf_block);
+    if (leaf == NULL)
+      return 0;
+    real_block = leaf[leaf_index];
+    kfree(leaf);
+    return real_block;
+  }
+
+  _kputs("We don't implement the third stage of i_blocks");
   return 0;
 }
 
@@ -457,39 +499,111 @@ PRIVATE int ext3_inode_ensure_block(ext3_dentry *dentry, int lblock)
   if (lblock <= BLOCK_FIRST_STAGE) {
     u_int32_t *table;
     int entry = lblock - BLOCK_ZERO_STAGE - 1;
+    int table_block;
+    int table_dirty = FALSE;
+    int resolved_block;
 
-    if (inode->i_block[BLOCK_ZERO_STAGE + 1] == 0) {
-      int first_stage = __alloc_block();
-      char *blank = kalloc(BLOCK_SIZE);
+    table_block = inode->i_block[EXT3_IND_BLOCK];
+    if (table_block == 0) {
+      table = kalloc(BLOCK_SIZE);
 
-      if (blank == NULL) {
+      if (table == NULL) {
         _kprintf("%s kalloc error\n", __func__);
         return 0;
       }
-      memset(blank, 0, BLOCK_SIZE);
-      inode->i_block[BLOCK_ZERO_STAGE + 1] = first_stage;
+      memset((char*)table, 0, BLOCK_SIZE);
+      table_block = __alloc_block();
+      inode->i_block[EXT3_IND_BLOCK] = table_block;
       ext3_mark_inode_dirty(dentry);
-      ext3_mark_block_dirty(first_stage, blank);
+      table_dirty = TRUE;
+    } else {
+      table = ext3_load_block_table((u_int32_t)table_block);
+      if (table == NULL)
+        return 0;
     }
-
-    table = kalloc(BLOCK_SIZE);
-    if (table == NULL) {
-      _kprintf("%s kalloc error\n", __func__);
-      return 0;
-    }
-    rawdev.raw_read(inode->i_block[BLOCK_ZERO_STAGE + 1] * BLOCK_SIZE / FDC_SECTOR_SIZE,
-                    BLOCK_SIZE / FDC_SECTOR_SIZE, table);
     if (table[entry] == 0) {
       table[entry] = __alloc_block();
-      ext3_mark_block_dirty(inode->i_block[BLOCK_ZERO_STAGE + 1], (char*)table);
-    } else {
-      kfree(table);
+      table_dirty = TRUE;
     }
-    if (table[entry] != 0)
-      return table[entry];
+    resolved_block = table[entry];
+    if (table_dirty)
+      ext3_mark_block_dirty((u_int32_t)table_block, (char*)table);
+    else
+      kfree(table);
+    if (resolved_block != 0)
+      return resolved_block;
+  }
+  if (lblock <= BLOCK_SECOND_STAGE) {
+    u_int32_t *table;
+    u_int32_t *leaf;
+    u_int32_t leaf_block;
+    int offset = lblock - BLOCK_FIRST_STAGE - 1;
+    int table_index = offset / EXT3_PTRS_PER_BLOCK;
+    int leaf_index = offset % EXT3_PTRS_PER_BLOCK;
+    int table_block = inode->i_block[EXT3_DIND_BLOCK];
+    int table_dirty = FALSE;
+    int leaf_dirty = FALSE;
+    int resolved_block;
+
+    if (table_block == 0) {
+      table = kalloc(BLOCK_SIZE);
+      if (table == NULL) {
+        _kprintf("%s kalloc error\n", __func__);
+        return 0;
+      }
+      memset((char*)table, 0, BLOCK_SIZE);
+      table_block = __alloc_block();
+      inode->i_block[EXT3_DIND_BLOCK] = table_block;
+      ext3_mark_inode_dirty(dentry);
+      table_dirty = TRUE;
+    } else {
+      table = ext3_load_block_table((u_int32_t)table_block);
+      if (table == NULL)
+        return 0;
+    }
+
+    leaf_block = table[table_index];
+    if (leaf_block == 0) {
+      leaf = kalloc(BLOCK_SIZE);
+      if (leaf == NULL) {
+        _kprintf("%s kalloc error\n", __func__);
+        if (table_dirty == FALSE)
+          kfree(table);
+        return 0;
+      }
+      memset((char*)leaf, 0, BLOCK_SIZE);
+      leaf_block = __alloc_block();
+      table[table_index] = leaf_block;
+      table_dirty = TRUE;
+      leaf_dirty = TRUE;
+    } else {
+      leaf = ext3_load_block_table(leaf_block);
+      if (leaf == NULL) {
+        if (table_dirty == FALSE)
+          kfree(table);
+        return 0;
+      }
+    }
+
+    if (leaf[leaf_index] == 0) {
+      leaf[leaf_index] = __alloc_block();
+      leaf_dirty = TRUE;
+    }
+    resolved_block = leaf[leaf_index];
+
+    if (table_dirty)
+      ext3_mark_block_dirty((u_int32_t)table_block, (char*)table);
+    else
+      kfree(table);
+    if (leaf_dirty)
+      ext3_mark_block_dirty(leaf_block, (char*)leaf);
+    else
+      kfree(leaf);
+    if (resolved_block != 0)
+      return resolved_block;
   }
 
-  _kputs("We don't implement the second stage of i_blocks");
+  _kputs("We don't implement the third stage of i_blocks");
   return 0;
 }
 
@@ -523,22 +637,51 @@ PRIVATE void ext3_release_inode_blocks(ext3_dentry *dentry)
       inode->i_block[i] = 0;
     }
   }
-  if (inode->i_block[BLOCK_ZERO_STAGE + 1] != 0) {
+  if (inode->i_block[EXT3_IND_BLOCK] != 0) {
     u_int32_t *table = kalloc(BLOCK_SIZE);
 
     if (table == NULL) {
       _kprintf("%s kalloc error\n", __func__);
       return;
     }
-    rawdev.raw_read(inode->i_block[BLOCK_ZERO_STAGE + 1] * BLOCK_SIZE / FDC_SECTOR_SIZE,
+    rawdev.raw_read(inode->i_block[EXT3_IND_BLOCK] * BLOCK_SIZE / FDC_SECTOR_SIZE,
                     BLOCK_SIZE / FDC_SECTOR_SIZE, table);
     for (i = 0; i < BLOCK_SIZE / 4; i++) {
       if (table[i] != 0)
         ext3_free_block(table[i]);
     }
     kfree(table);
-    ext3_free_block(inode->i_block[BLOCK_ZERO_STAGE + 1]);
-    inode->i_block[BLOCK_ZERO_STAGE + 1] = 0;
+    ext3_free_block(inode->i_block[EXT3_IND_BLOCK]);
+    inode->i_block[EXT3_IND_BLOCK] = 0;
+  }
+  if (inode->i_block[EXT3_DIND_BLOCK] != 0) {
+    u_int32_t *table = ext3_load_block_table(inode->i_block[EXT3_DIND_BLOCK]);
+
+    if (table == NULL) {
+      _kprintf("%s kalloc error\n", __func__);
+      return;
+    }
+    for (i = 0; i < EXT3_PTRS_PER_BLOCK; i++) {
+      if (table[i] != 0) {
+        u_int32_t *leaf = ext3_load_block_table(table[i]);
+        int j;
+
+        if (leaf == NULL) {
+          _kprintf("%s kalloc error\n", __func__);
+          kfree(table);
+          return;
+        }
+        for (j = 0; j < EXT3_PTRS_PER_BLOCK; j++) {
+          if (leaf[j] != 0)
+            ext3_free_block(leaf[j]);
+        }
+        kfree(leaf);
+        ext3_free_block(table[i]);
+      }
+    }
+    kfree(table);
+    ext3_free_block(inode->i_block[EXT3_DIND_BLOCK]);
+    inode->i_block[EXT3_DIND_BLOCK] = 0;
   }
   inode->i_size = 0;
   inode->i_blocks = 0;

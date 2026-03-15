@@ -11,6 +11,9 @@ void ime_cancel_conversion(struct ime_state *state);
 const char *ime_current_candidate(const struct ime_state *state);
 int ime_candidate_count(const struct ime_state *state);
 int ime_candidate_index(const struct ime_state *state);
+int ime_candidate_page_start(const struct ime_state *state);
+int ime_candidate_page_count(const struct ime_state *state);
+int ime_candidate_page_index(const struct ime_state *state);
 int ime_commit_conversion(struct ime_state *state, char *out, int out_cap,
                           int *replace_chars);
 

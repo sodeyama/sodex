@@ -24,6 +24,7 @@
 #define TERM_IME_STATUS_COLS 16
 #define TERM_IME_CONVERSION_COLS 40
 #define TERM_IME_OVERLAY_MAX_CELLS 96
+#define TERM_IME_OVERLAY_MARGIN_COLS 1
 #define TERM_IME_TARGET_FG TERM_COLOR_WHITE
 #define TERM_IME_TARGET_BG TERM_COLOR_RED
 #define TERM_IME_READING_FG TERM_COLOR_BLACK
@@ -59,8 +60,11 @@ struct term_app {
   int master_fd;
   int use_framebuffer;
   int cursor_valid;
+  int ime_overlay_valid;
   int last_cursor_col;
   int last_cursor_row;
+  int last_ime_overlay_width;
+  int last_ime_overlay_start_col;
   int last_scroll_count;
   u_int32_t long_output_base;
   struct fb_info fb;
@@ -72,6 +76,7 @@ struct term_app {
   int scroll_head;
   int scroll_len;
   struct ime_state ime;
+  struct term_cell last_ime_overlay_cells[TERM_IME_OVERLAY_MAX_CELLS];
 };
 
 PRIVATE struct term_app term_state;
@@ -99,11 +104,16 @@ PRIVATE int flush_ime(struct term_app *app, char *buf, int len);
 PRIVATE enum term_ime_action ime_action_for_event(const struct ime_state *ime,
                                                   const struct key_event *event);
 PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action);
-PRIVATE void render_ime_overlay(struct term_app *app);
+PRIVATE void render_ime_overlay(struct term_app *app, int force);
 PRIVATE void render_conversion_target(struct term_app *app);
 PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap);
 PRIVATE int build_ime_overlay_cells(struct term_app *app,
                                     struct term_cell *cells, int cap);
+PRIVATE int ime_overlay_cells_equal(const struct term_cell *a,
+                                    const struct term_cell *b, int len);
+PRIVATE int ime_overlay_region_needs_redraw(const struct term_app *app,
+                                            int start_col, int width,
+                                            int force);
 PRIVATE int utf8_display_width(const char *text);
 PRIVATE int append_overlay_ascii(struct term_cell *cells, int len, int cap,
                                  const char *text,
@@ -200,6 +210,9 @@ PRIVATE int term_init(struct term_app *app)
   app->scroll_head = 0;
   app->scroll_len = 0;
   app->cursor_valid = 0;
+  app->ime_overlay_valid = 0;
+  app->last_ime_overlay_width = 0;
+  app->last_ime_overlay_start_col = 0;
   app->last_scroll_count = 0;
   app->long_output_base = 0;
   ime_init(&app->ime);
@@ -249,6 +262,9 @@ PRIVATE int sync_viewport(struct term_app *app)
   if (terminal_surface_resize(&app->surface, cols, rows, &blank) < 0)
     return 0;
 
+  app->ime_overlay_valid = 0;
+  app->last_ime_overlay_width = 0;
+  app->last_ime_overlay_start_col = 0;
   if (app->use_framebuffer == 0)
     console_clear();
   replay_scrollback(app);
@@ -531,7 +547,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
     app->last_cursor_col = app->surface.cursor_col;
     app->last_cursor_row = app->surface.cursor_row;
     app->cursor_valid = 1;
-    render_ime_overlay(app);
+    render_ime_overlay(app, force);
     app->metrics.render_cells += rendered;
     if (force != FALSE || dirty_before == total_cells)
       app->metrics.full_redraws++;
@@ -592,7 +608,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
     emit_metric(app, "full_redraw", 0, rendered);
   terminal_surface_clear_damage(&app->surface);
   render_conversion_target(app);
-  render_ime_overlay(app);
+  render_ime_overlay(app, force);
   console_set_cursor(app->surface.cursor_col, app->surface.cursor_row);
 }
 
@@ -834,13 +850,19 @@ PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action
   }
 }
 
-PRIVATE void render_ime_overlay(struct term_app *app)
+PRIVATE void render_ime_overlay(struct term_app *app, int force)
 {
   struct term_cell cell;
   struct term_cell cells[TERM_IME_OVERLAY_MAX_CELLS];
   char text[TERM_IME_STATUS_COLS + 1];
+  int clear_start_col;
+  int clear_width;
+  int overlay_start_col;
+  int overlay_width;
+  int right_edge_col;
   int width;
   int start_col;
+  int needs_redraw;
   int i;
   int text_len;
   int cell_len;
@@ -852,38 +874,118 @@ PRIVATE void render_ime_overlay(struct term_app *app)
   cell.fg = TERM_COLOR_BLACK;
   cell.bg = TERM_COLOR_LIGHT_GRAY;
   cell.width = 1;
+  right_edge_col = app->surface.cols - TERM_IME_OVERLAY_MARGIN_COLS;
+  if (right_edge_col <= 0)
+    right_edge_col = app->surface.cols;
 
   if (app->use_framebuffer != 0) {
     cell_len = build_ime_overlay_cells(app, cells, TERM_IME_OVERLAY_MAX_CELLS);
-    width = TERM_IME_STATUS_COLS;
+    overlay_width = TERM_IME_STATUS_COLS;
     if (ime_conversion_active(&app->ime) != 0)
-      width = TERM_IME_CONVERSION_COLS;
-    if (cell_len > width)
-      width = cell_len;
-    if (width > app->surface.cols)
-      width = app->surface.cols;
-    start_col = app->surface.cols - width;
-    for (i = 0; i < width; i++) {
-      if (i < cell_len)
-        cell_renderer_draw_cell(&app->renderer, start_col + i, 0,
-                                &cells[i], FALSE);
-      else
-        cell_renderer_draw_cell(&app->renderer, start_col + i, 0,
-                                &cell, FALSE);
+      overlay_width = TERM_IME_CONVERSION_COLS;
+    if (cell_len > overlay_width)
+      overlay_width = cell_len;
+    if (overlay_width > right_edge_col)
+      overlay_width = right_edge_col;
+    clear_width = overlay_width;
+    if (app->last_ime_overlay_width > clear_width)
+      clear_width = app->last_ime_overlay_width;
+    if (clear_width > right_edge_col)
+      clear_width = right_edge_col;
+    clear_start_col = right_edge_col - clear_width;
+    overlay_start_col = right_edge_col - overlay_width;
+    needs_redraw = force != FALSE ||
+                   app->ime_overlay_valid == 0 ||
+                   app->last_ime_overlay_width != overlay_width ||
+                   app->last_ime_overlay_start_col != overlay_start_col ||
+                   ime_overlay_region_needs_redraw(app, clear_start_col,
+                                                   clear_width, force) != 0 ||
+                   ime_overlay_cells_equal(cells, app->last_ime_overlay_cells,
+                                           overlay_width) == 0;
+    if (needs_redraw == 0)
+      return;
+    for (i = 0; i < clear_width; i++) {
+      cell_renderer_draw_cell(&app->renderer, clear_start_col + i, 0,
+                              &cell, FALSE);
     }
+    for (i = 0; i < overlay_width && i < cell_len; i++) {
+      if ((cells[i].attr & TERM_ATTR_CONTINUATION) != 0)
+        continue;
+      cell_renderer_draw_cell(&app->renderer, overlay_start_col + i, 0,
+                              &cells[i], FALSE);
+    }
+    memcpy(app->last_ime_overlay_cells, cells,
+           sizeof(struct term_cell) * (size_t)overlay_width);
+    app->ime_overlay_valid = 1;
+    app->last_ime_overlay_width = overlay_width;
+    app->last_ime_overlay_start_col = overlay_start_col;
     return;
   }
 
   build_ime_overlay_text(app, text, sizeof(text));
   width = TERM_IME_STATUS_COLS;
-  if (width > app->surface.cols)
-    width = app->surface.cols;
-  start_col = app->surface.cols - width;
+  if (width > right_edge_col)
+    width = right_edge_col;
+  clear_width = width;
+  if (app->last_ime_overlay_width > clear_width)
+    clear_width = app->last_ime_overlay_width;
+  if (clear_width > right_edge_col)
+    clear_width = right_edge_col;
+  clear_start_col = right_edge_col - clear_width;
+  start_col = right_edge_col - width;
+  for (i = 0; i < clear_width; i++)
+    console_putc_at(clear_start_col + i, 0, render_color(&cell), ' ');
   text_len = (int)strlen(text);
   for (i = 0; i < width; i++) {
     char ch = (i < text_len) ? text[i] : ' ';
     console_putc_at(start_col + i, 0, render_color(&cell), ch);
   }
+  app->last_ime_overlay_width = width;
+}
+
+PRIVATE int ime_overlay_cells_equal(const struct term_cell *a,
+                                    const struct term_cell *b, int len)
+{
+  int i;
+
+  if (a == NULL || b == NULL || len < 0)
+    return FALSE;
+  for (i = 0; i < len; i++) {
+    if (a[i].ch != b[i].ch || a[i].fg != b[i].fg || a[i].bg != b[i].bg ||
+        a[i].attr != b[i].attr || a[i].width != b[i].width)
+      return FALSE;
+  }
+  return TRUE;
+}
+
+PRIVATE int ime_overlay_region_needs_redraw(const struct term_app *app,
+                                            int start_col, int width,
+                                            int force)
+{
+  int end_col;
+  int col;
+
+  if (app == NULL || width <= 0)
+    return TRUE;
+  if (force != FALSE)
+    return TRUE;
+
+  end_col = start_col + width;
+  if (app->surface.cursor_row == 0 &&
+      app->surface.cursor_col >= start_col &&
+      app->surface.cursor_col < end_col)
+    return TRUE;
+  if (app->cursor_valid != 0 &&
+      app->last_cursor_row == 0 &&
+      app->last_cursor_col >= start_col &&
+      app->last_cursor_col < end_col)
+    return TRUE;
+
+  for (col = start_col; col < end_col; col++) {
+    if (terminal_surface_is_dirty(&app->surface, col, 0) != FALSE)
+      return TRUE;
+  }
+  return FALSE;
 }
 
 PRIVATE void render_conversion_target(struct term_app *app)
@@ -946,9 +1048,14 @@ PRIVATE int build_ime_overlay_cells(struct term_app *app,
 {
   const char *mode;
   const char *reading;
+  char *p;
   int i;
   int len = 0;
-  char count[8];
+  int page_end;
+  int page_start;
+  int page_total;
+  char count[24];
+  char page[24];
 
   if (app == NULL || cells == NULL || cap <= 0)
     return 0;
@@ -976,16 +1083,29 @@ PRIVATE int build_ime_overlay_cells(struct term_app *app,
     return len;
   }
 
-  count[0] = '\0';
-  count[0] = (char)('0' + ((ime_candidate_index(&app->ime) + 1) % 10));
-  count[1] = '/';
-  count[2] = (char)('0' + (ime_candidate_count(&app->ime) % 10));
-  count[3] = '\0';
+  p = count;
+  p = metric_append_uint(p, (u_int32_t)(ime_candidate_index(&app->ime) + 1));
+  *p++ = '/';
+  p = metric_append_uint(p, (u_int32_t)ime_candidate_count(&app->ime));
+  *p = '\0';
 
   len = append_overlay_ascii(cells, len, cap, " ",
                              TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
   len = append_overlay_ascii(cells, len, cap, count,
                              TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+  page_total = ime_candidate_page_count(&app->ime);
+  if (page_total > 1) {
+    p = page;
+    *p++ = ' ';
+    *p++ = 'P';
+    p = metric_append_uint(p,
+                           (u_int32_t)(ime_candidate_page_index(&app->ime) + 1));
+    *p++ = '/';
+    p = metric_append_uint(p, (u_int32_t)page_total);
+    *p = '\0';
+    len = append_overlay_ascii(cells, len, cap, page,
+                               TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+  }
   reading = ime_reading(&app->ime);
   if (reading[0] != '\0') {
     len = append_overlay_ascii(cells, len, cap, " [",
@@ -995,11 +1115,15 @@ PRIVATE int build_ime_overlay_cells(struct term_app *app,
     len = append_overlay_ascii(cells, len, cap, "]",
                                TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
   }
-  for (i = 0; i < ime_candidate_count(&app->ime); i++) {
+  page_start = ime_candidate_page_start(&app->ime);
+  page_end = page_start + IME_CANDIDATE_PAGE_SIZE;
+  if (page_end > ime_candidate_count(&app->ime))
+    page_end = ime_candidate_count(&app->ime);
+  for (i = page_start; i < page_end; i++) {
     unsigned char fg = TERM_COLOR_BLACK;
     unsigned char bg = TERM_COLOR_LIGHT_GRAY;
 
-    if (i == 0)
+    if (i == page_start)
       len = append_overlay_ascii(cells, len, cap, " ",
                                  TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
     else
@@ -1128,6 +1252,8 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
   const char *mode;
   const char *preedit;
   const char *candidate;
+  char info[24];
+  char *p;
   int pos = 0;
   int tail_len;
   int selected;
@@ -1154,16 +1280,28 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
   if (ime_conversion_active(&app->ime) != 0) {
     selected = ime_candidate_index(&app->ime) + 1;
     total = ime_candidate_count(&app->ime);
-    if (pos < cap - 1)
-      text[pos++] = ' ';
-    if (pos < cap - 1)
-      text[pos++] = 'C';
-    if (pos < cap - 1)
-      text[pos++] = (char)('0' + (selected % 10));
-    if (pos < cap - 1)
-      text[pos++] = '/';
-    if (pos < cap - 1)
-      text[pos++] = (char)('0' + (total % 10));
+    p = info;
+    *p++ = ' ';
+    *p++ = 'C';
+    p = metric_append_uint(p, (u_int32_t)selected);
+    *p++ = '/';
+    p = metric_append_uint(p, (u_int32_t)total);
+    if (ime_candidate_page_count(&app->ime) > 1) {
+      *p++ = ' ';
+      *p++ = 'P';
+      p = metric_append_uint(p,
+                             (u_int32_t)(ime_candidate_page_index(&app->ime) + 1));
+      *p++ = '/';
+      p = metric_append_uint(p, (u_int32_t)ime_candidate_page_count(&app->ime));
+    }
+    *p = '\0';
+    tail_len = (int)strlen(info);
+    if (tail_len > cap - 1 - pos)
+      tail_len = cap - 1 - pos;
+    if (tail_len > 0) {
+      memcpy(text + pos, info, (size_t)tail_len);
+      pos += tail_len;
+    }
     if (candidate[0] != '\0' && pos < cap - 2) {
       text[pos++] = ' ';
       while (*candidate != '\0' && pos < cap - 1) {

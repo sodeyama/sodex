@@ -5,12 +5,12 @@
 TEST(init_computes_grid_size) {
     struct cell_renderer renderer;
     struct fb_info info;
-    u_int32_t pixels[16 * 32];
+    u_int32_t pixels[24 * 48];
 
     info.available = 1;
-    info.width = 16;
-    info.height = 32;
-    info.pitch = 16 * 4;
+    info.width = font_default_cell_width() * 2;
+    info.height = font_default_cell_height() * 2;
+    info.pitch = info.width * 4;
     info.bpp = 32;
     info.size = sizeof(pixels);
     info.base = pixels;
@@ -24,18 +24,20 @@ TEST(draw_cell_paints_foreground_and_background) {
     struct cell_renderer renderer;
     struct fb_info info;
     struct term_cell cell;
-    u_int32_t pixels[8 * 16];
+    u_int32_t pixels[24 * 48];
     int i;
+    int pixel_count;
     int saw_fg = 0;
     int saw_bg = 0;
 
     info.available = 1;
-    info.width = 8;
-    info.height = 16;
-    info.pitch = 8 * 4;
+    info.width = font_default_cell_width();
+    info.height = font_default_cell_height();
+    info.pitch = info.width * 4;
     info.bpp = 32;
     info.size = sizeof(pixels);
     info.base = pixels;
+    pixel_count = info.width * info.height;
 
     ASSERT_EQ(cell_renderer_init(&renderer, &info), 0);
     cell.ch = 'A';
@@ -45,7 +47,7 @@ TEST(draw_cell_paints_foreground_and_background) {
     cell.width = 1;
     cell_renderer_draw_cell(&renderer, 0, 0, &cell, 0);
 
-    for (i = 0; i < (int)(sizeof(pixels) / sizeof(pixels[0])); i++) {
+    for (i = 0; i < pixel_count; i++) {
         if (pixels[i] == 0x00aa00)
             saw_fg = 1;
         if (pixels[i] == 0x000000)
@@ -60,16 +62,18 @@ TEST(cursor_swaps_foreground_and_background) {
     struct cell_renderer renderer;
     struct fb_info info;
     struct term_cell cell;
-    u_int32_t pixels[8 * 16];
+    u_int32_t pixels[24 * 48];
     int i;
+    int pixel_count;
 
     info.available = 1;
-    info.width = 8;
-    info.height = 16;
-    info.pitch = 8 * 4;
+    info.width = font_default_cell_width();
+    info.height = font_default_cell_height();
+    info.pitch = info.width * 4;
     info.bpp = 32;
     info.size = sizeof(pixels);
     info.base = pixels;
+    pixel_count = info.width * info.height;
 
     ASSERT_EQ(cell_renderer_init(&renderer, &info), 0);
     cell.ch = ' ';
@@ -79,7 +83,7 @@ TEST(cursor_swaps_foreground_and_background) {
     cell.width = 1;
     cell_renderer_draw_cell(&renderer, 0, 0, &cell, 1);
 
-    for (i = 0; i < (int)(sizeof(pixels) / sizeof(pixels[0])); i++) {
+    for (i = 0; i < pixel_count; i++) {
         ASSERT_EQ(pixels[i], 0xffffff);
     }
 }
@@ -88,22 +92,24 @@ TEST(draws_wide_utf8_glyph_from_font_pack) {
     struct cell_renderer renderer;
     struct fb_info info;
     struct term_cell cell;
-    u_int32_t pixels[16 * 32];
+    u_int32_t pixels[24 * 48];
     const unsigned int *glyph;
     int i;
+    int pixel_count;
     int saw_fg = 0;
 
     info.available = 1;
-    info.width = 16;
-    info.height = 16;
-    info.pitch = 16 * 4;
+    info.width = font_default_pixels_for_cells(2);
+    info.height = font_default_cell_height();
+    info.pitch = info.width * 4;
     info.bpp = 32;
     info.size = sizeof(pixels);
     info.base = pixels;
+    pixel_count = info.width * info.height;
 
     glyph = font16x16_glyph(0x3042);
     ASSERT_NOT_NULL(glyph);
-    ASSERT_EQ(glyph[3], 0x0600);
+    ASSERT(glyph[3] != 0 || glyph[4] != 0);
 
     ASSERT_EQ(cell_renderer_init(&renderer, &info), 0);
     cell.ch = 0x3042;
@@ -114,7 +120,7 @@ TEST(draws_wide_utf8_glyph_from_font_pack) {
     cell_renderer_draw_cell(&renderer, 0, 0, &cell, 0);
 
     ASSERT_EQ(pixels[0], 0x000000);
-    for (i = 0; i < (int)(sizeof(pixels) / sizeof(pixels[0])); i++) {
+    for (i = 0; i < pixel_count; i++) {
         if (pixels[i] == 0x00aa00)
             saw_fg = 1;
     }

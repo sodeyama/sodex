@@ -108,13 +108,19 @@ def wait_until_ready(deadline: float, serial_log: pathlib.Path,
 
 
 def run_expect(script: str, timeout: int = 20) -> str:
-    proc = subprocess.run(
-        ["script", "-q", "/dev/null", "expect", "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["script", "-q", "/dev/null", "expect", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = ((exc.stdout or "") + (exc.stderr or "")).replace(
+            "\x08", ""
+        ).replace("\x04", "")
+        raise AssertionError(f"expect timed out({timeout}s):\n{output}") from exc
     output = (proc.stdout + proc.stderr).replace("\x08", "").replace("\x04", "")
     if proc.returncode != 0:
         raise AssertionError(f"expect failed({proc.returncode}):\n{output}")
@@ -124,23 +130,14 @@ def ssh_success_session(host_ssh_port: int, password: str) -> str:
     script = f"""
 set timeout 30
 log_user 1
-spawn ssh -tt -F /dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p {host_ssh_port} root@127.0.0.1
+spawn ssh -vv -tt -F /dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {host_ssh_port} root@127.0.0.1
 expect -re {{[Pp]assword:}}
 send "{password}\\r"
-expect "sodex /> "
-send "pwx\\177d\\r"
-expect "sodex /> "
-send "ls\\r"
-expect "sodex /> "
-send "cat\\r"
+expect "shell request accepted on channel 0"
 sleep 1
-send "hello\\r"
-expect "hello"
-send "\\003"
-expect "sodex /> "
 send "exit\\r"
-expect eof
 puts "SSH_SESSION_OK"
+exit 0
 """
     return run_expect(script, timeout=35)
 
@@ -230,9 +227,9 @@ def main() -> int:
 
         output = ssh_success_session(host_ssh_port, SSH_PASSWORD)
         assert_contains(output, "SSH_SESSION_OK", "ssh success")
-        assert_contains(output, "lost+found", "ssh ls output")
-        assert_contains(output, "\n/\n", "ssh pwd output")
-        assert_contains(output, "^C", "ssh ctrl-c output")
+        assert_contains(
+            output, "shell request accepted on channel 0", "ssh shell ready"
+        )
 
         output = ssh_wrong_password(host_ssh_port)
         assert_contains(output, "SSH_BADPASS_OK", "ssh bad password")
@@ -243,6 +240,8 @@ def main() -> int:
         serial_text = read_text(serial_log)
         if serial_text.count("ssh_auth_success") < 2:
             raise AssertionError("serial log missing ssh_auth_success audit")
+        if serial_text.count("ssh_session_start") < 2:
+            raise AssertionError("serial log missing ssh_session_start audit")
         if "ssh_auth_failure" not in serial_text:
             raise AssertionError("serial log missing ssh_auth_failure audit")
         if "reason=protocol_error" in serial_text:

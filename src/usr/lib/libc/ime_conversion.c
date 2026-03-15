@@ -13,22 +13,22 @@ int ime_conversion_active(const struct ime_state *state)
 
 int ime_start_conversion(struct ime_state *state)
 {
-  const char *const *candidates = NULL;
   int candidate_count = 0;
   int i;
 
   if (state == NULL || state->mode != IME_MODE_HIRAGANA ||
       state->reading_len <= 0)
     return 0;
-  if (ime_dictionary_lookup(state->reading, &candidates, &candidate_count) < 0)
+  if (ime_dictionary_lookup(state->reading,
+                            state->candidate_storage,
+                            sizeof(state->candidate_storage),
+                            state->candidates, IME_CANDIDATE_MAX,
+                            &candidate_count) < 0)
     return 0;
   if (candidate_count <= 0)
     return 0;
-  if (candidate_count > IME_CANDIDATE_MAX)
-    candidate_count = IME_CANDIDATE_MAX;
 
-  for (i = 0; i < candidate_count; i++)
-    state->candidates[i] = candidates[i];
+  i = candidate_count;
   for (; i < IME_CANDIDATE_MAX; i++)
     state->candidates[i] = NULL;
   state->candidate_count = candidate_count;
@@ -91,6 +91,32 @@ int ime_candidate_index(const struct ime_state *state)
   if (state == NULL || state->conversion_active == 0)
     return -1;
   return state->candidate_index;
+}
+
+int ime_candidate_page_start(const struct ime_state *state)
+{
+  if (state == NULL || state->conversion_active == 0 ||
+      state->candidate_count <= 0 || state->candidate_index < 0)
+    return 0;
+  return (state->candidate_index / IME_CANDIDATE_PAGE_SIZE) *
+         IME_CANDIDATE_PAGE_SIZE;
+}
+
+int ime_candidate_page_count(const struct ime_state *state)
+{
+  if (state == NULL || state->conversion_active == 0 ||
+      state->candidate_count <= 0)
+    return 0;
+  return (state->candidate_count + IME_CANDIDATE_PAGE_SIZE - 1) /
+         IME_CANDIDATE_PAGE_SIZE;
+}
+
+int ime_candidate_page_index(const struct ime_state *state)
+{
+  if (state == NULL || state->conversion_active == 0 ||
+      state->candidate_index < 0)
+    return -1;
+  return state->candidate_index / IME_CANDIDATE_PAGE_SIZE;
 }
 
 int ime_commit_conversion(struct ime_state *state, char *out, int out_cap,

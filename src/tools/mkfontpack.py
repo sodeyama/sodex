@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TrueType フォントから 8x16 の端末用ビットマップヘッダを生成する。"""
+"""TrueType フォントから端末用ビットマップヘッダを生成する。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 ASCII_FIRST = 32
 ASCII_LAST = 126
+RESAMPLE_LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
+PUNCTUATION_SCALE_OVERRIDES = {
+    0x3001: 1.35,
+    0x3002: 1.35,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,6 +28,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cell-width", type=int, default=8, help="セル幅")
     parser.add_argument("--cell-height", type=int, default=16, help="セル高さ")
     parser.add_argument("--threshold", type=int, default=96, help="2値化しきい値")
+    parser.add_argument(
+        "--supersample",
+        type=int,
+        default=1,
+        help="高解像度で一度描いて縮小する倍率",
+    )
     parser.add_argument(
         "--codepoint-ranges",
         default="",
@@ -38,20 +49,71 @@ def parse_args() -> argparse.Namespace:
         default="UDEVGothic-Regular.ttf",
         help="生成コメントへ埋め込むソース名",
     )
+    parser.add_argument(
+        "--text-source",
+        action="append",
+        default=[],
+        help="追加 glyph 抽出元の UTF-8 text file",
+    )
     return parser.parse_args()
 
 
-def render_glyph(font: ImageFont.FreeTypeFont, ch: str,
+def emphasize_small_punctuation(image: Image.Image,
+                                codepoint: int,
+                                cell_width: int,
+                                cell_height: int) -> Image.Image:
+    scale = PUNCTUATION_SCALE_OVERRIDES.get(codepoint)
+    bbox: tuple[int, int, int, int] | None
+    crop: Image.Image
+    target_width: int
+    target_height: int
+    margin_bottom: int
+    x: int
+    y: int
+
+    if scale is None:
+        return image
+
+    bbox = image.getbbox()
+    if bbox is None:
+        return image
+
+    crop = image.crop(bbox)
+    target_width = min(cell_width, max(crop.width, int(round(crop.width * scale))))
+    target_height = min(cell_height, max(crop.height, int(round(crop.height * scale))))
+    if target_width == crop.width and target_height == crop.height:
+        return image
+
+    margin_bottom = cell_height - bbox[3]
+    x = bbox[0]
+    y = cell_height - margin_bottom - target_height
+    y = max(0, y)
+    if x + target_width > cell_width:
+        x = cell_width - target_width
+
+    adjusted = Image.new("L", (cell_width, cell_height), 0)
+    adjusted.paste(crop.resize((target_width, target_height), RESAMPLE_LANCZOS), (x, y))
+    return adjusted
+
+
+def render_glyph(font: ImageFont.FreeTypeFont, codepoint: int,
                  cell_width: int, cell_height: int,
                  advance_width: int, baseline: int,
-                 threshold: int) -> list[int]:
-    image = Image.new("L", (cell_width, cell_height), 0)
+                 threshold: int,
+                 supersample: int) -> list[int]:
+    ch = chr(codepoint)
+    render_width = cell_width * supersample
+    render_height = cell_height * supersample
+    image = Image.new("L", (render_width, render_height), 0)
     draw = ImageDraw.Draw(image)
-    origin_x = max(0, (cell_width - advance_width) // 2)
+    origin_x = max(0, (render_width - advance_width) // 2)
 
     # 各文字を個別に中央寄せすると "." や "g" が不自然に浮くため、
     # フォントの advance と baseline を全 glyph で共有する。
     draw.text((origin_x, baseline), ch, fill=255, font=font, anchor="ls")
+    if supersample > 1:
+        image = image.resize((cell_width, cell_height), RESAMPLE_LANCZOS)
+    image = emphasize_small_punctuation(image, codepoint, cell_width, cell_height)
     image = image.point(lambda value: 255 if value >= threshold else 0)
 
     pixels = image.load()
@@ -89,6 +151,20 @@ def parse_codepoint_ranges(spec: str) -> list[int]:
     return sorted(seen)
 
 
+def load_text_source_codepoints(paths: list[str]) -> list[int]:
+    seen: set[int] = set()
+
+    for raw_path in paths:
+        path = Path(raw_path)
+        for ch in path.read_text(encoding="utf-8"):
+            codepoint = ord(ch)
+            if codepoint < 0x80:
+                continue
+            seen.add(codepoint)
+
+    return sorted(seen)
+
+
 def format_row_values(rows: list[int], row_hex_width: int) -> str:
     return ", ".join(f"0x{value:0{row_hex_width}x}" for value in rows)
 
@@ -119,7 +195,7 @@ def build_header(source_name: str,
         f"#define FONT8X16_WIDTH {cell_width}",
         f"#define FONT8X16_HEIGHT {cell_height}",
         "",
-        "static const unsigned char font8x16_printable[95][FONT8X16_HEIGHT] = {",
+        "static const unsigned int font8x16_printable[95][FONT8X16_HEIGHT] = {",
     ]
 
     for codepoint, rows in glyphs:
@@ -190,15 +266,20 @@ def main() -> int:
         print(f"フォントが見つかりません: {font_path}", file=sys.stderr)
         return 1
 
-    codepoints = parse_codepoint_ranges(args.codepoint_ranges)
-    font = ImageFont.truetype(str(font_path), size=args.font_size)
+    codepoints = set(parse_codepoint_ranges(args.codepoint_ranges))
+    codepoints.update(load_text_source_codepoints(args.text_source))
+    if args.supersample <= 0:
+        print("supersample は 1 以上である必要があります", file=sys.stderr)
+        return 1
+
+    font = ImageFont.truetype(str(font_path), size=args.font_size * args.supersample)
     ascent, descent = font.getmetrics()
     line_height = ascent + descent
-    top_padding = max(0, (args.cell_height - line_height) // 2)
+    top_padding = max(0, (args.cell_height * args.supersample - line_height) // 2)
     baseline = top_padding + ascent
     advance_width = 0
     if codepoints:
-        sample_codepoints = codepoints
+        sample_codepoints = sorted(codepoints)
     else:
         sample_codepoints = list(range(ASCII_FIRST, ASCII_LAST + 1))
     for codepoint in sample_codepoints:
@@ -211,12 +292,13 @@ def main() -> int:
                 codepoint,
                 render_glyph(
                     font,
-                    chr(codepoint),
+                    codepoint,
                     args.cell_width,
                     args.cell_height,
                     advance_width,
                     baseline,
                     args.threshold,
+                    args.supersample,
                 ),
             )
         )

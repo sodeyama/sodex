@@ -15,11 +15,16 @@ using namespace std;
 #define EXT3_N_BLOCKS       15
 #define EXT3_NAME_LEN       256
 #define BLOCK_SIZE          4096    //4096Byte
-#define BLOCK_MAX           700     //700個
+#define BLOCK_MAX           4096    //4096個
 #define INODE_SIZE          128     //128Byte
 #define INODE_MAX           128     //128個
 #define INODE_PER_BLOCK     ((BLOCK_SIZE)/(INODE_SIZE)) //32
 #define IBLOCK_SIZE         512
+
+#define EXT3_DIRECT_BLOCKS  12
+#define EXT3_PTRS_PER_BLOCK (BLOCK_SIZE/sizeof(u_int32_t))
+#define EXT3_IND_BLOCK      EXT3_DIRECT_BLOCKS
+#define EXT3_DIND_BLOCK     (EXT3_DIRECT_BLOCKS+1)
 
 // super block
 #define EXT3_SUPER_MAGIC        0xEF53
@@ -227,6 +232,7 @@ struct ext3_direntry {
 };
 
 void set_bitmap(u_int8_t* bitmap, u_int32_t bit);
+u_int32_t alloc_inode_block(ext3_super_block* sb, ext3_group_desc* gd);
 void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
               ext3_group_desc* gd, u_int8_t* inode_bitmap,
               u_int8_t* block_bitmap, int parent_ino, string path);
@@ -236,6 +242,48 @@ int first_data_block = 8;
 
 int current_inode = 0;
 int rootdir_inode;
+
+void write_file_block(fstream& ofs, u_int32_t iblock, const u_int8_t* data,
+                      u_int32_t data_size, u_int32_t block_index)
+{
+  u_int8_t block_buf[BLOCK_SIZE];
+  u_int32_t offset = block_index * BLOCK_SIZE;
+  u_int32_t chunk = 0;
+
+  memset(block_buf, 0, sizeof(block_buf));
+  if (offset < data_size) {
+    chunk = data_size - offset;
+    if (chunk > BLOCK_SIZE)
+      chunk = BLOCK_SIZE;
+    memcpy(block_buf, data + offset, chunk);
+  }
+  ofs.seekp(iblock * BLOCK_SIZE, ios::beg);
+  ofs.write((char*)block_buf, BLOCK_SIZE);
+  ofs.flush();
+}
+
+u_int32_t alloc_data_block(fstream& ofs, ext3_super_block* sb, ext3_group_desc* gd,
+                           u_int8_t* block_bitmap, const u_int8_t* data,
+                           u_int32_t data_size, u_int32_t block_index)
+{
+  u_int32_t iblock = alloc_inode_block(sb, gd);
+
+  write_file_block(ofs, iblock, data, data_size, block_index);
+  set_bitmap(block_bitmap, iblock);
+  return iblock;
+}
+
+u_int32_t alloc_pointer_block(fstream& ofs, ext3_super_block* sb, ext3_group_desc* gd,
+                              u_int8_t* block_bitmap, const u_int32_t* table)
+{
+  u_int32_t iblock = alloc_inode_block(sb, gd);
+
+  ofs.seekp(iblock * BLOCK_SIZE, ios::beg);
+  ofs.write((const char*)table, BLOCK_SIZE);
+  ofs.flush();
+  set_bitmap(block_bitmap, iblock);
+  return iblock;
+}
 
 void error(const char* str)
 {
@@ -261,8 +309,7 @@ void set_super_block(fstream& ofs, ext3_super_block* sb)
   sb->s_r_blocks_count = BLOCK_MAX - 8;
   sb->s_max_mnt_count = EXT2_DFL_MAX_MNT_COUNT;
   sb->s_errors = EXT2_ERRORS_DEFALT;
-  sb->s_free_blocks_count = 
-    BLOCK_MAX - INODE_MAX/INODE_PER_BLOCK - 4; //360 - 4  - 4 = 352
+  sb->s_free_blocks_count = BLOCK_MAX - (P_DATA_BLOCK / BLOCK_SIZE);
   sb->s_free_inodes_count = INODE_MAX;
   sb->s_first_data_block = 1;
 
@@ -304,7 +351,7 @@ void set_group_block(fstream& ofs, ext3_group_desc* gd)
   gd->bg_block_bitmap = 2;
   gd->bg_inode_bitmap = 3;
   gd->bg_inode_table = 4;
-  gd->bg_free_blocks_count = 346;
+  gd->bg_free_blocks_count = BLOCK_MAX - (P_DATA_BLOCK / BLOCK_SIZE);
   gd->bg_free_inodes_count = 125;
   gd->bg_used_dirs_count = 1;
 
@@ -401,56 +448,79 @@ int create_file(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
     error("we can't carete file on file system because of too large file"
           "which we can't support");
 
-  const u_int32_t direct_blocks = 12;
-  u_int32_t first_stage = direct_blocks + BLOCK_SIZE/4;
-  u_int32_t second_stage = direct_blocks + BLOCK_SIZE/4
-    + (BLOCK_SIZE/4)*(BLOCK_SIZE/4);
-  u_int32_t third_stage = direct_blocks + BLOCK_SIZE/4
-    + (BLOCK_SIZE/4)*(BLOCK_SIZE/4)
-    +(BLOCK_SIZE/4)*(BLOCK_SIZE/4)*(BLOCK_SIZE/4);
+  const u_int32_t direct_blocks = EXT3_DIRECT_BLOCKS;
+  const u_int32_t ptrs_per_block = EXT3_PTRS_PER_BLOCK;
+  u_int32_t first_stage = direct_blocks + ptrs_per_block;
+  u_int32_t second_stage = direct_blocks + ptrs_per_block
+    + ptrs_per_block * ptrs_per_block;
+  u_int32_t third_stage = direct_blocks + ptrs_per_block
+    + ptrs_per_block * ptrs_per_block
+    + ptrs_per_block * ptrs_per_block * ptrs_per_block;
+  u_int32_t block_index = 0;
 
   if (ino->i_blocks <= direct_blocks) {
-    int i;
-    for (i=0; i<ino->i_blocks; i++) {
-      int iblock = alloc_inode_block(sb, gd);
-      ino->i_block[i] = iblock;
-      ofs.seekp(iblock*BLOCK_SIZE, ios::beg);
-      ofs.write((char*)(data+i*BLOCK_SIZE), BLOCK_SIZE);
-      ofs.flush();
-      set_bitmap(block_bitmap, iblock);
+    u_int32_t i;
+    for (i = 0; i < ino->i_blocks; i++) {
+      ino->i_block[i] = alloc_data_block(ofs, sb, gd, block_bitmap,
+                                         data, data_size, block_index++);
     }
 
   } else if (ino->i_blocks <= first_stage) {
-    int i;
-    for (i=0; i<(int)direct_blocks; i++) {
-      int iblock = alloc_inode_block(sb, gd);
-      ino->i_block[i] = iblock;
-      ofs.seekp(iblock*BLOCK_SIZE);
-      ofs.write((char*)(data+i*BLOCK_SIZE), BLOCK_SIZE);
-      ofs.flush();
-      set_bitmap(block_bitmap, iblock);
-    }
+    u_int32_t i;
+    u_int32_t first_blocks[EXT3_PTRS_PER_BLOCK];
 
-    u_int32_t first_blocks[BLOCK_SIZE/4]; // 1024
+    for (i = 0; i < direct_blocks; i++) {
+      ino->i_block[i] = alloc_data_block(ofs, sb, gd, block_bitmap,
+                                         data, data_size, block_index++);
+    }
     memset((char*)first_blocks, 0, BLOCK_SIZE);
 
-    for (i=direct_blocks; i<(int)ino->i_blocks; i++) {
-      int iblock = alloc_inode_block(sb, gd);
-      first_blocks[i-direct_blocks] = iblock;
-      ofs.seekp(iblock*BLOCK_SIZE, ios::beg);
-      ofs.write((char*)(data+i*BLOCK_SIZE), BLOCK_SIZE);
-      ofs.flush();
-      set_bitmap(block_bitmap, iblock);
+    for (i = direct_blocks; i < ino->i_blocks; i++) {
+      first_blocks[i - direct_blocks] =
+        alloc_data_block(ofs, sb, gd, block_bitmap, data, data_size, block_index++);
     }
-
-    int first_stage_block = alloc_inode_block(sb, gd);
-    ofs.seekp(first_stage_block*BLOCK_SIZE, ios::beg);
-    ofs.write((char*)first_blocks, BLOCK_SIZE);
-    ofs.flush();
-    ino->i_block[12] = first_stage_block;
+    ino->i_block[EXT3_IND_BLOCK] = alloc_pointer_block(ofs, sb, gd, block_bitmap,
+                                                       first_blocks);
 
   } else if (ino->i_blocks <= second_stage) {
-    error("We don't implement the second stage of i_blocks");
+    u_int32_t i;
+    u_int32_t first_blocks[EXT3_PTRS_PER_BLOCK];
+    u_int32_t second_blocks[EXT3_PTRS_PER_BLOCK];
+    u_int32_t remaining;
+
+    for (i = 0; i < direct_blocks; i++) {
+      ino->i_block[i] = alloc_data_block(ofs, sb, gd, block_bitmap,
+                                         data, data_size, block_index++);
+    }
+
+    memset((char*)first_blocks, 0, BLOCK_SIZE);
+    for (i = 0; i < ptrs_per_block; i++) {
+      first_blocks[i] = alloc_data_block(ofs, sb, gd, block_bitmap,
+                                         data, data_size, block_index++);
+    }
+    ino->i_block[EXT3_IND_BLOCK] = alloc_pointer_block(ofs, sb, gd, block_bitmap,
+                                                       first_blocks);
+
+    memset((char*)second_blocks, 0, BLOCK_SIZE);
+    remaining = ino->i_blocks - first_stage;
+    for (i = 0; i < EXT3_PTRS_PER_BLOCK && remaining > 0; i++) {
+      u_int32_t leaf_blocks[EXT3_PTRS_PER_BLOCK];
+      u_int32_t j;
+      u_int32_t leaf_count = remaining;
+
+      if (leaf_count > ptrs_per_block)
+        leaf_count = ptrs_per_block;
+      memset((char*)leaf_blocks, 0, BLOCK_SIZE);
+      for (j = 0; j < leaf_count; j++) {
+        leaf_blocks[j] = alloc_data_block(ofs, sb, gd, block_bitmap,
+                                          data, data_size, block_index++);
+      }
+      second_blocks[i] = alloc_pointer_block(ofs, sb, gd, block_bitmap,
+                                             leaf_blocks);
+      remaining -= leaf_count;
+    }
+    ino->i_block[EXT3_DIND_BLOCK] = alloc_pointer_block(ofs, sb, gd, block_bitmap,
+                                                        second_blocks);
   } else if (ino->i_blocks <= third_stage) {
     error("We don't implement the third stage of i_blocks");
   } else {

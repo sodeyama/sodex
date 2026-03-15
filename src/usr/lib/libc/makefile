@@ -18,7 +18,7 @@ all: ${OBJS}
 $(SUB_OBJDIR)/%.o : %.S
 	$(CC) -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
 
-$(SUB_OBJDIR)/%.o : %.c
+$(SUB_OBJDIR)/%.o : %.c ${FONT_HEADERS}
 	$(CC) -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
 
 .PHONY: clean

@@ -12,6 +12,7 @@ typedef uint8_t  u_int8_t;
 typedef uint32_t u_int32_t;
 
 #define BLOCK_SIZE 4096
+#define BLOCK_MAX 4096
 #define EXT3_DIRECT_BLOCKS 12
 #define IBLOCK_SIZE 512
 
@@ -84,6 +85,15 @@ static int block_index_level(u_int32_t logical_block)
     if (logical_block < PTRS_PER_BLOCK * PTRS_PER_BLOCK)
         return 2;  /* double indirect */
     return 3;      /* triple indirect */
+}
+
+static void double_indirect_position(u_int32_t logical_block,
+                                     u_int32_t *outer,
+                                     u_int32_t *inner)
+{
+    logical_block -= EXT3_DIRECT_BLOCKS + PTRS_PER_BLOCK;
+    *outer = logical_block / PTRS_PER_BLOCK;
+    *inner = logical_block % PTRS_PER_BLOCK;
 }
 
 /* === Bitmap tests === */
@@ -193,6 +203,40 @@ TEST(block_level_triple_indirect) {
     ASSERT_EQ(block_index_level(start), 3);
 }
 
+TEST(block_position_double_indirect_first_entry) {
+    u_int32_t outer = 99;
+    u_int32_t inner = 99;
+    u_int32_t start = EXT3_DIRECT_BLOCKS + PTRS_PER_BLOCK;
+
+    double_indirect_position(start, &outer, &inner);
+    ASSERT_EQ(outer, 0);
+    ASSERT_EQ(inner, 0);
+}
+
+TEST(block_position_double_indirect_last_entry_of_first_leaf) {
+    u_int32_t outer = 99;
+    u_int32_t inner = 99;
+    u_int32_t block = EXT3_DIRECT_BLOCKS + PTRS_PER_BLOCK + PTRS_PER_BLOCK - 1;
+
+    double_indirect_position(block, &outer, &inner);
+    ASSERT_EQ(outer, 0);
+    ASSERT_EQ(inner, PTRS_PER_BLOCK - 1);
+}
+
+TEST(block_position_double_indirect_first_entry_of_second_leaf) {
+    u_int32_t outer = 99;
+    u_int32_t inner = 99;
+    u_int32_t block = EXT3_DIRECT_BLOCKS + PTRS_PER_BLOCK + PTRS_PER_BLOCK;
+
+    double_indirect_position(block, &outer, &inner);
+    ASSERT_EQ(outer, 1);
+    ASSERT_EQ(inner, 0);
+}
+
+TEST(block_max_reaches_double_indirect_range) {
+    ASSERT(BLOCK_MAX > EXT3_DIRECT_BLOCKS + PTRS_PER_BLOCK);
+}
+
 /* === Directory entry parsing tests === */
 
 /*
@@ -293,6 +337,10 @@ int main(void)
     RUN_TEST(block_level_indirect);
     RUN_TEST(block_level_double_indirect);
     RUN_TEST(block_level_triple_indirect);
+    RUN_TEST(block_position_double_indirect_first_entry);
+    RUN_TEST(block_position_double_indirect_last_entry_of_first_leaf);
+    RUN_TEST(block_position_double_indirect_first_entry_of_second_leaf);
+    RUN_TEST(block_max_reaches_double_indirect_range);
 
     RUN_TEST(dentry_parse_single);
     RUN_TEST(dentry_parse_chain);

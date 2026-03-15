@@ -10,7 +10,9 @@ from pathlib import Path
 HEADER_STRUCT = struct.Struct("<4s7I")
 ENTRY_STRUCT = struct.Struct("<IIHHI")
 MAGIC = b"IMED"
-DEFAULT_BUCKETS = 64
+MIN_BUCKETS = 64
+MAX_BUCKETS = 16384
+TARGET_ENTRIES_PER_BUCKET = 16
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,8 +22,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bucket-count",
         type=int,
-        default=DEFAULT_BUCKETS,
-        help="bucket 数",
+        default=0,
+        help="bucket 数。0 なら entry 数から自動決定",
     )
     return parser.parse_args()
 
@@ -53,6 +55,23 @@ def fnv1a(data: bytes) -> int:
         value ^= byte
         value = (value * 16777619) & 0xFFFFFFFF
     return value
+
+
+def next_power_of_two(value: int) -> int:
+    result = 1
+
+    while result < value:
+        result <<= 1
+    return result
+
+
+def choose_bucket_count(entry_count: int, requested: int) -> int:
+    if requested > 0:
+        return requested
+
+    target = max(MIN_BUCKETS, entry_count // TARGET_ENTRIES_PER_BUCKET)
+    target = min(MAX_BUCKETS, target)
+    return max(MIN_BUCKETS, min(MAX_BUCKETS, next_power_of_two(target)))
 
 
 def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
@@ -118,17 +137,19 @@ def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
 
 def main() -> int:
     args = parse_args()
-    if args.bucket_count <= 0 or args.bucket_count > 256:
-        raise ValueError("bucket-count は 1..256 で指定してください")
 
     grouped = load_entries(args.input)
-    blob = build_blob(grouped, args.bucket_count)
+    bucket_count = choose_bucket_count(len(grouped), args.bucket_count)
+    if bucket_count <= 0 or bucket_count > MAX_BUCKETS:
+        raise ValueError(f"bucket-count は 1..{MAX_BUCKETS} で指定してください")
+
+    blob = build_blob(grouped, bucket_count)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(blob)
 
     print(
         f"generated {args.output} entries={len(grouped)} "
-        f"bucket_count={args.bucket_count} bytes={len(blob)}"
+        f"bucket_count={bucket_count} bytes={len(blob)}"
     )
     return 0
 

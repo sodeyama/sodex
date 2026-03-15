@@ -4,6 +4,20 @@
 
 #define TEST_BLOB_PATH "ime_dictionary_fixture.blob"
 
+static u_int32_t max_bucket_size(const struct ime_dict_blob_context *ctx)
+{
+    u_int32_t max_size = 0;
+    u_int32_t i;
+
+    for (i = 0; i < ctx->header.bucket_count; i++) {
+        u_int32_t size = ctx->bucket_offsets[i + 1] - ctx->bucket_offsets[i];
+
+        if (size > max_size)
+            max_size = size;
+    }
+    return max_size;
+}
+
 TEST(open_and_lookup_blob_entry) {
     struct ime_dict_blob_context ctx;
     char storage[IME_CANDIDATE_STORAGE_MAX];
@@ -22,11 +36,14 @@ TEST(open_and_lookup_blob_entry) {
 
 TEST(blob_contains_hundreds_of_basic_entries) {
     struct ime_dict_blob_context ctx;
+    u_int32_t bucket_max;
 
     ime_dict_blob_init(&ctx);
     ASSERT_EQ(ime_dict_blob_open(&ctx, TEST_BLOB_PATH), 0);
     ASSERT(ctx.header.entry_count >= 100000);
-    ASSERT(ctx.header.bucket_count >= 64);
+    ASSERT(ctx.header.bucket_count >= 4096);
+    bucket_max = max_bucket_size(&ctx);
+    ASSERT(bucket_max <= 64);
     ime_dict_blob_close(&ctx);
 }
 

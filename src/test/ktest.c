@@ -9,6 +9,7 @@
 #include <kernel.h>
 #include <io.h>
 #include <memory.h>
+#include <memory_layout.h>
 #include <ne2000.h>
 #include <uip.h>
 #include <uip_arp.h>
@@ -149,6 +150,31 @@ PRIVATE void test_memory_many_allocs(void)
   }
   for (i = 0; i < 32; i++) {
     if (ptrs[i]) kfree(ptrs[i]);
+  }
+}
+
+PRIVATE void test_memory_layout_ready(void)
+{
+  const memory_layout_policy_t *layout = memory_get_layout_policy();
+
+  if (memory_layout_is_initialized() != 0 &&
+      layout->effective_ram_bytes >= (64 * 1024 * 1024) &&
+      layout->process_pool.size > 0) {
+    ktest_pass("memory_layout_ready");
+  } else {
+    ktest_fail("memory_layout_ready", "memory layout is not initialized");
+  }
+}
+
+PRIVATE void test_palloc_basic(void)
+{
+  void *p = palloc(4 * 1024 * 1024);
+
+  if (p != NULL) {
+    ktest_pass("palloc_basic");
+    pfree(p);
+  } else {
+    ktest_fail("palloc_basic", "palloc returned NULL");
   }
 }
 
@@ -441,6 +467,8 @@ PUBLIC void run_kernel_tests(void)
   test_memory_kalloc_kfree();
   test_memory_aalloc();
   test_memory_many_allocs();
+  test_memory_layout_ready();
+  test_palloc_basic();
 
   /* Network tests (requires NE2000 + uIP init) */
   serial_puts("\n--- Network Tests ---\n");

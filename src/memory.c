@@ -16,6 +16,8 @@
 #else
 #include <ld/page_linker.h>
 #include <memory.h>
+#include <memory_layout.h>
+#include <io.h>
 #include <vga.h>
 #endif
 
@@ -29,12 +31,31 @@ PRIVATE MemHole* new_mhole(MemHole* hole_list);
 PRIVATE void init_kmem();
 PRIVATE void init_pmem();
 PRIVATE void used_check(MemHole* mem);
+PRIVATE void init_hole_pool(MemHole* holes, u_int32_t hole_count,
+                            MemHole* hole_list, MemHole* free_list,
+                            MemHole* use_list, u_int32_t base,
+                            u_int32_t size);
+
+#ifndef TEST_BUILD
+PRIVATE void mem_serial_putc(char c);
+PRIVATE void mem_serial_puts(const char* s);
+PRIVATE void mem_serial_putdec(u_int32_t value);
+PRIVATE void mem_serial_puthex(u_int32_t value);
+PRIVATE void log_memory_layout(void);
+#endif
 
 #ifndef TEST_BUILD
 PUBLIC void init_mem()
 {
+  extern u_int32_t __bss_end;
+  u_int32_t kernel_image_end_phys =
+    (((u_int32_t)&__bss_end - __PAGE_OFFSET + BLOCK_SIZE - 1) &
+     ~(BLOCK_SIZE - 1));
+
+  memory_layout_init_runtime(kernel_image_end_phys);
   init_kmem();
   init_pmem();
+  log_memory_layout();
 }
 #endif
 
@@ -46,54 +67,65 @@ PUBLIC void init_mem()
  */
 PUBLIC void init_mem_core(u_int32_t base_addr, u_int32_t pool_size)
 {
+  init_hole_pool(memhole, MAX_MHOLES, &mhole_list, &mfree_list, &muse_list,
+                 base_addr, pool_size);
+}
+
+PRIVATE void init_hole_pool(MemHole* holes, u_int32_t hole_count,
+                            MemHole* hole_list, MemHole* free_list,
+                            MemHole* use_list, u_int32_t base,
+                            u_int32_t size)
+{
   int i;
-  for (i = 0; i < MAX_MHOLES; ++i) {
-    if (i == MAX_MHOLES - 1)
-      memhole[i].next = &mhole_list;
+  for (i = 0; i < hole_count; ++i) {
+    if (i == hole_count - 1)
+      holes[i].next = hole_list;
     else
-      memhole[i].next = &memhole[i+1];
+      holes[i].next = &holes[i+1];
 
     if (i == 0)
-      memhole[i].prev = &mhole_list;
+      holes[i].prev = hole_list;
     else
-      memhole[i].prev = &memhole[i-1];
+      holes[i].prev = &holes[i-1];
   }
-  mhole_list.next = &memhole[0];
-  mhole_list.prev = &memhole[MAX_MHOLES-1];
-  memhole[0].prev = &mhole_list;
-  memhole[MAX_MHOLES-1].next = &mhole_list;
+  hole_list->next = &holes[0];
+  hole_list->prev = &holes[hole_count-1];
+  holes[0].prev = hole_list;
+  holes[hole_count-1].next = hole_list;
 
-  mhole_list.base = 0;
-  mhole_list.size = 0;
-  mfree_list.base = 0;
-  mfree_list.size = 0;
-  muse_list.base = 0;
-  muse_list.size = 0;
+  hole_list->base = 0;
+  hole_list->size = 0;
+  free_list->base = 0;
+  free_list->size = 0;
+  use_list->base = 0;
+  use_list->size = 0;
 
-  //initial muse_list setting
-  muse_list.next = &muse_list;
-  muse_list.prev = &muse_list;
+  use_list->next = use_list;
+  use_list->prev = use_list;
+  free_list->next = free_list;
+  free_list->prev = free_list;
 
-  //initial mfree_list setting
-  mfree_list.next = &mfree_list;
-  mfree_list.prev = &mfree_list;
-
-  MemHole* mem = mhole_list.next;
+  MemHole* mem = hole_list->next;
   MHOLE_REMOVE(mem);
-  MHOLE_INSERT_HEAD(mem, mfree_list);
-  mfree_list.next->base = base_addr;
-  mfree_list.next->size = pool_size;
+  MHOLE_INSERT_HEAD(mem, (*free_list));
+  free_list->next->base = base;
+  free_list->next->size = size;
 }
 
 #ifndef TEST_BUILD
 PRIVATE void init_kmem()
 {
-  /* __bss_end is provided by the linker script.
-   * Align to next page boundary to avoid overlapping BSS. */
-  extern u_int32_t __bss_end;
-  u_int32_t kernel_membase = ((u_int32_t)&__bss_end + BLOCK_SIZE - 1) & ~(BLOCK_SIZE - 1);
+  const memory_layout_policy_t* layout = memory_get_layout_policy();
 
-  init_mem_core(kernel_membase, KERNEL_MEMEND - kernel_membase);
+  if (memory_layout_is_initialized() == 0 || layout->kernel_heap.size == 0) {
+    extern u_int32_t __bss_end;
+    u_int32_t kernel_membase =
+      ((u_int32_t)&__bss_end + BLOCK_SIZE - 1) & ~(BLOCK_SIZE - 1);
+    init_mem_core(kernel_membase, KERNEL_MEMEND - kernel_membase);
+    return;
+  }
+
+  init_mem_core(layout->kernel_heap.base, layout->kernel_heap.size);
 }
 #endif
 
@@ -319,46 +351,20 @@ PUBLIC void _kprint_mem()
 
 
 #ifndef TEST_BUILD
-/* For process, alloc physical memory between 32MB and 64MB */
 PRIVATE void init_pmem()
 {
-  int i;
-  for (i = 0; i < MAX_PMHOLES; ++i) {
-    if (i == MAX_PMHOLES - 1)
-      p_memhole[i].next = &p_mhole_list;
-    else
-      p_memhole[i].next = &p_memhole[i+1];
+  const memory_layout_policy_t* layout = memory_get_layout_policy();
 
-    if (i == 0)
-      p_memhole[i].prev = &p_mhole_list;
-    else
-      p_memhole[i].prev = &p_memhole[i-1];
+  if (memory_layout_is_initialized() == 0 || layout->process_pool.size == 0) {
+    init_hole_pool(p_memhole, MAX_PMHOLES, &p_mhole_list,
+                   &p_mfree_list, &p_muse_list,
+                   KERNEL_PMEMBASE, KERNEL_PMEMEND - KERNEL_PMEMBASE);
+    return;
   }
-  p_mhole_list.next = &p_memhole[0];
-  p_mhole_list.prev = &p_memhole[MAX_MHOLES-1];
-  p_memhole[0].prev = &p_mhole_list;
-  p_memhole[MAX_PMHOLES-1].next = &p_mhole_list;
 
-  p_mhole_list.base = 0;
-  p_mhole_list.size = 0;
-  p_mfree_list.base = 0;
-  p_mfree_list.size = 0;
-  p_muse_list.base = 0;
-  p_muse_list.size = 0;
-
-  //initial muse_list setting
-  p_muse_list.next = &p_muse_list;
-  p_muse_list.prev = &p_muse_list;
-
-  //initial mfree_list setting
-  p_mfree_list.next = &p_mfree_list;
-  p_mfree_list.prev = &p_mfree_list;
-
-  MemHole* mem = p_mhole_list.next;
-  MHOLE_REMOVE(mem);
-  MHOLE_INSERT_HEAD(mem, p_mfree_list);
-  p_mfree_list.next->base = KERNEL_PMEMBASE;
-  p_mfree_list.next->size = KERNEL_PMEMEND - KERNEL_PMEMBASE;
+  init_hole_pool(p_memhole, MAX_PMHOLES, &p_mhole_list,
+                 &p_mfree_list, &p_muse_list,
+                 layout->process_pool.base, layout->process_pool.size);
 }
 
 PUBLIC void* palloc(u_int32_t size)
@@ -431,6 +437,89 @@ PUBLIC u_int32_t get_realaddr(u_int32_t virt_addr)
   return virt_addr - __PAGE_OFFSET;
 }
 #endif /* !TEST_BUILD */
+
+#ifndef TEST_BUILD
+PRIVATE void mem_serial_putc(char c)
+{
+  while (!(in8(0x3F8 + 5) & 0x20));
+  out8(0x3F8, c);
+}
+
+PRIVATE void mem_serial_puts(const char* s)
+{
+  while (*s) {
+    if (*s == '\n')
+      mem_serial_putc('\r');
+    mem_serial_putc(*s++);
+  }
+}
+
+PRIVATE void mem_serial_putdec(u_int32_t value)
+{
+  char buf[12];
+  int len = 0;
+
+  if (value == 0) {
+    mem_serial_putc('0');
+    return;
+  }
+
+  while (value > 0) {
+    buf[len++] = '0' + (value % 10);
+    value /= 10;
+  }
+  while (len > 0)
+    mem_serial_putc(buf[--len]);
+}
+
+PRIVATE void mem_serial_puthex(u_int32_t value)
+{
+  int shift;
+  const char* hex = "0123456789abcdef";
+
+  mem_serial_puts("0x");
+  for (shift = 28; shift >= 0; shift -= 4)
+    mem_serial_putc(hex[(value >> shift) & 0xf]);
+}
+
+PRIVATE void log_memory_layout(void)
+{
+  const memory_info_t* info = memory_get_info();
+  const memory_layout_policy_t* layout = memory_get_layout_policy();
+
+  _kprintf(" MEMORY: detected=%xMB source=%s cap=%xMB effective=%xMB\n",
+           info->detected_ram_bytes / (1024 * 1024),
+           memory_source_name(info->source),
+           layout->configured_cap_bytes / (1024 * 1024),
+           layout->effective_ram_bytes / (1024 * 1024));
+  _kprintf(" MEMORY: heap=%x size=%x pool=%x size=%x pde_end=%x\n",
+           layout->kernel_heap.base, layout->kernel_heap.size,
+           layout->process_pool.base, layout->process_pool.size,
+           layout->kernel_pde_end);
+
+  mem_serial_puts("MEMORY_LAYOUT detected_mb=");
+  mem_serial_putdec(info->detected_ram_bytes / (1024 * 1024));
+  mem_serial_puts(" source=");
+  mem_serial_puts(memory_source_name(info->source));
+  mem_serial_puts(" cap_mb=");
+  mem_serial_putdec(layout->configured_cap_bytes / (1024 * 1024));
+  mem_serial_puts(" effective_mb=");
+  mem_serial_putdec(layout->effective_ram_bytes / (1024 * 1024));
+  mem_serial_puts(" direct_map_mb=");
+  mem_serial_putdec(layout->direct_map_bytes / (1024 * 1024));
+  mem_serial_puts(" kernel_heap_base=");
+  mem_serial_puthex(layout->kernel_heap.base);
+  mem_serial_puts(" kernel_heap_size=");
+  mem_serial_puthex(layout->kernel_heap.size);
+  mem_serial_puts(" process_pool_base=");
+  mem_serial_puthex(layout->process_pool.base);
+  mem_serial_puts(" process_pool_size=");
+  mem_serial_puthex(layout->process_pool.size);
+  mem_serial_puts(" pde_end=");
+  mem_serial_putdec(layout->kernel_pde_end);
+  mem_serial_puts("\n");
+}
+#endif
 
 PRIVATE void used_check(MemHole* mem)
 {

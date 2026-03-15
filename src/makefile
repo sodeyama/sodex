@@ -51,9 +51,16 @@ ASMSRC  = startup.S    \
 ASMOBJS = $(addprefix $(OBJDIR)/,$(ASMSRC:.S=.o))
 
 EXTRA_CFLAGS ?=
+SODEX_QEMU_MEM_MB ?= 128
+SODEX_RAM_CAP_MB ?= 0
+MEMORY_SCALE_CFLAGS =
+
+ifneq ($(strip $(SODEX_RAM_CAP_MB)),0)
+MEMORY_SCALE_CFLAGS += -DSODEX_RAM_CAP_MB=$(SODEX_RAM_CAP_MB)
+endif
 
 # === Build directory creation (done upfront via shell) ===
-$(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/test)
+$(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/test $(INITDIR)/bin)
 
 # === Main targets ===
 
@@ -128,7 +135,7 @@ ${BUILDDIR}/boot.ld: boot.ld.S
 # === Pattern rules (C and assembly -> build/obj/) ===
 
 $(OBJDIR)/%.o: %.c
-	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} ${EXTRA_CFLAGS} ${MEMORY_SCALE_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(OBJDIR)/%.o: %.S
 	${AS} ${ASFLAGS} -I $(INCLUDE) -I . -o $@ $<
@@ -161,30 +168,34 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
-	@python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-memory: ktest-build
+	@echo "=== Running memory scaling smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_memory_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-term: all
 	@echo "=== Running rich terminal smoke in QEMU ==="
-	@python3 $(BASEDIR)/src/test/run_qemu_terminal_smoke.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_terminal_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-fs: all
 	@echo "=== Running fs CRUD smoke in QEMU ==="
-	@python3 $(BASEDIR)/src/test/run_qemu_fs_crud_smoke.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_fs_crud_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-shell-io: all
 	@echo "=== Running shell IO smoke in QEMU ==="
-	@python3 $(BASEDIR)/src/test/run_qemu_shell_io_smoke.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_shell_io_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-vi: all
 	@echo "=== Running vi smoke in QEMU ==="
-	@python3 $(BASEDIR)/src/test/run_qemu_vi_smoke.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_vi_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-ime: all
 	@echo "=== Running IME smoke in QEMU ==="
-	@python3 $(BASEDIR)/src/test/run_qemu_ime_smoke.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ime_smoke.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
@@ -195,6 +206,7 @@ ktest-build:
 
 ktest-link: ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
 	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
+	$(MAKE) usr-build
 	$(MAKE) tools
 	$(MAKE) ${ACIENT} ${MIDDLE}
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi

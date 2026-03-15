@@ -18,6 +18,15 @@ INITSEG         = 0x9000
 __KERNEL_CS     = 0x08
 
 MEMORY_SIZE     = 0x0       
+MEMORY_SOURCE   = 0x2
+MEMORY_E820_ENTRY_COUNT = 0x4
+MEMORY_E820_TRUNCATED = 0x6
+MEMORY_MAP      = 0x20
+
+MEMORY_SOURCE_E820    = 0x1
+MEMORY_SOURCE_E801    = 0x2
+MEMORY_SOURCE_88      = 0x3
+MEMORY_SOURCE_DEFAULT = 0x4
 
 .code16
 .text
@@ -37,6 +46,9 @@ middle_start:
         movw    %ax, %fs
         xorl    %eax, %eax
         movl    %eax, %fs:(0x0)
+        movw    %ax, (MEMORY_SOURCE)
+        movw    %ax, (MEMORY_E820_ENTRY_COUNT)
+        movw    %ax, (MEMORY_E820_TRUNCATED)
         jmp     pre_e820
 
 /* We have to get the phisical memory map.
@@ -51,6 +63,7 @@ middle_start:
 SMAP = 0x534d4150 # "SMAP"
 
 pre_e820:               
+        movb    $32, (e820_mmap_maxsize)
         xorl    %ebx, %ebx
         movw    $MEMORY_MAP, %di
 
@@ -61,20 +74,26 @@ e820_start:
         int     $0x15
         jc      e820_error
         cmpl    $SMAP, %eax
-        jc      e820_error
+        jne     e820_error
 
+        incw    (MEMORY_E820_ENTRY_COUNT)
+        movw    $MEMORY_SOURCE_E820, (MEMORY_SOURCE)
         cmpl    $0, %ebx
         jz      e820_end
 
         movb    (e820_mmap_maxsize), %al
-        cmpb    $0, %al
-        jz      e820_end
+        cmpb    $1, %al
+        jbe     e820_truncated
 
         decb    (e820_mmap_maxsize)
         movw    %di, %ax
         addw    $20, %ax
         movw    %ax, %di
         jmp     e820_start              # get the next memory map
+
+e820_truncated:
+        movw    $1, (MEMORY_E820_TRUNCATED)
+        jmp     e820_end
 
 e820_error:
         call    print_all_registers
@@ -101,6 +120,10 @@ e801_start:
         xorb    %ah, %ah
         incb    %al
         movw    %ax, (MEMORY_SIZE)
+        cmpw    $0, (MEMORY_E820_ENTRY_COUNT)
+        jne     e801_source_done
+        movw    $MEMORY_SOURCE_E801, (MEMORY_SOURCE)
+e801_source_done:
         popw    %bx
         shr     $4, %bx
         addw    %bx, (MEMORY_SIZE)
@@ -126,7 +149,11 @@ m88_start:
         shr     $10, %ax
         xorb    %ah, %ah
         incb    %al
-        movw    %ax, (MEMORY_SIZE)      
+        movw    %ax, (MEMORY_SIZE)
+        cmpw    $0, (MEMORY_E820_ENTRY_COUNT)
+        jne     m88_source_done
+        movw    $MEMORY_SOURCE_88, (MEMORY_SOURCE)
+m88_source_done:
 #if DEBUG
         movw    (MEMORY_SIZE), %ax
         call    print_register
@@ -142,6 +169,9 @@ m88_error:
 mem_set_default:
         movw    $0x40, %ax              # set 64MB
         movw    %ax, (MEMORY_SIZE)
+        cmpw    $0, (MEMORY_E820_ENTRY_COUNT)
+        jne     mem_check_end
+        movw    $MEMORY_SOURCE_DEFAULT, (MEMORY_SOURCE)
 
 mem_check_end:
 
@@ -468,17 +498,6 @@ m88_fail_mes:
         .ascii  "88: getting memory size function is failed\r\n\0"
 a20_fail_mes:   
         .ascii  "a20 enable function failed\r\n\0"      
-                
-MEMORY_MAP:
-        .rept 32
-        .long 0         # addr
-        .long 0
-        
-        .long 0         # size
-        .long 0
-        
-        .long 0         # type
-        .endr
 
 #MEMORY_SIZE:   
 #       .word   0       

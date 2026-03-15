@@ -12,10 +12,12 @@
 
 #include <sys/types.h>
 #include <page.h>
+#include <memory_layout.h>
 
 PRIVATE void delete_first_page();
 PRIVATE u_int32_t get_need_blocks(size_t need_size, size_t size);
 PRIVATE u_int32_t kernel_extra_pdes[PAGE_DIR_SIZE];
+PRIVATE u_int32_t get_kernel_pde_end();
 
 PUBLIC void init_paging()
 {
@@ -34,9 +36,10 @@ PRIVATE void delete_first_page()
 PUBLIC void create_kernel_page(u_int32_t* pg_dir)
 {
   u_int32_t pte;
+  u_int32_t kernel_pde_end = get_kernel_pde_end();
   int pos;
   for (pos = 0; pos < PAGE_DIR_SIZE; pos++) {
-    if (pos >= PGDIR_KERNEL_START && pos < PGDIR_KERNEL_END) {
+    if (pos >= PGDIR_KERNEL_START && pos < kernel_pde_end) {
       pte = (pos - PGDIR_KERNEL_START) * PSE_PAGE_SIZE;
       pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US|PAGE_PSE|PAGE_GLOBAL);
       pg_dir[pos] = pte;
@@ -49,6 +52,21 @@ PUBLIC void create_kernel_page(u_int32_t* pg_dir)
     if (kernel_extra_pdes[pos] != 0)
       pg_dir[pos] = kernel_extra_pdes[pos];
   }
+}
+
+PRIVATE u_int32_t get_kernel_pde_end()
+{
+  const memory_layout_policy_t* layout;
+
+  if (memory_layout_is_initialized() == 0)
+    return PGDIR_KERNEL_END;
+
+  layout = memory_get_layout_policy();
+  if (layout->kernel_pde_end <= PGDIR_KERNEL_START ||
+      layout->kernel_pde_end > PAGE_DIR_SIZE)
+    return PGDIR_KERNEL_END;
+
+  return layout->kernel_pde_end;
 }
 
 PUBLIC void* create_process_page(u_int32_t* pg_dir, size_t size)

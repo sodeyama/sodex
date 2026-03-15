@@ -21,10 +21,11 @@ REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")" || {
 }
 BUILD_BIN="$REPO_ROOT/build/bin"
 LOG_DIR="$REPO_ROOT/build/log"
+QEMU_MEM_MB="${SODEX_QEMU_MEM_MB:-128}"
 mkdir -p "$LOG_DIR"
 
 COMMON_OPTS="-drive file=$BUILD_BIN/fsboot.bin,format=raw,if=ide \
-    -m 128 \
+    -m $QEMU_MEM_MB \
     -serial file:$LOG_DIR/serial.log \
     -d int,cpu_reset -D $LOG_DIR/qemu_debug.log \
     -monitor unix:$LOG_DIR/monitor.sock,server,nowait"

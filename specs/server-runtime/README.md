@@ -75,6 +75,8 @@ Linux ホスト
 | 04 | [04-http-control-surface.md](plans/04-http-control-surface.md) | HTTP ベースの control / health 面 | 01, 02 |
 | 05 | [05-auth-and-capability-boundary.md](plans/05-auth-and-capability-boundary.md) | 認証、権限制御、接続制限 | 03 または 04 |
 | 06 | [06-ssh-readiness.md](plans/06-ssh-readiness.md) | `SSH` 実装の前提と go/no-go 判定 | 01-05 |
+| 07 | [07-tcp-pty-bridge.md](plans/07-tcp-pty-bridge.md) | 暗号なしで shell relay を検証する最小 TCP-PTY bridge | 01-06 |
+| 08 | [08-ssh-server.md](plans/08-ssh-server.md) | 暗号込み `SSH server` の段階導入 | 06, 07 |
 
 実装タスクと残フォローアップは [TASKS.md](TASKS.md) で管理する。
 
@@ -86,6 +88,8 @@ Linux ホスト
 4. health / status / 制御操作を HTTP 化するか判断する
 5. token / capability / allowlist で絞る
 6. その上で `SSH` が必要かを再評価する
+7. 必要なら最小 TCP-PTY bridge で shell relay を先に検証する
+8. それでも必要なら暗号込み `SSH server` を 1 suite から段階導入する
 
 ## 設計判断
 
@@ -123,6 +127,8 @@ Linux ホスト
 - `/etc/sodex-admin.conf` による起動時 token / allowlist 注入
 - allowlist と audit ring buffer
 - 認証失敗に対する peer 単位 rate limit と backoff
+- `docker/server-runtime/Dockerfile` / `entrypoint.sh` / `run_docker_server_smoke.py` による Docker/headless 常駐起動と published-port smoke
+- `debug_shell_port` と raw TCP preface、`PTY` relay、`test-qemu-debug-shell` による reconnect smoke
 - host Linux の `SSH` と guest `sodex` 管理 API の分離を継続し、guest 内 `SSH server` は当面見送る判断
 
 ## 完了条件

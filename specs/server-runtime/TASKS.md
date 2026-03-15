@@ -146,7 +146,8 @@ Docker 経由の HTTP/admin smoke まで安定化できた。
 
 - raw TCP client 前提の `debug_shell_port` と `TOKEN <control_token>` preface を実装し、認証後は `OK shell` で `PTY` relay へ移る形にした
 - `test_debug_shell_parser` で preface / role / config parser を固定した
-- QEMU smoke と README の接続手順は、`test-qemu-server` の baseline 不安定化を先に潰してから閉じる
+- root `README` に `nc` / `socat` 前提の接続手順を追加した
+- `test-qemu-debug-shell` と `run_qemu_debug_shell_smoke.py` を追加し、invalid preface / 認証失敗 / 認証成功 / reconnect まで QEMU smoke で通した
 
 - [x] `telnet` 互換ではなく raw TCP client 前提の protocol と port を決める
 - [x] listener を default off にし、明示 config がある時だけ有効にする
@@ -155,8 +156,8 @@ Docker 経由の HTTP/admin smoke まで安定化できた。
 - [x] 単一 session 制限、timeout、close、reconnect、audit を入れる
 - [x] fixed winsize で始める方針に決める
 - [x] host test を追加する
-- [ ] QEMU smoke を追加する
-- [ ] `nc` / `socat` 前提の接続手順を README に書く
+- [x] QEMU smoke を追加する
+- [x] `nc` / `socat` 前提の接続手順を README に書く
 
 ### SRT-16: 暗号込み `SSH server` の段階導入
 

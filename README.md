@@ -75,8 +75,12 @@ docker run --rm \
   sodex-server-runtime
 ```
 
-この image は `linux/amd64` 前提です。Apple Silicon などの arm64 host では Docker の emulation 経由で動かします。
-published port の疎通と常駐運用は Linux host を前提にしています。Docker Desktop/macOS の nested slirp はサポート対象外です。
+この image は container 内で `i686-linux-gnu` cross toolchain を使って guest を build します。
+Apple Silicon を含む arm64 host でも native image として build / run できます。
+
+published port の peer IP は host により異なります。
+Linux host の既定は `10.0.2.2`、Docker Desktop/macOS では `192.168.65.1` を確認しました。
+allowlist を変えるときは `SODEX_ADMIN_ALLOW_IP=...` を指定してください。
 
 ready 条件は container の serial/stdout に `AUDIT server_runtime_ready ...` が出た時点です。
 `qemu_debug.log` と `monitor.sock` は mount した `/var/log/sodex` 配下に出ます。
@@ -114,6 +118,33 @@ Docker/headless server runtime smoke:
 ```sh
 make test-docker-server
 ```
+
+ポート衝突を避けたいときは `SODEX_HOST_HTTP_PORT` / `SODEX_HOST_ADMIN_PORT` を上書きできます。
+Docker Desktop/macOS では `SODEX_ADMIN_ALLOW_IP=192.168.65.1 make test-docker-server` を使います。
+
+QEMU debug shell smoke:
+
+```sh
+make test-qemu-debug-shell
+```
+
+debug shell の guest port は `10024` です。
+host 側ポートを変えたいときは `SODEX_HOST_DEBUG_SHELL_PORT=11024 make test-qemu-debug-shell` のように上書きできます。
+
+raw TCP client から手で試すときの最小例:
+
+```sh
+printf 'TOKEN control-secret\n' | nc 127.0.0.1 10024
+```
+
+返答は最初に `OK shell` が 1 行返り、その後は line protocol ではなく raw stream に切り替わります。
+対話用途では `nc` より `socat` の方が扱いやすいです。
+
+```sh
+socat -,rawer,echo=0 TCP:127.0.0.1:10024
+```
+
+接続したら最初の 1 行で `TOKEN control-secret` を送り、以後は shell 入力をそのまま流します。
 
 `make -C src test-qemu-memory` は `128/256/512/1024MB` の memory scaling matrix を回します。
 `make -C src test-qemu-user-memory` は shell 経由で `memgrow` を起動し、`execve` と `malloc/brk` の userland 回帰を確認します。

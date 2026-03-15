@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 ubuntu:24.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -6,8 +6,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         binutils \
         build-essential \
-        gcc-multilib \
-        libc6-dev-i386 \
+        binutils-i686-linux-gnu \
+        gcc-i686-linux-gnu \
         make \
         python3 \
         qemu-system-x86 \
@@ -17,11 +17,11 @@ WORKDIR /workspace
 
 COPY . /workspace
 
-ENV AS=/usr/bin/as
-ENV CC=/usr/bin/gcc
+ENV AS=/usr/bin/i686-linux-gnu-as
+ENV CC=/usr/bin/i686-linux-gnu-gcc
 ENV CXX=/usr/bin/g++
-ENV LD=/usr/bin/ld
-ENV AR=/usr/bin/ar
+ENV LD=/usr/bin/i686-linux-gnu-ld
+ENV AR=/usr/bin/i686-linux-gnu-ar
 ENV MAKE=/usr/bin/make
 ENV QEMU_CMD=/usr/bin/qemu-system-i386
 ENV SODEX_HOST_BIND_ADDR=0.0.0.0

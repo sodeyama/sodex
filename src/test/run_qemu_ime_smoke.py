@@ -21,8 +21,9 @@ INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 45
-IME_FILE_TEXT = "日本語 感じ ABC".encode("utf-8")
+IME_FILE_TEXT = "学校 感じ ABC".encode("utf-8")
 SHELL_FILENAME = "漢字"
+BLOB_SHELL_FILENAME = "学校"
 LATIN_FILENAME = "latin.txt"
 
 
@@ -240,6 +241,7 @@ def assert_ime_state(fsboot: pathlib.Path) -> None:
     ime_entry = root_entries.get("ime.txt")
     marker_entry = root_entries.get("afterime.txt")
     shell_entry = root_entries.get(SHELL_FILENAME)
+    blob_shell_entry = root_entries.get(BLOB_SHELL_FILENAME)
     latin_entry = root_entries.get(LATIN_FILENAME)
 
     if ime_entry is None:
@@ -248,6 +250,8 @@ def assert_ime_state(fsboot: pathlib.Path) -> None:
         raise AssertionError("afterime.txt was not created after returning to shell")
     if shell_entry is None:
         raise AssertionError(f"{SHELL_FILENAME!r} was not created from shell input")
+    if blob_shell_entry is None:
+        raise AssertionError(f"{BLOB_SHELL_FILENAME!r} was not created from blob dictionary input")
     if latin_entry is None:
         raise AssertionError(f"{LATIN_FILENAME!r} was not created after returning to latin mode")
 
@@ -336,12 +340,23 @@ def main() -> int:
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)
         monitor.send_text(f"touch {LATIN_FILENAME}\n")
         time.sleep(1.0)
+        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+
+        monitor.send_text("touch ")
+        monitor.send_hankaku_zenkaku()
+        monitor.send_text("gakkou")
+        monitor.send_key("spc")
+        monitor.send_key("ret")
+        monitor.send_muhenkan()
+        monitor.send_text("\n")
+        time.sleep(1.0)
+        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
 
         monitor.send_text("vi ime.txt\n")
         time.sleep(1.0)
         monitor.send_text("i")
         monitor.send_henkan()
-        monitor.send_text("nihongo")
+        monitor.send_text("gakkou")
         monitor.send_key("spc")
         monitor.send_key("ret")
         monitor.send_muhenkan()

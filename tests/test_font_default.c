@@ -34,9 +34,20 @@ TEST(wide_lookup_finds_demo_kanji) {
     ASSERT_EQ(glyph[3], 0x3ff0);
 }
 
+TEST(expanded_ime_kanji_have_wide_glyphs) {
+    ASSERT_NOT_NULL(font_default_wide_glyph(0x6771));
+    ASSERT_NOT_NULL(font_default_wide_glyph(0x4eac));
+    ASSERT_NOT_NULL(font_default_wide_glyph(0x5929));
+    ASSERT_NOT_NULL(font_default_wide_glyph(0x6c17));
+    ASSERT_EQ(font_default_glyph_width(0x6771), 2);
+    ASSERT_EQ(font_default_glyph_width(0x4eac), 2);
+    ASSERT_EQ(font_default_glyph_width(0x5929), 2);
+    ASSERT_EQ(font_default_glyph_width(0x6c17), 2);
+}
+
 TEST(missing_wide_glyph_falls_back_to_single_cell) {
-    ASSERT_NULL(font_default_wide_glyph(0x4e00));
-    ASSERT_EQ(font_default_glyph_width(0x4e00), 1);
+    ASSERT_NULL(font_default_wide_glyph(0x1f600));
+    ASSERT_EQ(font_default_glyph_width(0x1f600), 1);
 }
 
 int main(void)
@@ -47,6 +58,7 @@ int main(void)
     RUN_TEST(lowercase_i_keeps_visible_dot);
     RUN_TEST(wide_lookup_finds_hiragana);
     RUN_TEST(wide_lookup_finds_demo_kanji);
+    RUN_TEST(expanded_ime_kanji_have_wide_glyphs);
     RUN_TEST(missing_wide_glyph_falls_back_to_single_cell);
 
     TEST_REPORT();

@@ -32,6 +32,7 @@ COMMON_OPTS="-drive file=$BUILD_BIN/fsboot.bin,format=raw,if=ide \
 
 NIC_OPTS="-device ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net0"
 QEMU_CMD="${QEMU_CMD:-qemu-system-i386}"
+QEMU_DISPLAY="${QEMU_DISPLAY:-cocoa,zoom-to-fit=off}"
 
 case "${1:-user}" in
   net)
@@ -45,7 +46,7 @@ case "${1:-user}" in
         $COMMON_OPTS \
         -netdev vmnet-shared,id=net0,start-address=10.0.2.1,end-address=10.0.2.254,subnet-mask=255.255.255.0 \
         $NIC_OPTS \
-        -display cocoa
+        -display "$QEMU_DISPLAY"
     ;;
   *)
     echo "=== user net mode ==="
@@ -55,6 +56,6 @@ case "${1:-user}" in
         $COMMON_OPTS \
         -netdev user,id=net0 \
         $NIC_OPTS \
-        -display cocoa
+        -display "$QEMU_DISPLAY"
     ;;
 esac

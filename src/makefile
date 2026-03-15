@@ -16,7 +16,13 @@ INIT2   = ${INITDIR}/bin/ptest2
 KMKFS   = ${BUILDDIR}/tools/kmkfs
 GETSIZE = ${BUILDDIR}/tools/getsize
 UDEV_GOTHIC_TTF = ${BASEDIR}/third_party/fonts/UDEVGothic-Regular.ttf
-UDEV_GOTHIC_UTF8_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6,5909,5b57,611b,611f,63db,65e5,672c,6f22,85cd,8a9e
+FONT8X16_HEADER = ${INCLUDE}/font8x16_data.h
+FONT16X16_HEADER = ${INCLUDE}/font16x16_data.h
+FONT_HEADERS = ${FONT8X16_HEADER} ${FONT16X16_HEADER}
+FONT16X16_BASE_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6
+IME_DICT_SOURCE = ${TOOLDIR}/ime_dictionary_source.tsv
+IME_DICT_TOOL = ${TOOLDIR}/mkimeblob.py
+IME_DICT_BLOB = ${USRDIR}/bin/ime_dictionary.blob
 
 # Test process
 PTEST   = ${INITDIR}/bin/ptest
@@ -65,35 +71,44 @@ $(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/
 # === Main targets ===
 
 .PHONY: all usr-build regen-font8x16 regen-font16x16 regen-fonts
-all : usr-build ${KERNEL} ${ACIENT} ${MIDDLE} tools
+all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
 
-regen-font8x16:
-	python3 ${TOOLDIR}/mkfontpack.py \
-		--font-path ${UDEV_GOTHIC_TTF} \
-		--font-size 13 \
-		--output-header ${INCLUDE}/font8x16_data.h \
-		--source-name UDEVGothic-Regular.ttf
+regen-font8x16: ${FONT8X16_HEADER}
 
-regen-font16x16:
-	python3 ${TOOLDIR}/mkfontpack.py \
-		--font-path ${UDEV_GOTHIC_TTF} \
-		--output-header ${INCLUDE}/font16x16_data.h \
-		--cell-width 16 \
-		--cell-height 16 \
-		--font-size 14 \
-		--codepoint-ranges ${UDEV_GOTHIC_UTF8_RANGES} \
-		--symbol-name font16x16_glyphs \
-		--source-name UDEVGothic-Regular.ttf
+regen-font16x16: ${FONT16X16_HEADER}
 
 regen-fonts: regen-font8x16 regen-font16x16
 
-usr-build:
+usr-build: ${FONT_HEADERS}
 	cd usr; make
 
-${KERNEL} : ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${BUILDDIR}/boot.ld
+${FONT8X16_HEADER}: ${TOOLDIR}/mkfontpack.py ${UDEV_GOTHIC_TTF}
+	python3 ${TOOLDIR}/mkfontpack.py \
+		--font-path ${UDEV_GOTHIC_TTF} \
+		--font-size 13 \
+		--output-header $@ \
+		--source-name UDEVGothic-Regular.ttf
+
+${FONT16X16_HEADER}: ${TOOLDIR}/mkfontpack.py ${UDEV_GOTHIC_TTF} ${IME_DICT_SOURCE}
+	python3 ${TOOLDIR}/mkfontpack.py \
+		--font-path ${UDEV_GOTHIC_TTF} \
+		--output-header $@ \
+		--cell-width 16 \
+		--cell-height 16 \
+		--font-size 14 \
+		--codepoint-ranges ${FONT16X16_BASE_RANGES} \
+		--text-source ${IME_DICT_SOURCE} \
+		--symbol-name font16x16_glyphs \
+		--source-name UDEVGothic-Regular.ttf
+
+${IME_DICT_BLOB}: ${IME_DICT_SOURCE} ${IME_DICT_TOOL}
+	mkdir -p ${USRDIR}/bin
+	python3 ${IME_DICT_TOOL} --input ${IME_DICT_SOURCE} --output $@
+
+${KERNEL} : ${FONT_HEADERS} ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${BUILDDIR}/boot.ld
 	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} -o $@
 
 ${DRIVER_OBJS} :
@@ -134,7 +149,7 @@ ${BUILDDIR}/boot.ld: boot.ld.S
 
 # === Pattern rules (C and assembly -> build/obj/) ===
 
-$(OBJDIR)/%.o: %.c
+$(OBJDIR)/%.o: %.c ${FONT_HEADERS}
 	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} ${EXTRA_CFLAGS} ${MEMORY_SCALE_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(OBJDIR)/%.o: %.S
@@ -239,4 +254,5 @@ clean :
 	cd net; make clean
 	cd display; make clean
 	cd tty; make clean
+	rm -f ${IME_DICT_BLOB}
 	rm -rf ${BUILDDIR}

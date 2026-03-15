@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
         default="UDEVGothic-Regular.ttf",
         help="生成コメントへ埋め込むソース名",
     )
+    parser.add_argument(
+        "--text-source",
+        action="append",
+        default=[],
+        help="追加 glyph 抽出元の UTF-8 text file",
+    )
     return parser.parse_args()
 
 
@@ -86,6 +92,20 @@ def parse_codepoint_ranges(spec: str) -> list[int]:
             first, last = last, first
         for codepoint in range(first, last + 1):
             seen.add(codepoint)
+    return sorted(seen)
+
+
+def load_text_source_codepoints(paths: list[str]) -> list[int]:
+    seen: set[int] = set()
+
+    for raw_path in paths:
+        path = Path(raw_path)
+        for ch in path.read_text(encoding="utf-8"):
+            codepoint = ord(ch)
+            if codepoint < 0x80:
+                continue
+            seen.add(codepoint)
+
     return sorted(seen)
 
 
@@ -190,7 +210,8 @@ def main() -> int:
         print(f"フォントが見つかりません: {font_path}", file=sys.stderr)
         return 1
 
-    codepoints = parse_codepoint_ranges(args.codepoint_ranges)
+    codepoints = set(parse_codepoint_ranges(args.codepoint_ranges))
+    codepoints.update(load_text_source_codepoints(args.text_source))
     font = ImageFont.truetype(str(font_path), size=args.font_size)
     ascent, descent = font.getmetrics()
     line_height = ascent + descent
@@ -198,7 +219,7 @@ def main() -> int:
     baseline = top_padding + ascent
     advance_width = 0
     if codepoints:
-        sample_codepoints = codepoints
+        sample_codepoints = sorted(codepoints)
     else:
         sample_codepoints = list(range(ASCII_FIRST, ASCII_LAST + 1))
     for codepoint in sample_codepoints:

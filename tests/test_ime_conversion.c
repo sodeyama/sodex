@@ -135,6 +135,26 @@ TEST(common_city_and_weather_terms_convert_from_expanded_dictionary) {
     ASSERT_STR_EQ(out, "天気");
 }
 
+TEST(common_large_dictionary_term_converts_from_mozc_source) {
+    struct ime_state ime;
+    char out[TEST_BUF_SIZE];
+    int replace_chars = 0;
+    int len;
+
+    ASSERT_EQ(configure_dictionary(), 0);
+    ime_init(&ime);
+    ime_set_mode(&ime, IME_MODE_HIRAGANA);
+    ASSERT_EQ(feed_text(&ime, "shushou", out), 15);
+    ASSERT_STR_EQ(ime_reading(&ime), "しゅしょう");
+    ASSERT_EQ(ime_start_conversion(&ime), 1);
+    ASSERT_STR_EQ(ime_current_candidate(&ime), "首相");
+    len = ime_commit_conversion(&ime, out, sizeof(out), &replace_chars);
+    ASSERT_EQ(len, 6);
+    ASSERT_EQ(replace_chars, 5);
+    out[len] = '\0';
+    ASSERT_STR_EQ(out, "首相");
+}
+
 TEST(commit_conversion_returns_replace_count_and_clears_segment) {
     struct ime_state ime;
     char out[TEST_BUF_SIZE];
@@ -179,6 +199,7 @@ int main(void)
     RUN_TEST(candidate_paging_tracks_selected_window);
     RUN_TEST(common_basic_term_converts_from_expanded_dictionary);
     RUN_TEST(common_city_and_weather_terms_convert_from_expanded_dictionary);
+    RUN_TEST(common_large_dictionary_term_converts_from_mozc_source);
     RUN_TEST(commit_conversion_returns_replace_count_and_clears_segment);
     RUN_TEST(backspace_drops_last_reading_char_and_cancels_conversion);
 

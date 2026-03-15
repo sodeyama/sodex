@@ -177,7 +177,7 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-84 | 採用する辞書 source、license、生成方針を確定し、build 入力形式を決める | RT-83 | 辞書更新元と配布上の扱いが明文化される |
+| [x] | RT-84 | 採用する辞書 source、license、生成方針を確定し、build 入力形式を決める | RT-83 | 辞書更新元と配布上の扱いが明文化される |
 | [x] | RT-85 | source 辞書から compact blob を生成する tool と build 導線を追加する | RT-84 | text 辞書を runtime parse せず、image へ辞書 blob を載せられる |
 | [x] | RT-86 | on-disk blob lookup と small cache を pure logic helper として実装する | RT-85 | RAM 常駐量を抑えつつ読みから候補列を引ける |
 | [x] | RT-87 | `term` の IME 辞書層を blob lookup 前提へ置き換える | RT-86 | shell / `vi` が大規模辞書候補を実際に引ける |

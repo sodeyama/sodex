@@ -27,7 +27,11 @@ FONT_WIDE_CELL_HEIGHT = 24
 FONT_NARROW_SIZE = 19
 FONT_WIDE_SIZE = 21
 FONT_SUPERSAMPLE = 3
-IME_DICT_SOURCE = ${TOOLDIR}/ime_dictionary_source.tsv
+IME_DICT_SOURCE = ${BUILDDIR}/tools/ime_dictionary_source.tsv
+IME_DICT_MANUAL_SOURCE = ${TOOLDIR}/ime_dictionary_manual.tsv
+IME_DICT_SOURCE_TOOL = ${TOOLDIR}/build_ime_dictionary_source.py
+IME_DICT_MOZC_DIR = ${BASEDIR}/third_party/dictionaries/mozc/dictionary_oss
+IME_DICT_MOZC_SOURCES = $(wildcard ${IME_DICT_MOZC_DIR}/dictionary*.txt)
 IME_DICT_TOOL = ${TOOLDIR}/mkimeblob.py
 IME_DICT_BLOB = ${USRDIR}/bin/ime_dictionary.blob
 
@@ -117,6 +121,13 @@ ${FONT16X16_HEADER}: ${TOOLDIR}/mkfontpack.py ${UDEV_GOTHIC_TTF} ${IME_DICT_SOUR
 		--text-source ${IME_DICT_SOURCE} \
 		--symbol-name font16x16_glyphs \
 		--source-name UDEVGothic-Regular.ttf
+
+${IME_DICT_SOURCE}: ${IME_DICT_SOURCE_TOOL} ${IME_DICT_MANUAL_SOURCE} ${IME_DICT_MOZC_SOURCES}
+	python3 ${IME_DICT_SOURCE_TOOL} \
+		--manual ${IME_DICT_MANUAL_SOURCE} \
+		--mozc-dir ${IME_DICT_MOZC_DIR} \
+		--max-cost 6000 \
+		--output $@
 
 ${IME_DICT_BLOB}: ${IME_DICT_SOURCE} ${IME_DICT_TOOL}
 	mkdir -p ${USRDIR}/bin

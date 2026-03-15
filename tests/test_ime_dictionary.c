@@ -63,6 +63,23 @@ TEST(blob_lookup_finds_added_basic_terms) {
     ASSERT_STR_EQ(candidates[0], "月曜日");
 }
 
+TEST(blob_lookup_finds_large_dictionary_terms) {
+    char storage[IME_CANDIDATE_STORAGE_MAX];
+    const char *candidates[IME_CANDIDATE_MAX];
+    int count = 0;
+
+    ASSERT_EQ(use_blob_fixture(), 0);
+    ASSERT_EQ(ime_dictionary_lookup("しゅしょう", storage, sizeof(storage),
+                                    candidates, IME_CANDIDATE_MAX, &count), 0);
+    ASSERT_EQ(count, 3);
+    ASSERT_STR_EQ(candidates[0], "首相");
+
+    ASSERT_EQ(ime_dictionary_lookup("そうりだいじん", storage, sizeof(storage),
+                                    candidates, IME_CANDIDATE_MAX, &count), 0);
+    ASSERT_EQ(count, 1);
+    ASSERT_STR_EQ(candidates[0], "総理大臣");
+}
+
 TEST(fallback_lookup_works_when_blob_missing) {
     char storage[IME_CANDIDATE_STORAGE_MAX];
     const char *candidates[IME_CANDIDATE_MAX];
@@ -82,7 +99,7 @@ TEST(lookup_returns_not_found_for_unknown_reading) {
     int count = 0;
 
     ASSERT_EQ(use_blob_fixture(), 0);
-    ASSERT_EQ(ime_dictionary_lookup("みとうろく", storage, sizeof(storage),
+    ASSERT_EQ(ime_dictionary_lookup("そでっくすみとうろく", storage, sizeof(storage),
                                     candidates, IME_CANDIDATE_MAX, &count), -1);
     ASSERT_EQ(count, 0);
     ASSERT_NULL(candidates[0]);
@@ -96,6 +113,7 @@ int main(void)
     RUN_TEST(lookup_prefers_blob_dictionary);
     RUN_TEST(blob_lookup_preserves_candidate_order);
     RUN_TEST(blob_lookup_finds_added_basic_terms);
+    RUN_TEST(blob_lookup_finds_large_dictionary_terms);
     RUN_TEST(fallback_lookup_works_when_blob_missing);
     RUN_TEST(lookup_returns_not_found_for_unknown_reading);
 

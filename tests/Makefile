@@ -8,6 +8,11 @@ SRC = ../src
 TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser
 
 IME_FIXTURE = ime_dictionary_fixture.blob
+IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
+IME_DICT_MANUAL_SOURCE = $(SRC)/tools/ime_dictionary_manual.tsv
+IME_DICT_SOURCE_TOOL = $(SRC)/tools/build_ime_dictionary_source.py
+IME_DICT_MOZC_DIR = ../third_party/dictionaries/mozc/dictionary_oss
+IME_DICT_MOZC_SOURCES = $(wildcard $(IME_DICT_MOZC_DIR)/dictionary*.txt)
 
 .PHONY: all clean test
 
@@ -227,8 +232,15 @@ test_ime_romaji_ime.o: $(SRC)/usr/lib/libc/ime_romaji.c
 test_ime_romaji_utf8.o: $(SRC)/usr/lib/libc/utf8.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
-$(IME_FIXTURE): $(SRC)/tools/mkimeblob.py $(SRC)/tools/ime_dictionary_source.tsv
-	python3 $(SRC)/tools/mkimeblob.py --input $(SRC)/tools/ime_dictionary_source.tsv --output $@
+$(IME_FIXTURE_SOURCE): $(IME_DICT_SOURCE_TOOL) $(IME_DICT_MANUAL_SOURCE) $(IME_DICT_MOZC_SOURCES)
+	python3 $(IME_DICT_SOURCE_TOOL) \
+		--manual $(IME_DICT_MANUAL_SOURCE) \
+		--mozc-dir $(IME_DICT_MOZC_DIR) \
+		--max-cost 6000 \
+		--output $@
+
+$(IME_FIXTURE): $(SRC)/tools/mkimeblob.py $(IME_FIXTURE_SOURCE)
+	python3 $(SRC)/tools/mkimeblob.py --input $(IME_FIXTURE_SOURCE) --output $@
 
 # IME blob lookup tests
 test_ime_dict_blob: test_ime_dict_blob.c test_ime_dict_blob_blob.o $(IME_FIXTURE)
@@ -281,4 +293,4 @@ test_eshell_parser_parser.o: $(SRC)/usr/lib/libc/eshell_parser.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:
-	rm -f $(TESTS) $(IME_FIXTURE) *.o
+	rm -f $(TESTS) $(IME_FIXTURE) $(IME_FIXTURE_SOURCE) *.o

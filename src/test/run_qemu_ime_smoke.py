@@ -21,9 +21,9 @@ INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 45
-IME_FILE_TEXT = "学校 感じ ABC".encode("utf-8")
+IME_FILE_TEXT = "首相 感じ ABC".encode("utf-8")
 SHELL_FILENAME = "漢字"
-BLOB_SHELL_FILENAME = "学校"
+BLOB_SHELL_FILENAME = "首相"
 LATIN_FILENAME = "latin.txt"
 
 
@@ -344,7 +344,7 @@ def main() -> int:
 
         monitor.send_text("touch ")
         monitor.send_hankaku_zenkaku()
-        monitor.send_text("gakkou")
+        monitor.send_text("shushou")
         monitor.send_key("spc")
         monitor.send_key("ret")
         monitor.send_muhenkan()
@@ -356,7 +356,7 @@ def main() -> int:
         time.sleep(1.0)
         monitor.send_text("i")
         monitor.send_henkan()
-        monitor.send_text("gakkou")
+        monitor.send_text("shushou")
         monitor.send_key("spc")
         monitor.send_key("ret")
         monitor.send_muhenkan()

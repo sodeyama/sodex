@@ -178,13 +178,25 @@
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
 | [ ] | RT-84 | 採用する辞書 source、license、生成方針を確定し、build 入力形式を決める | RT-83 | 辞書更新元と配布上の扱いが明文化される |
-| [ ] | RT-85 | source 辞書から compact blob を生成する tool と build 導線を追加する | RT-84 | text 辞書を runtime parse せず、image へ辞書 blob を載せられる |
-| [ ] | RT-86 | on-disk blob lookup と small cache を pure logic helper として実装する | RT-85 | RAM 常駐量を抑えつつ読みから候補列を引ける |
-| [ ] | RT-87 | `term` の IME 辞書層を blob lookup 前提へ置き換える | RT-86 | shell / `vi` が大規模辞書候補を実際に引ける |
-| [ ] | RT-88 | 候補 UI を多候補 paging、切り詰め、ページ移動対応へ拡張する | RT-87 | 長い候補列でも選択操作が破綻しない |
-| [ ] | RT-89 | 辞書 blob 欠落時の fallback と memory budget 診断を追加する | RT-87 | 辞書未搭載時も最小辞書で動き、cache 使用量を追える |
-| [ ] | RT-90 | blob lookup / cache / memory budget の host test を追加する | RT-86, RT-89 | 大規模辞書ロジックの回帰を host test で検知できる |
-| [ ] | RT-91 | 大規模辞書 IME の QEMU smoke test を追加し、代表語彙変換と保存を固定する | RT-88, RT-90 | 実機相当導線で大規模辞書 lookup の回帰を検知できる |
+| [x] | RT-85 | source 辞書から compact blob を生成する tool と build 導線を追加する | RT-84 | text 辞書を runtime parse せず、image へ辞書 blob を載せられる |
+| [x] | RT-86 | on-disk blob lookup と small cache を pure logic helper として実装する | RT-85 | RAM 常駐量を抑えつつ読みから候補列を引ける |
+| [x] | RT-87 | `term` の IME 辞書層を blob lookup 前提へ置き換える | RT-86 | shell / `vi` が大規模辞書候補を実際に引ける |
+| [x] | RT-88 | 候補 UI を多候補 paging、切り詰め、ページ移動対応へ拡張する | RT-87 | 長い候補列でも選択操作が破綻しない |
+| [x] | RT-89 | 辞書 blob 欠落時の fallback と memory budget 診断を追加する | RT-87 | 辞書未搭載時も最小辞書で動き、cache 使用量を追える |
+| [x] | RT-90 | blob lookup / cache / memory budget の host test を追加する | RT-86, RT-89 | 大規模辞書ロジックの回帰を host test で検知できる |
+| [x] | RT-91 | 大規模辞書 IME の QEMU smoke test を追加し、代表語彙変換と保存を固定する | RT-88, RT-90 | 実機相当導線で大規模辞書 lookup の回帰を検知できる |
+
+## M15: large dictionary 向け ext3 large file support
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | RT-92 | ext3 block geometry を header / tool 間で揃え、単一 file 上限を multi-MiB 級へ引き上げる | RT-85 | `BLOCK_MAX` と stage 境界が build / runtime で一致する |
+| [x] | RT-93 | `kmkfs` に direct + single indirect + double indirect の image 生成を追加する | RT-92 | 5MiB 級 file を image build で載せられる |
+| [x] | RT-94 | runtime `ext3fs` の block 解決、割り当て、解放を double indirect 対応へ拡張する | RT-92 | large file の read / write / unlink が double indirect 領域まで破綻しない |
+| [x] | RT-95 | guest userland から large file の境界 block を読む検証 command を追加する | RT-94 | representative block を userland で verify できる |
+| [x] | RT-96 | double indirect の block position と上限の host test を追加する | RT-92, RT-94 | 境界計算の回帰を host test で検知できる |
+| [x] | RT-97 | 5MiB fixture を image に載せ、guest から検証する QEMU smoke を追加する | RT-93, RT-95, RT-96 | ext3 large file の主要導線を QEMU 上で固定できる |
+| [x] | RT-98 | Plan 18 の blocker を更新し、large dictionary blob 搭載前提の fs 制約を解消する | RT-97 | 大規模辞書側が fs 制約ではなく辞書 source 側へ論点を移せる |
 
 ## 先送りする項目
 

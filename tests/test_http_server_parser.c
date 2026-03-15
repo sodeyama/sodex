@@ -1,13 +1,14 @@
 #include "test_framework.h"
+#include <stdint.h>
 #include <string.h>
 
 #define TEST_BUILD 1
 #include "../src/include/admin_server.h"
 
-static u_int32_t test_ip(u_int8_t a, u_int8_t b, u_int8_t c, u_int8_t d)
+static u_int32_t test_ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d)
 {
     u_int32_t value = 0;
-    u_int8_t *raw = (u_int8_t *)&value;
+    uint8_t *raw = (uint8_t *)&value;
     raw[0] = a;
     raw[1] = b;
     raw[2] = c;

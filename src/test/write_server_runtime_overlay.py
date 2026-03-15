@@ -21,22 +21,22 @@ def main() -> int:
     status_token = os.environ.get("SODEX_ADMIN_STATUS_TOKEN", "status-secret")
     control_token = os.environ.get("SODEX_ADMIN_CONTROL_TOKEN", "control-secret")
     allow_ip = os.environ.get("SODEX_ADMIN_ALLOW_IP", "10.0.2.2")
+    debug_shell_port = os.environ.get("SODEX_DEBUG_SHELL_PORT", "")
 
     if overlay_dir.exists():
         shutil.rmtree(overlay_dir)
     etc_dir.mkdir(parents=True, exist_ok=True)
 
-    config_path.write_text(
-        "\n".join(
-            [
-                f"status_token={status_token}",
-                f"control_token={control_token}",
-                f"allow_ip={allow_ip}",
-                "",
-            ]
-        ),
-        encoding="ascii",
-    )
+    lines = [
+        f"status_token={status_token}",
+        f"control_token={control_token}",
+        f"allow_ip={allow_ip}",
+    ]
+    if debug_shell_port and debug_shell_port != "0":
+        lines.append(f"debug_shell_port={debug_shell_port}")
+    lines.append("")
+
+    config_path.write_text("\n".join(lines), encoding="ascii")
 
     return 0
 

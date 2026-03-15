@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
 
 .PHONY: all clean test
 
@@ -203,6 +203,16 @@ test_http_server_parser_http.o: $(SRC)/net/http_server.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
 
 test_http_server_parser_admin.o: $(SRC)/net/admin_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# Debug shell parser/config tests
+test_debug_shell_parser: test_debug_shell_parser.c test_debug_shell_parser_debug_shell.o test_debug_shell_parser_admin.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ test_debug_shell_parser.c test_debug_shell_parser_debug_shell.o test_debug_shell_parser_admin.o
+
+test_debug_shell_parser_debug_shell.o: $(SRC)/net/debug_shell_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_debug_shell_parser_admin.o: $(SRC)/net/admin_server.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
 
 # vi buffer tests

@@ -85,6 +85,7 @@ struct admin_runtime_state {
   char status_token[ADMIN_TOKEN_MAX];
   char control_token[ADMIN_TOKEN_MAX];
   u_int32_t allow_ip;
+  u_int16_t debug_shell_port;
   int agent_running;
   int agent_start_count;
   int agent_stop_count;
@@ -532,6 +533,7 @@ PRIVATE int admin_apply_config_line(const char *line)
   char raw[ADMIN_TEXT_REQUEST_MAX];
   char *sep;
   u_int32_t allow_ip;
+  int port;
 
   if (line == 0)
     return 0;
@@ -562,6 +564,13 @@ PRIVATE int admin_apply_config_line(const char *line)
     if (!admin_parse_ipv4(value, &allow_ip))
       return -1;
     admin_runtime.allow_ip = allow_ip;
+    return 1;
+  }
+  if (strcmp(key, "debug_shell_port") == 0) {
+    port = admin_parse_positive_int(value);
+    if (port < 0 || port > 65535)
+      return -1;
+    admin_runtime.debug_shell_port = (u_int16_t)port;
     return 1;
   }
 
@@ -757,6 +766,22 @@ PUBLIC int admin_role_from_token(const char *token)
     return ADMIN_ROLE_STATUS;
 
   return ADMIN_ROLE_NONE;
+}
+
+PUBLIC int admin_runtime_debug_shell_enabled(void)
+{
+  return admin_runtime.debug_shell_port != 0 &&
+         admin_runtime.control_token[0] != '\0';
+}
+
+PUBLIC int admin_runtime_debug_shell_port(void)
+{
+  return (int)admin_runtime.debug_shell_port;
+}
+
+PUBLIC void admin_runtime_audit_line(const char *line)
+{
+  admin_audit_line(line);
 }
 
 PUBLIC int admin_is_source_allowed(u_int32_t peer_addr)
@@ -1207,5 +1232,14 @@ PUBLIC void admin_runtime_append_test_audit(const char *message)
 PUBLIC int admin_runtime_load_config_text(const char *text, int len)
 {
   return admin_apply_config_text(text, len);
+}
+
+PUBLIC void admin_runtime_set_debug_shell_port(int port)
+{
+  if (port < 0)
+    port = 0;
+  if (port > 65535)
+    port = 65535;
+  admin_runtime.debug_shell_port = (u_int16_t)port;
 }
 #endif

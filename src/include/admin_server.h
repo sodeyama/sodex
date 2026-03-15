@@ -83,6 +83,9 @@ PUBLIC int admin_authorize_peer(u_int32_t peer_addr,
 PUBLIC int admin_authorize_request_detailed(const struct admin_request *req,
                                             u_int32_t peer_addr,
                                             u_int32_t *retry_after_ticks);
+PUBLIC int admin_runtime_debug_shell_enabled(void);
+PUBLIC int admin_runtime_debug_shell_port(void);
+PUBLIC void admin_runtime_audit_line(const char *line);
 PUBLIC void admin_runtime_note_listener_ready(int listener_kind);
 
 PUBLIC int http_parse_request(const char *data, int len,
@@ -101,6 +104,7 @@ PUBLIC void admin_runtime_set_tick(u_int32_t tick);
 PUBLIC void admin_runtime_set_agent_running(int running);
 PUBLIC void admin_runtime_append_test_audit(const char *message);
 PUBLIC int admin_runtime_load_config_text(const char *text, int len);
+PUBLIC void admin_runtime_set_debug_shell_port(int port);
 #endif
 
 #endif

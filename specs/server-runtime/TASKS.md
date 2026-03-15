@@ -161,11 +161,61 @@ Docker 経由の HTTP/admin smoke まで安定化できた。
 
 ### SRT-16: 暗号込み `SSH server` の段階導入
 
-- [ ] `SSHv2` の最小 scope と algorithm suite を決める
-- [ ] 乱数源と crypto 実装の導入方針を決める
-- [ ] host key の注入または永続化方式を決める
-- [ ] transport packet / key exchange / `NEWKEYS` を実装する
-- [ ] 最初の 1 auth method を実装する
-- [ ] `session` channel / `pty-req` / `shell` / `window-change` を実装する
-- [ ] `OpenSSH` client との互換 smoke と host test を追加する
-- [ ] `scp` / `sftp` / forwarding を初期スコープ外として固定する
+まずは [plans/08-ssh-server.md](plans/08-ssh-server.md) の最初の milestone、
+すなわち `ssh -p <hostfwd_port> root@127.0.0.1` で `eshell` に入るところまでを最小 goal にする。
+
+#### Phase 0: scope / profile 固定
+
+- [ ] listener を `ssh_port` default off にし、1 active connection / 1 session channel で固定する
+- [ ] 初期 scope を interactive shell のみに絞り、`exec` / `subsystem` / forwarding / 複数 channel を reject に固定する
+- [ ] 初期 auth を `password` のみに絞り、user 名は `root` 固定で進める
+- [ ] 初期 algorithm profile を `curve25519-sha256` + `ssh-ed25519` + `aes128-ctr` + `hmac-sha2-256` + `none` に固定する
+- [ ] `scp` / `sftp` / publickey auth / agent forwarding を初期スコープ外として文書に固定する
+
+#### Phase 1: crypto / seed / config 注入
+
+- [ ] `src/lib/crypto/` を追加し、vendored primitive を最小 wrapper API で包む方針を決める
+- [ ] `X25519`, `Ed25519`, `SHA-256`, `SHA-512`, `AES-CTR`, `HMAC-SHA256` の最小 API を定義する
+- [ ] `ssh_password`, `ssh_hostkey_ed25519_seed`, `ssh_rng_seed` を config parser に追加する
+- [ ] seed 未設定時 fail closed にし、host 側 overlay 生成で seed/material を注入する
+- [ ] packet padding / ephemeral key / IV 用の DRBG を追加する
+
+#### Phase 2: transport packet 層
+
+- [ ] `SSH-2.0-*` version exchange と banner parser を実装する
+- [ ] SSH binary packet の encode / decode を実装する
+- [ ] `uint32`, `string`, `name-list`, `mpint` helper を実装する
+- [ ] preauth state machine と disconnect reason を実装する
+- [ ] packet size 上限と malformed packet reject を入れる
+
+#### Phase 3: key exchange / `NEWKEYS`
+
+- [ ] `KEXINIT` negotiation を 1 profile 固定で実装する
+- [ ] `curve25519-sha256` の shared secret と exchange hash を実装する
+- [ ] `ssh-ed25519` host key 公開鍵生成と署名を実装する
+- [ ] key expansion と `NEWKEYS` を実装する
+- [ ] `aes128-ctr` / `hmac-sha2-256` で encrypt/decrypt を有効化する
+
+#### Phase 4: userauth
+
+- [ ] `ssh-userauth` service と `password` auth を実装する
+- [ ] `root` 固定 user + `ssh_password` 照合を実装する
+- [ ] 認証失敗時の retry 制限、timeout、audit を既存 runtime 制約へ統合する
+- [ ] unsupported auth method には `password` のみを advertise する
+
+#### Phase 5: session / PTY / shell
+
+- [ ] `ssh-connection` service を実装する
+- [ ] `CHANNEL_OPEN session` を 1 本だけ許可する
+- [ ] `pty-req` を `tty_set_winsize()` と結び、初期 winsize と `window-change` を反映する
+- [ ] `shell` request で `openpty()` / `execve_pty()` に接続し、`eshell` を起動する
+- [ ] `CHANNEL_DATA` と `PTY` relay の双方向転送を実装する
+- [ ] shell 終了時に `exit-status`, `EOF`, `CLOSE` を返す
+- [ ] `exec`, `env`, `subsystem`, 追加 channel を reject する
+
+#### Phase 6: host test / QEMU smoke / 手順
+
+- [ ] host test に packet codec / `KEXINIT` parser / auth policy / channel state machine を追加する
+- [ ] `run_qemu_ssh_smoke.py` を追加し、login / command / exit / reconnect / wrong password を通す
+- [ ] host key fingerprint と known_hosts を固定する smoke 手順を追加する
+- [ ] README に manual 手順と `ssh` / `ssh -tt` 例を書く

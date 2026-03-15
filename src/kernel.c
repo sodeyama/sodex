@@ -159,12 +159,6 @@ PUBLIC void start_kernel()
   _kputs("\n");
 
   for(;;) {
-    network_poll();
-    admin_server_tick();
-    http_server_tick();
-    debug_shell_server_tick();
-    ssh_server_tick();
-    socket_service_pending_tcp();
     asm("sti\n\thlt");
   }
 }

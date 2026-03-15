@@ -18,6 +18,7 @@
 11. 日本語直接入力と IME
 12. terminal / shell / `vi` の実用化と回帰基盤の再固定
 13. 日本語 IME の漢字変換と候補 UI
+14. フル IME 辞書と大規模候補対応
 
 ## M0: 互換を壊さない基盤化
 
@@ -172,6 +173,19 @@
 | [x] | RT-82 | IME 辞書 lookup と候補遷移の host test を追加する | RT-77, RT-78 | lookup、次候補、前候補、キャンセル、確定、`Backspace` 復帰を自動検知できる |
 | [x] | RT-83 | IME 変換の QEMU smoke test を追加し、候補選択と保存を固定する | RT-81, RT-82 | 漢字変換の主要導線を QEMU 上で回帰検知できる |
 
+## M14: フル IME 辞書と大規模候補対応
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | RT-84 | 採用する辞書 source、license、生成方針を確定し、build 入力形式を決める | RT-83 | 辞書更新元と配布上の扱いが明文化される |
+| [ ] | RT-85 | source 辞書から compact blob を生成する tool と build 導線を追加する | RT-84 | text 辞書を runtime parse せず、image へ辞書 blob を載せられる |
+| [ ] | RT-86 | on-disk blob lookup と small cache を pure logic helper として実装する | RT-85 | RAM 常駐量を抑えつつ読みから候補列を引ける |
+| [ ] | RT-87 | `term` の IME 辞書層を blob lookup 前提へ置き換える | RT-86 | shell / `vi` が大規模辞書候補を実際に引ける |
+| [ ] | RT-88 | 候補 UI を多候補 paging、切り詰め、ページ移動対応へ拡張する | RT-87 | 長い候補列でも選択操作が破綻しない |
+| [ ] | RT-89 | 辞書 blob 欠落時の fallback と memory budget 診断を追加する | RT-87 | 辞書未搭載時も最小辞書で動き、cache 使用量を追える |
+| [ ] | RT-90 | blob lookup / cache / memory budget の host test を追加する | RT-86, RT-89 | 大規模辞書ロジックの回帰を host test で検知できる |
+| [ ] | RT-91 | 大規模辞書 IME の QEMU smoke test を追加し、代表語彙変換と保存を固定する | RT-88, RT-90 | 実機相当導線で大規模辞書 lookup の回帰を検知できる |
+
 ## 先送りする項目
 
 - 複数 terminal セッション
@@ -179,4 +193,4 @@
 - マウス入力
 - ウィンドウシステム
 - `vi` の複数バッファ、text object、マクロ
-- 日本語 IME の予測変換、学習辞書、大規模辞書
+- 日本語 IME の予測変換、学習辞書

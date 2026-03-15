@@ -65,6 +65,7 @@ PRIVATE int sys_tcgetattr(int fd, struct termios *termios);
 PRIVATE int sys_tcsetattr(int fd, int optional_actions,
                           const struct termios *termios);
 PRIVATE int sys_sleep_ticks(u_int32_t ticks);
+PRIVATE int sys_set_foreground_pid(int fd, pid_t pid);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -211,6 +212,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_SLEEP_TICKS:
     ret = sys_sleep_ticks(p1);
+    break;
+
+  case SYS_CALL_SET_FOREGROUND_PID:
+    ret = sys_set_foreground_pid((int)p1, (pid_t)p2);
     break;
 
   case SYS_CALL_BRK:
@@ -573,6 +578,13 @@ PRIVATE int sys_sleep_ticks(u_int32_t ticks)
     asm("sti\n\thlt");
   }
   return 0;
+}
+
+PRIVATE int sys_set_foreground_pid(int fd, pid_t pid)
+{
+  struct tty *tty = tty_lookup_file(current->files, fd);
+
+  return tty_set_foreground_pid(tty, pid);
 }
 
 PRIVATE int sys_debug_write(const char *buf, size_t len)

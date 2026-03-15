@@ -201,6 +201,8 @@ PRIVATE u_int8_t ssh_channel_payload_buf[SSH_PAYLOAD_MAX];
 PRIVATE int ssh_runtime_loaded = FALSE;
 PRIVATE int ssh_tick_active = FALSE;
 
+PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn);
+
 PRIVATE void ssh_copy_string(char *dest, int cap, const char *src)
 {
   int i = 0;
@@ -1671,7 +1673,15 @@ PRIVATE int ssh_handle_channel_data(struct ssh_connection *conn,
     return 0;
 
   conn->last_activity_tick = kernel_tick;
-  tty_master_write(conn->channel.tty, data, (size_t)data_len);
+  {
+    int i;
+
+    for (i = 0; i < data_len; i++) {
+      if (data[i] == 0x03)
+        ssh_interrupt_foreground(conn);
+      tty_master_write(conn->channel.tty, data + i, 1);
+    }
+  }
   return 0;
 }
 
@@ -1927,6 +1937,19 @@ PRIVATE void ssh_flush_outbox(struct ssh_connection *conn)
   conn->out_count--;
 }
 
+PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn)
+{
+  pid_t pid;
+
+  if (conn == 0 || conn->channel.tty == 0)
+    return;
+
+  pid = tty_get_foreground_pid(conn->channel.tty);
+  if (pid <= 0)
+    return;
+  sys_kill(pid, SIGINT);
+}
+
 PRIVATE int ssh_translate_tty_chunk(struct ssh_connection *conn,
                                     const char *src, int src_len,
                                     char *dest, int dest_cap)
@@ -2014,13 +2037,15 @@ PRIVATE void ssh_poll_shell(struct ssh_connection *conn)
 {
   if (conn->channel.shell_pid <= 0)
     return;
-  if (conn->channel.tty != 0 && conn->channel.tty->active != FALSE)
-    return;
   if (process_has_pid(conn->channel.shell_pid))
     return;
 
+  if (conn->channel.tty != 0) {
+    tty_release(conn->channel.tty);
+    conn->channel.tty = 0;
+  }
   conn->channel.shell_pid = -1;
-  conn->channel.tty = 0;
+  conn->channel.prompt_kick_pending = FALSE;
   ssh_queue_exit_status(conn, 0);
   ssh_queue_channel_eof(conn);
   ssh_queue_channel_close(conn);

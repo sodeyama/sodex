@@ -8,7 +8,7 @@
 一方で server 側は `bind()` / `listen()` までは存在するが、`accept()` が未実装で、受け口としてはまだ成立していない。
 
 また、`SSH server` を直接目標にすると、TCP 受け付け、認証、暗号、PTY 統合まで一気に広がってしまう。
-そのため、この spec ではまず以下の順で段階導入する。
+そのため、この spec ではまず以下の順で段階導入し、最後に最小 `SSH server` を別 plan として足す。
 
 1. 受動 TCP 接続の成立
 2. 軽量な管理プロトコルまたは HTTP 制御面
@@ -129,7 +129,9 @@ Linux ホスト
 - 認証失敗に対する peer 単位 rate limit と backoff
 - `docker/server-runtime/Dockerfile` / `entrypoint.sh` / `run_docker_server_smoke.py` による Docker/headless 常駐起動と published-port smoke
 - `debug_shell_port` と raw TCP preface、`PTY` relay、`test-qemu-debug-shell` による reconnect smoke
-- host Linux の `SSH` と guest `sodex` 管理 API の分離を継続し、guest 内 `SSH server` は当面見送る判断
+- `curve25519-sha256` + `ssh-ed25519` + `aes128-ctr` + `hmac-sha2-256` + `password` に絞った最小 `SSH server`
+- host の `ssh -tt` から guest `eshell` へ login し、`backspace` 付き `pwd` / `ls` / `cat` + `Ctrl-C` / `exit` / wrong password / reconnect を `test-qemu-ssh` で確認
+- host Linux の `SSH` と guest `sodex` 管理 API の分離方針は維持しつつ、guest 内 `SSH server` は最小 scope で検証を継続
 
 ## 完了条件
 

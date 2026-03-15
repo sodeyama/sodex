@@ -42,6 +42,7 @@ struct file;
 
 #define ICANON 0x0001
 #define ECHO   0x0002
+#define ISIG   0x0004
 
 int files_alloc_fd(struct files_struct *files, struct file *file) {
     static int next_fd = 0;
@@ -58,6 +59,7 @@ int file_put(struct file *file) {
 extern void init_tty(void);
 extern struct tty *tty_get_console(void);
 extern struct tty *tty_alloc_pty(void);
+extern void tty_release(struct tty *tty);
 extern int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows);
 extern int tty_get_winsize(struct tty *tty, struct winsize *winsize);
 extern int tty_set_input_mode(int mode);
@@ -86,6 +88,7 @@ TEST(canonical_input_waits_for_enter) {
     ASSERT_EQ(buf[1], 'b');
     ASSERT_EQ(buf[2], 'c');
     ASSERT_EQ(buf[3], '\0');
+    tty_release(tty);
 }
 
 TEST(canonical_backspace_echo_erases_on_master) {
@@ -105,6 +108,33 @@ TEST(canonical_backspace_echo_erases_on_master) {
     ASSERT_EQ(buf[2], ' ');
     ASSERT_EQ(buf[3], '\b');
     ASSERT_EQ(buf[4], '\n');
+    tty_release(tty);
+}
+
+TEST(canonical_delete_key_erases_on_master) {
+    struct tty *tty;
+    char buf[8];
+    char slave_buf[8];
+    const char del = 0x7f;
+
+    init_tty();
+    tty = tty_alloc_pty();
+    ASSERT_NOT_NULL(tty);
+
+    ASSERT_EQ(tty_master_write(tty, "ab", 2), 2);
+    ASSERT_EQ(tty_master_write(tty, &del, 1), 1);
+    ASSERT_EQ(tty_master_write(tty, "\r", 1), 1);
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 2);
+    ASSERT_EQ(slave_buf[0], 'a');
+    ASSERT_EQ(slave_buf[1], '\0');
+    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 6);
+    ASSERT_EQ(buf[0], 'a');
+    ASSERT_EQ(buf[1], 'b');
+    ASSERT_EQ(buf[2], '\b');
+    ASSERT_EQ(buf[3], ' ');
+    ASSERT_EQ(buf[4], '\b');
+    ASSERT_EQ(buf[5], '\n');
+    tty_release(tty);
 }
 
 TEST(canonical_utf8_backspace_erases_whole_character) {
@@ -159,6 +189,7 @@ TEST(canonical_utf8_backspace_erases_whole_character) {
     ASSERT_EQ((unsigned char)buf[16], 0x81);
     ASSERT_EQ((unsigned char)buf[17], 0x88);
     ASSERT_EQ(buf[18], '\n');
+    tty_release(tty);
 }
 
 TEST(slave_output_is_visible_from_master) {
@@ -185,6 +216,7 @@ TEST(slave_output_is_visible_from_master) {
     ASSERT_EQ(tty_slave_write(tty, long_out, sizeof(long_out)), sizeof(long_out));
     ASSERT_EQ(tty_master_read(tty, long_in, sizeof(long_in)), sizeof(long_in));
     ASSERT_EQ(memcmp(long_in, long_out, sizeof(long_out)), 0);
+    tty_release(tty);
 }
 
 TEST(input_mode_switches_between_console_and_raw) {
@@ -219,7 +251,7 @@ TEST(termios_can_switch_console_tty_to_raw_noecho) {
     ASSERT_NOT_NULL(tty);
 
     ASSERT_EQ(tty_get_termios(tty, &termios), 0);
-    ASSERT_EQ(termios.c_lflag, ICANON | ECHO);
+    ASSERT_EQ(termios.c_lflag, ICANON | ECHO | ISIG);
 
     termios.c_lflag = 0;
     ASSERT_EQ(tty_set_termios(tty, &termios), 0);
@@ -231,17 +263,43 @@ TEST(termios_can_switch_console_tty_to_raw_noecho) {
     ASSERT_EQ(slave_buf[1], 'b');
 }
 
+TEST(ctrl_c_discards_pending_line) {
+    struct tty *tty;
+    char master_buf[8];
+    char slave_buf[8];
+    const char intr = 0x03;
+
+    init_tty();
+    tty = tty_alloc_pty();
+    ASSERT_NOT_NULL(tty);
+
+    ASSERT_EQ(tty_master_write(tty, "abc", 3), 3);
+    ASSERT_EQ(tty_master_write(tty, &intr, 1), 1);
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 1);
+    ASSERT_EQ(slave_buf[0], '\0');
+    ASSERT_EQ(tty_master_read(tty, master_buf, sizeof(master_buf)), 6);
+    ASSERT_EQ(master_buf[0], 'a');
+    ASSERT_EQ(master_buf[1], 'b');
+    ASSERT_EQ(master_buf[2], 'c');
+    ASSERT_EQ(master_buf[3], '^');
+    ASSERT_EQ(master_buf[4], 'C');
+    ASSERT_EQ(master_buf[5], '\n');
+    tty_release(tty);
+}
+
 int main(void)
 {
     printf("=== tty / pty tests ===\n");
 
     RUN_TEST(canonical_input_waits_for_enter);
     RUN_TEST(canonical_backspace_echo_erases_on_master);
+    RUN_TEST(canonical_delete_key_erases_on_master);
     RUN_TEST(canonical_utf8_backspace_erases_whole_character);
     RUN_TEST(slave_output_is_visible_from_master);
     RUN_TEST(input_mode_switches_between_console_and_raw);
     RUN_TEST(pty_winsize_can_be_updated);
     RUN_TEST(termios_can_switch_console_tty_to_raw_noecho);
+    RUN_TEST(ctrl_c_discards_pending_line);
 
     TEST_REPORT();
 }

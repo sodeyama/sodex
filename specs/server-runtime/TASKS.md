@@ -212,19 +212,28 @@ Docker 経由の HTTP/admin smoke まで安定化できた。
 - [x] `CHANNEL_DATA` と `PTY` relay の双方向転送を実装する
 - [x] shell 終了時に `exit-status`, `EOF`, `CLOSE` を返す
 - [x] `exec`, `env`, `subsystem`, 追加 channel を reject する
-- [ ] interactive shell を multi-command で安定化し、`pwd` に続けて `ls` / `exit` でも `shell_exit` せず prompt 復帰できるようにする
-- [ ] host 側 `ssh -tt` の見え方を安定化し、prompt 未表示 run を潰す
+- [x] interactive shell の clean close を安定化し、`pwd` / `ls` の後に `exit` または client disconnect でも session close を整合させる
+- [x] host 側 `ssh -tt` の見え方を安定化し、CRLF 崩れと prompt 未表示 run、`backspace` 崩れを潰す
 
 #### Phase 6: host test / QEMU smoke / 手順
 
 - [ ] host test に packet codec / `KEXINIT` parser / auth policy / channel state machine を追加する
-- [ ] `run_qemu_ssh_smoke.py` を追加し、login / command / exit / reconnect / wrong password を通す
+- [x] `run_qemu_ssh_smoke.py` を追加し、login / `backspace` 付き `pwd` / `ls` / `cat` + `Ctrl-C` / `exit` / reconnect / wrong password / client disconnect を通す
 - [ ] host key fingerprint と known_hosts を固定する smoke 手順を追加する
-- [ ] README に manual 手順と `ssh` / `ssh -tt` 例を書く
+- [x] README に manual 手順と `ssh` / `ssh -tt` 例を書く
 
 #### 現在の到達点
 
 - [x] host の `ssh -tt -F /dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -p <hostfwd_port> root@127.0.0.1` で guest `eshell` まで到達する
-- [x] `sodex /> pwd` を実行して `/` が返るところまで確認する
+- [x] 同一 session で `backspace` 付き `pwd`、`ls`、`cat` + `Ctrl-C`、`exit` を実行し、prompt 復帰と clean close を確認する
+- [x] `make test-qemu-ssh` と `run_qemu_ssh_smoke.py` が pass する
 - [ ] `OpenSSH` client の追加オプションなし login を通す
-- [ ] `pwd` / `ls` / `exit` を同一 session で安定して通す
+
+2026-03-15 追記:
+
+- `ssh -tt` 側の bare `LF` を `CRLF` へ正規化し、TTY 崩れを解消した
+- `CHANNEL_DATA` では client からの `CR` / `CRLF` を `\n` に畳んで `eshell` へ渡すようにし、`pwd` に続けて `ls` と `exit` も同一 session で通るようにした
+- canonical の `DEL` / `backspace` と `Ctrl-C` を `SSH PTY` でも扱えるようにし、foreground command に対して `SIGINT` を送れるようにした
+- shell pid の生死で `exit-status` / `EOF` / `CLOSE` を返す cleanup に切り替え、`shell_exit` close を安定化した
+- `run_qemu_ssh_smoke.py` は専用に複製した `fsboot.bin` を使って QEMU を起動し、手元の別 QEMU run と競合しないようにした
+- いま残っている実質タスクは、auth retry 制限、known_hosts / fingerprint 固定、追加オプションなし login、host test 拡充の 4 点

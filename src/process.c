@@ -126,17 +126,23 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
 
   while (current->signal) {
     u_int32_t sig = maxsignal(current->signal)+1;
+    sighandler_t handler = 0;
     switch (sig) {
     case SIGSTOP:
     case SIGTSTP:
     case SIGTTIN:
     case SIGTTOU:
-    case SIGKILL:
       current->state = TASK_STOPPED;
+      break;
+    case SIGKILL:
+      current->state = TASK_ZOMBIE;
       break;
 
     default:
-      (current->sigactions[sig-1]->sa_handler)(sig-1);
+      handler = current->sigactions[sig-1];
+      if (handler == 0)
+        handler = task_exit;
+      handler((int)sig);
       break;
     }
     current->signal &= (~(1<<(sig-1)));
@@ -416,17 +422,25 @@ PUBLIC void wakeup(struct wait_queue **wq)
 
 PUBLIC int process_has_pid(pid_t pid)
 {
+  return process_find_pid(pid) != 0;
+}
+
+PUBLIC struct task_struct *process_find_pid(pid_t pid)
+{
   struct dlist_set *plist;
   struct dlist_set *pos;
 
   if (pid <= 0 || current == (struct task_struct *)0)
-    return FALSE;
+    return 0;
+
+  if (current->pid == pid)
+    return current;
 
   plist = &(current->run_list);
   dlist_for_each(pos, plist) {
     struct task_struct *proc = dlist_entry(pos, struct task_struct, run_list);
     if (proc->pid == pid)
-      return TRUE;
+      return proc;
   }
-  return FALSE;
+  return 0;
 }

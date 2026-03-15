@@ -11,6 +11,7 @@ struct wait_queue;
 
 #define TTY_FLAG_ICANON 0x01
 #define TTY_FLAG_ECHO   0x02
+#define TTY_FLAG_ISIG   0x04
 
 #define TTY_RING_SIZE   8192
 #define TTY_CANON_SIZE  256
@@ -32,6 +33,7 @@ struct tty {
   u_int8_t flags;
   u_int16_t cols;
   u_int16_t rows;
+  pid_t foreground_pid;
   struct tty_ring slave_rx;
   struct tty_ring master_rx;
   char canon_buf[TTY_CANON_SIZE];
@@ -56,6 +58,8 @@ PUBLIC int tty_get_termios(struct tty *tty, struct termios *termios);
 PUBLIC int tty_set_termios(struct tty *tty, const struct termios *termios);
 PUBLIC int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows);
 PUBLIC int tty_get_winsize(struct tty *tty, struct winsize *winsize);
+PUBLIC int tty_set_foreground_pid(struct tty *tty, pid_t pid);
+PUBLIC pid_t tty_get_foreground_pid(struct tty *tty);
 PUBLIC ssize_t tty_slave_read(struct tty *tty, void *buf, size_t count,
                               int block);
 PUBLIC ssize_t tty_slave_write(struct tty *tty, const void *buf, size_t count);

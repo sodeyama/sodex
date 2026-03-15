@@ -69,6 +69,7 @@ PRIVATE int tty_ring_pop(struct tty_ring *ring, char *c);
 PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag);
 PRIVATE void tty_emit_output(struct tty *tty, char c);
 PRIVATE void tty_echo_erase(struct tty *tty, int width);
+PRIVATE void tty_echo_interrupt(struct tty *tty);
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c);
 PRIVATE void tty_receive_char(struct tty *tty, char c);
 PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,
@@ -250,6 +251,8 @@ PUBLIC int tty_get_termios(struct tty *tty, struct termios *termios)
     termios->c_lflag |= ICANON;
   if (tty->flags & TTY_FLAG_ECHO)
     termios->c_lflag |= ECHO;
+  if (tty->flags & TTY_FLAG_ISIG)
+    termios->c_lflag |= ISIG;
   return 0;
 }
 
@@ -281,6 +284,24 @@ PUBLIC int tty_get_winsize(struct tty *tty, struct winsize *winsize)
   winsize->cols = tty->cols;
   winsize->rows = tty->rows;
   return 0;
+}
+
+PUBLIC int tty_set_foreground_pid(struct tty *tty, pid_t pid)
+{
+  if (tty == NULL)
+    return -1;
+
+  if (pid < 0)
+    pid = 0;
+  tty->foreground_pid = pid;
+  return 0;
+}
+
+PUBLIC pid_t tty_get_foreground_pid(struct tty *tty)
+{
+  if (tty == NULL)
+    return 0;
+  return tty->foreground_pid;
 }
 
 PUBLIC void tty_feed_console_char(char c)
@@ -405,7 +426,7 @@ PRIVATE void tty_reset(struct tty *tty, int has_master)
 {
   memset(tty, 0, sizeof(struct tty));
   tty->has_master = has_master;
-  tty->flags = TTY_FLAG_ICANON | TTY_FLAG_ECHO;
+  tty->flags = TTY_FLAG_ICANON | TTY_FLAG_ECHO | TTY_FLAG_ISIG;
   tty->cols = screen_cols();
   tty->rows = screen_rows();
 }
@@ -506,6 +527,8 @@ PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag)
     flags |= TTY_FLAG_ICANON;
   if (lflag & ECHO)
     flags |= TTY_FLAG_ECHO;
+  if (lflag & ISIG)
+    flags |= TTY_FLAG_ISIG;
   return flags;
 }
 
@@ -535,6 +558,16 @@ PRIVATE void tty_echo_erase(struct tty *tty, int width)
   }
 }
 
+PRIVATE void tty_echo_interrupt(struct tty *tty)
+{
+  if (tty == NULL)
+    return;
+
+  tty_emit_output(tty, '^');
+  tty_emit_output(tty, 'C');
+  tty_emit_output(tty, '\n');
+}
+
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c)
 {
   tty_ring_push(&tty->slave_rx, c);
@@ -543,6 +576,15 @@ PRIVATE void tty_push_slave_byte(struct tty *tty, char c)
 
 PRIVATE void tty_receive_char(struct tty *tty, char c)
 {
+  if ((tty->flags & TTY_FLAG_ISIG) && c == 0x03) {
+    tty->canon_len = 0;
+    if (tty->flags & TTY_FLAG_ECHO)
+      tty_echo_interrupt(tty);
+    if ((tty->flags & TTY_FLAG_ICANON) && tty->foreground_pid <= 0)
+      tty_push_slave_byte(tty, '\0');
+    return;
+  }
+
   if ((tty->flags & TTY_FLAG_ICANON) == 0) {
     tty_push_slave_byte(tty, c);
     if (tty->flags & TTY_FLAG_ECHO)
@@ -550,7 +592,7 @@ PRIVATE void tty_receive_char(struct tty *tty, char c)
     return;
   }
 
-  if (c == KEY_BACK) {
+  if (c == KEY_BACK || c == 0x7f) {
     if (tty->canon_len > 0) {
       int prev_len = tty_utf8_prev_char_start(tty->canon_buf, tty->canon_len,
                                               tty->canon_len);

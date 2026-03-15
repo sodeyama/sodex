@@ -13,6 +13,7 @@ static int shell_buf_size(void);
 static int refresh_shell_buffer(char **buf, int *buf_size);
 static int clamp_copy_len(int len, int max_len);
 static void print_command_not_found(char *const argv[]);
+static void clear_foreground_pid(void);
 static int wait_command(pid_t pid, char *const argv[]);
 static int swap_fd(int target_fd, int next_fd);
 static void restore_fd(int target_fd, int saved_fd);
@@ -127,14 +128,23 @@ static int clamp_copy_len(int len, int max_len)
   return len;
 }
 
+static void clear_foreground_pid(void)
+{
+  set_foreground_pid(STDIN_FILENO, 0);
+}
+
 static int wait_command(pid_t pid, char *const argv[])
 {
+  clear_foreground_pid();
   if (pid < 0) {
     print_command_not_found(argv);
     return -1;
   }
-  if (argv != NULL && argv[0] != NULL && strcmp(argv[0], "test") != 0)
+  if (argv != NULL && argv[0] != NULL && strcmp(argv[0], "test") != 0) {
+    set_foreground_pid(STDIN_FILENO, pid);
     waitpid(pid, NULL, NULL);
+    clear_foreground_pid();
+  }
   return 0;
 }
 

@@ -29,6 +29,7 @@ extern struct task_struct* get_pstat();
 extern int _brk(void* end_data_segment);
 extern pid_t waitpid(pid_t pid, int *status, int options);
 extern pid_t fork(void);
+extern int set_foreground_pid(int fd, pid_t pid);
 extern sighandler_t signal(int signum, sighandler_t sighandler);
 extern int kill(pid_t pid, int sig);
 

@@ -146,6 +146,36 @@ socat -,rawer,echo=0 TCP:127.0.0.1:10024
 
 接続したら最初の 1 行で `TOKEN control-secret` を送り、以後は shell 入力をそのまま流します。
 
+QEMU SSH smoke:
+
+```sh
+make test-qemu-ssh
+```
+
+host 側ポートを変えたいときは `SODEX_HOST_SSH_PORT=11022 make test-qemu-ssh` のように上書きできます。
+
+手で試すときは、まず guest を SSH 付きで起動します。
+
+```sh
+bin/start.sh server-headless --ssh
+```
+
+その後、別ターミナルから接続します。
+現時点では最小実装なので、auth method と host key 確認を明示した `ssh -tt` を前提にします。
+
+```sh
+ssh -tt -F /dev/null \
+  -o PreferredAuthentications=password \
+  -o PubkeyAuthentication=no \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  -p 10022 root@127.0.0.1
+```
+
+既定 password は `root-secret` です。
+login 後は `sodex />` prompt が出るので、`ls` / `pwd` / `cat` を実行でき、
+`Backspace`, `Ctrl-C`, `exit` も通ります。
+
 `make -C src test-qemu-memory` は `128/256/512/1024MB` の memory scaling matrix を回します。
 `make -C src test-qemu-user-memory` は shell 経由で `memgrow` を起動し、`execve` と `malloc/brk` の userland 回帰を確認します。
 guest が使う RAM を論理的に絞りたいときは、`SODEX_RAM_CAP_MB=256 make -C src test-qemu-memory` のように cap を付けられます。

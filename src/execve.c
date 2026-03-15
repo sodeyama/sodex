@@ -229,12 +229,17 @@ PRIVATE void set_default_sigaction(struct task_struct* task)
   for (i=0; i<MAX_SIGNALS; i++) {
     task->sigactions[i] = signal_dummy;
   }
+  task->sigactions[SIGHUP-1] = task_exit;
+  task->sigactions[SIGINT-1] = task_exit;
   task->sigactions[SIGQUIT-1] = core_dump;
   task->sigactions[SIGILL-1] = core_dump;
   task->sigactions[SIGTRAP-1] = core_dump;
   task->sigactions[SIGIOT-1] = core_dump;
   task->sigactions[SIGFPE-1] = core_dump;
   task->sigactions[SIGSEGV-1] = core_dump;
+  task->sigactions[SIGPIPE-1] = task_exit;
+  task->sigactions[SIGALRM-1] = task_exit;
+  task->sigactions[SIGTERM-1] = task_exit;
 }
 
 PRIVATE u_int32_t get_proc_stackmem(u_int32_t *pg_dir)

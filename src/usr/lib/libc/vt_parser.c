@@ -9,6 +9,7 @@ static unsigned char vt_parser_ansi_to_vga(int color);
 static void vt_parser_apply_sgr(struct vt_parser *parser);
 static void vt_parser_erase_display(struct vt_parser *parser, int mode);
 static void vt_parser_erase_line(struct vt_parser *parser, int mode);
+static void vt_parser_dispatch_private_csi(struct vt_parser *parser, char final);
 static void vt_parser_dispatch_csi(struct vt_parser *parser, char final);
 static void vt_parser_emit_codepoint(struct vt_parser *parser, u_int32_t codepoint);
 static void vt_parser_flush_partial_utf8(struct vt_parser *parser);
@@ -26,6 +27,7 @@ static void vt_parser_reset_params(struct vt_parser *parser)
 
   parser->param_count = 0;
   parser->param_active = 0;
+  parser->private_mode = 0;
   for (i = 0; i < VT_PARSER_MAX_PARAMS; i++) {
     parser->params[i] = -1;
   }
@@ -177,6 +179,31 @@ static void vt_parser_erase_line(struct vt_parser *parser, int mode)
   }
 }
 
+static void vt_parser_dispatch_private_csi(struct vt_parser *parser, char final)
+{
+  int i;
+  struct term_cell blank;
+
+  if (parser == NULL || parser->surface == NULL)
+    return;
+
+  if (final != 'h' && final != 'l')
+    return;
+
+  blank = vt_parser_blank(parser);
+  for (i = 0; i < parser->param_count; i++) {
+    int code = vt_parser_param(parser, i, -1);
+
+    if (code != 47 && code != 1047 && code != 1049)
+      continue;
+    if (final == 'h')
+      terminal_surface_enter_alternate(parser->surface, &blank);
+    else
+      terminal_surface_leave_alternate(parser->surface);
+    break;
+  }
+}
+
 static void vt_parser_dispatch_csi(struct vt_parser *parser, char final)
 {
   struct terminal_surface *surface = parser->surface;
@@ -189,6 +216,11 @@ static void vt_parser_dispatch_csi(struct vt_parser *parser, char final)
     } else if (parser->param_active != 0 && parser->param_count < VT_PARSER_MAX_PARAMS) {
       parser->param_count++;
     }
+  }
+
+  if (parser->private_mode != 0) {
+    vt_parser_dispatch_private_csi(parser, final);
+    return;
   }
 
   switch (final) {
@@ -380,6 +412,9 @@ void vt_parser_feed(struct vt_parser *parser, const char *data, size_t len)
         } else {
           parser->state = VT_STATE_GROUND;
         }
+      } else if (ch == '?' && parser->param_count == 0 &&
+                 parser->param_active == 0 && parser->private_mode == 0) {
+        parser->private_mode = 1;
       } else if (ch >= 0x40 && ch <= 0x7e) {
         vt_parser_dispatch_csi(parser, ch);
         parser->state = VT_STATE_GROUND;

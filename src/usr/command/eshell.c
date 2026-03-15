@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
+#include <eshell_parser.h>
 #include <fs.h>
 #include <eshell.h>
 #include <winsize.h>
@@ -11,23 +12,18 @@ static char* get_path_recursively(ext3_dentry* dentry);
 static int shell_buf_size(void);
 static int refresh_shell_buffer(char **buf, int *buf_size);
 static int clamp_copy_len(int len, int max_len);
-static int find_token(char **argv, const char *token);
 static void print_command_not_found(char *const argv[]);
 static int wait_command(pid_t pid, char *const argv[]);
 static int swap_fd(int target_fd, int next_fd);
 static void restore_fd(int target_fd, int saved_fd);
-static int run_with_redirection(char **argv, char *input_path,
-                                char *output_path);
-static int run_pipeline(char **left_argv, char **right_argv);
+static int run_single_command(const struct eshell_command *command);
+static int run_pipeline(const struct eshell_pipeline *pipeline);
 
 char g_pathname[PATH_MAX];
 
 int main(int argc, char** argv)
 {
-  char arg_tmpbuf[ARGV_MAX_NUMS][ARGV_MAX_LEN];
-  char *arg_buf[ARGV_MAX_NUMS];
-  memset(arg_tmpbuf, 0, ARGV_MAX_LEN*ARGV_MAX_NUMS);
-  memset(arg_buf, 0, 4*ARGV_MAX_NUMS);
+  struct eshell_pipeline pipeline;
   char *buf;
   char prompt[PROMPT_BUF];
   int input_buf_size;
@@ -54,66 +50,28 @@ int main(int argc, char** argv)
     if (input_len <= 0)
       continue;
 
-    char *p = buf;
-    char *prev_p = buf;
-    int i=0;
-    while (TRUE) {
-      p = strchr(prev_p, ' ');
-      if (p == NULL || p >= buf + input_len || i >= ARGV_MAX_NUMS - 1) {
-        int len = clamp_copy_len((buf + input_len) - prev_p, ARGV_MAX_LEN);
-        memcpy(arg_tmpbuf[i], prev_p, len);
-        arg_tmpbuf[i][len] = 0;
-        arg_buf[i] = arg_tmpbuf[i];
-        break;
-      }
-      {
-        int len = clamp_copy_len(p - prev_p, ARGV_MAX_LEN);
-        memcpy(arg_tmpbuf[i], prev_p, len);
-        arg_tmpbuf[i][len] = 0;
-      }
-      arg_buf[i] = arg_tmpbuf[i];
-
-      if (p >= buf + input_len) {
-        printf("p is over\n");
-        break;
-      }
-      i++;
-      prev_p = p + 1;
+    if (eshell_parse_line(buf, input_len, &pipeline) < 0) {
+      printf("eshell: parse error\n");
+      memset(buf, 0, input_buf_size);
+      continue;
     }
-    arg_buf[i+1] = NULL;
-    
-    {
-      int pipe_pos = find_token(arg_buf, "|");
-      int input_pos = find_token(arg_buf, "<");
-      int output_pos = find_token(arg_buf, ">");
-
-      if (pipe_pos > 0 && arg_buf[pipe_pos + 1] != NULL) {
-        char **right_argv = &(arg_buf[pipe_pos + 1]);
-        arg_buf[pipe_pos] = NULL;
-        run_pipeline(arg_buf, right_argv);
-      } else {
-        char *input_path = NULL;
-        char *output_path = NULL;
-
-        if (input_pos > 0 && arg_buf[input_pos + 1] != NULL) {
-          input_path = arg_buf[input_pos + 1];
-          arg_buf[input_pos] = NULL;
-        }
-        if (output_pos > 0 && arg_buf[output_pos + 1] != NULL) {
-          output_path = arg_buf[output_pos + 1];
-          arg_buf[output_pos] = NULL;
-        }
-        run_with_redirection(arg_buf, input_path, output_path);
-      }
+    if (pipeline.command_count <= 0) {
+      memset(buf, 0, input_buf_size);
+      continue;
     }
 
-    if (arg_buf[0] != NULL && strcmp(arg_buf[0], "cd") == 0) { 
+    if (pipeline.command_count == 1)
+      run_single_command(&pipeline.commands[0]);
+    else
+      run_pipeline(&pipeline);
+
+    if (pipeline.command_count == 1 &&
+        pipeline.commands[0].argv[0] != NULL &&
+        strcmp(pipeline.commands[0].argv[0], "cd") == 0) {
       set_prompt(prompt);
     }
 
     memset(buf, 0, input_buf_size);
-    memset(arg_tmpbuf, 0, ARGV_MAX_LEN*ARGV_MAX_NUMS);
-    memset(arg_buf, 0, 4*ARGV_MAX_NUMS);
   }
 
   exit(1);
@@ -163,19 +121,6 @@ static int clamp_copy_len(int len, int max_len)
   return len;
 }
 
-static int find_token(char **argv, const char *token)
-{
-  int i;
-
-  if (argv == NULL || token == NULL)
-    return -1;
-  for (i = 0; argv[i] != NULL; i++) {
-    if (strcmp(argv[i], token) == 0)
-      return i;
-  }
-  return -1;
-}
-
 static int wait_command(pid_t pid, char *const argv[])
 {
   if (pid < 0) {
@@ -218,20 +163,20 @@ static void restore_fd(int target_fd, int saved_fd)
   close(saved_fd);
 }
 
-static int run_with_redirection(char **argv, char *input_path,
-                                char *output_path)
+static int run_single_command(const struct eshell_command *command)
 {
   int input_fd = -1;
   int output_fd = -1;
   int saved_stdin = -1;
   int saved_stdout = -1;
   pid_t pid;
+  int flags;
 
-  if (argv == NULL || argv[0] == NULL)
+  if (command == NULL || command->argv[0] == NULL)
     return -1;
 
-  if (input_path != NULL) {
-    input_fd = open(input_path, O_RDONLY, 0);
+  if (command->input_path != NULL) {
+    input_fd = open(command->input_path, O_RDONLY, 0);
     if (input_fd < 0)
       return -1;
     saved_stdin = swap_fd(STDIN_FILENO, input_fd);
@@ -240,8 +185,13 @@ static int run_with_redirection(char **argv, char *input_path,
       return -1;
   }
 
-  if (output_path != NULL) {
-    output_fd = open(output_path, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+  if (command->output_path != NULL) {
+    flags = O_CREAT | O_WRONLY;
+    if (command->append_output != 0)
+      flags |= O_APPEND;
+    else
+      flags |= O_TRUNC;
+    output_fd = open(command->output_path, flags, 0644);
     if (output_fd < 0) {
       restore_fd(STDIN_FILENO, saved_stdin);
       return -1;
@@ -254,43 +204,96 @@ static int run_with_redirection(char **argv, char *input_path,
     }
   }
 
-  pid = execve(argv[0], argv, 0);
+  pid = execve(command->argv[0], command->argv, 0);
   restore_fd(STDIN_FILENO, saved_stdin);
   restore_fd(STDOUT_FILENO, saved_stdout);
-  return wait_command(pid, argv);
+  return wait_command(pid, command->argv);
 }
 
-static int run_pipeline(char **left_argv, char **right_argv)
+static int run_pipeline(const struct eshell_pipeline *pipeline)
 {
-  int pipefd[2];
-  int saved_stdout;
-  int saved_stdin;
-  pid_t left_pid;
-  pid_t right_pid;
+  int input_fd = -1;
+  int i;
 
-  if (left_argv == NULL || left_argv[0] == NULL ||
-      right_argv == NULL || right_argv[0] == NULL)
-    return -1;
-  if (pipe(pipefd) < 0)
+  if (pipeline == NULL || pipeline->command_count <= 0)
     return -1;
 
-  saved_stdout = swap_fd(STDOUT_FILENO, pipefd[1]);
-  close(pipefd[1]);
-  if (saved_stdout < 0) {
-    close(pipefd[0]);
-    return -1;
+  for (i = 0; i < pipeline->command_count; i++) {
+    const struct eshell_command *command = &pipeline->commands[i];
+    int pipefd[2] = {-1, -1};
+    int saved_stdin = -1;
+    int saved_stdout = -1;
+    int output_fd = -1;
+    int next_input_fd = -1;
+    int flags;
+    pid_t pid;
+
+    if (command->argv[0] == NULL)
+      return -1;
+
+    if (input_fd >= 0) {
+      saved_stdin = swap_fd(STDIN_FILENO, input_fd);
+      close(input_fd);
+      input_fd = -1;
+      if (saved_stdin < 0)
+        return -1;
+    } else if (command->input_path != NULL) {
+      input_fd = open(command->input_path, O_RDONLY, 0);
+      if (input_fd < 0)
+        return -1;
+      saved_stdin = swap_fd(STDIN_FILENO, input_fd);
+      close(input_fd);
+      input_fd = -1;
+      if (saved_stdin < 0)
+        return -1;
+    }
+
+    if (i + 1 < pipeline->command_count) {
+      if (pipe(pipefd) < 0) {
+        restore_fd(STDIN_FILENO, saved_stdin);
+        return -1;
+      }
+      saved_stdout = swap_fd(STDOUT_FILENO, pipefd[1]);
+      close(pipefd[1]);
+      if (saved_stdout < 0) {
+        close(pipefd[0]);
+        restore_fd(STDIN_FILENO, saved_stdin);
+        return -1;
+      }
+      next_input_fd = pipefd[0];
+    } else if (command->output_path != NULL) {
+      flags = O_CREAT | O_WRONLY;
+      if (command->append_output != 0)
+        flags |= O_APPEND;
+      else
+        flags |= O_TRUNC;
+      output_fd = open(command->output_path, flags, 0644);
+      if (output_fd < 0) {
+        restore_fd(STDIN_FILENO, saved_stdin);
+        return -1;
+      }
+      saved_stdout = swap_fd(STDOUT_FILENO, output_fd);
+      close(output_fd);
+      if (saved_stdout < 0) {
+        restore_fd(STDIN_FILENO, saved_stdin);
+        return -1;
+      }
+    }
+
+    pid = execve(command->argv[0], command->argv, 0);
+    restore_fd(STDIN_FILENO, saved_stdin);
+    restore_fd(STDOUT_FILENO, saved_stdout);
+    if (wait_command(pid, command->argv) < 0) {
+      if (next_input_fd >= 0)
+        close(next_input_fd);
+      return -1;
+    }
+    input_fd = next_input_fd;
   }
-  left_pid = execve(left_argv[0], left_argv, 0);
-  restore_fd(STDOUT_FILENO, saved_stdout);
-  wait_command(left_pid, left_argv);
 
-  saved_stdin = swap_fd(STDIN_FILENO, pipefd[0]);
-  close(pipefd[0]);
-  if (saved_stdin < 0)
-    return -1;
-  right_pid = execve(right_argv[0], right_argv, 0);
-  restore_fd(STDIN_FILENO, saved_stdin);
-  return wait_command(right_pid, right_argv);
+  if (input_fd >= 0)
+    close(input_fd);
+  return 0;
 }
 
 static void set_prompt(char* prompt)

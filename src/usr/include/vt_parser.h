@@ -15,6 +15,7 @@ struct vt_parser {
   int params[VT_PARSER_MAX_PARAMS];
   int param_count;
   int param_active;
+  int private_mode;
   struct utf8_decoder decoder;
 };
 

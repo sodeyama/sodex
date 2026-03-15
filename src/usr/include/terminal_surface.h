@@ -39,12 +39,25 @@ struct terminal_surface {
   int rows;
   int cursor_col;
   int cursor_row;
+  int wrap_pending;
   int saved_col;
   int saved_row;
+  int saved_wrap_pending;
   struct term_cell *cells;
+  struct term_cell *primary_cells;
+  struct term_cell *alternate_cells;
   unsigned char *dirty;
+  unsigned char *primary_dirty;
+  unsigned char *alternate_dirty;
   int dirty_count;
   int scroll_count;
+  int alternate_active;
+  int primary_cursor_col;
+  int primary_cursor_row;
+  int primary_wrap_pending;
+  int primary_saved_col;
+  int primary_saved_row;
+  int primary_saved_wrap_pending;
 };
 
 int terminal_surface_init(struct terminal_surface *surface, int cols, int rows);
@@ -71,6 +84,10 @@ void terminal_surface_move_cursor(struct terminal_surface *surface,
                                   int dcol, int drow);
 void terminal_surface_save_cursor(struct terminal_surface *surface);
 void terminal_surface_restore_cursor(struct terminal_surface *surface);
+void terminal_surface_enter_alternate(struct terminal_surface *surface,
+                                      const struct term_cell *fill);
+void terminal_surface_leave_alternate(struct terminal_surface *surface);
+int terminal_surface_is_alternate(const struct terminal_surface *surface);
 void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
                                 const struct term_cell *fill);
 void terminal_surface_put_cell(struct terminal_surface *surface,

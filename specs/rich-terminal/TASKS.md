@@ -16,6 +16,8 @@
 9. フルスクリーン editor と保存導線
 10. UTF-8 と多言語表示
 11. 日本語直接入力と IME
+12. terminal / shell / `vi` の実用化と回帰基盤の再固定
+13. 日本語 IME の漢字変換と候補 UI
 
 ## M0: 互換を壊さない基盤化
 
@@ -141,11 +143,39 @@
 | [x] | RT-63 | `vi` の host test を拡張し、ASCII / UTF-8 の移動と削除を回帰検知できるようにする | RT-60, RT-62 | pure logic の編集退行を自動検知できる |
 | [x] | RT-64 | `vi` の QEMU smoke test を拡張し、移動、削除、追記、保存の一連フローを固定する | RT-62, RT-63, RT-45 | QEMU 上で基本編集コマンドの回帰を検知できる |
 
+## M12: terminal / shell / vi の実用化と堅牢化
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | RT-65 | `tests/Makefile` の rich terminal 系集約 test 依存を修正し、`make -C tests test` を再び green に戻す | RT-27, RT-63 | VT fixture を含む host test 一括実行が再度通る |
+| [x] | RT-66 | `term` の main loop を見直し、無入力時の busy wait を減らす | RT-65 | idle 時の無駄な spin が減り、入力と描画の応答が維持される |
+| [x] | RT-67 | framebuffer 経路でも viewport 変化を検出できるようにし、winsize 再通知と再描画を通す | RT-66 | graphics terminal でも resize 後に列数・行数が反映される |
+| [x] | RT-68 | `eshell` に quote-aware tokenizer と最小 escape 処理を追加する | RT-40, RT-65 | quoted string を含む入力を token 単位で安全に解釈できる |
+| [x] | RT-69 | `eshell` の parser / executor を拡張し、複数段 pipeline と `>>` を扱えるようにする | RT-68 | `cmd1 | cmd2 | cmd3` と `cmd >> file` が成立する |
+| [x] | RT-70 | shell parser / I/O 合成の host/QEMU smoke test を拡張する | RT-69 | quoting、複数 pipeline、append redirection の回帰を検知できる |
+| [x] | RT-71 | `vi` に alternate screen の入退場と終了時の画面復元を追加する | RT-64 | `vi` 終了後に shell 画面が自然に戻る |
+| [x] | RT-72 | `vi` に undo/redo の最小履歴を追加する | RT-64, RT-71 | `u` / `Ctrl-R` で直前編集を戻したりやり直したりできる |
+| [x] | RT-73 | `vi` に `/`, `?`, `n`, `N` の最小検索を追加する | RT-72 | 既存ファイル内を前方 / 後方検索できる |
+| [x] | RT-74 | `vi` に char-wise / line-wise の最小 visual mode を追加する | RT-73 | 範囲選択と削除の基本操作が成立する |
+| [x] | RT-75 | `vi` の host/QEMU smoke test を拡張し、alternate screen、undo/redo、検索、visual mode を固定する | RT-72, RT-73, RT-74 | 実用編集フローの回帰を自動検知できる |
+
+## M13: 日本語 IME の漢字変換と候補 UI
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | RT-76 | `ime_state` を拡張し、かな読み、候補列、選択 index、変換状態を保持できるようにする | RT-59, RT-66 | preedit と変換中候補を別状態として保持できる |
+| [ ] | RT-77 | 最小辞書 format と lookup 層を追加し、読みから候補列を引けるようにする | RT-76 | `かな` 読みから 1 件以上の候補を得られる |
+| [ ] | RT-78 | `term` の入力経路に変換開始、候補移動、確定、キャンセル action を追加する | RT-77 | `Space` / `変換` / `Enter` / `Esc` で候補操作ができる |
+| [ ] | RT-79 | `term` overlay に候補 UI を追加し、preedit と候補一覧を描画する | RT-78, RT-67 | 候補選択中の状態が terminal 上で見える |
+| [ ] | RT-80 | shell と `vi` の両方で、候補確定済み UTF-8 を保存まで通す | RT-79, RT-75 | 漢字を含む入力が raw / canonical の両経路で破綻しない |
+| [ ] | RT-81 | IME 辞書 lookup と候補遷移の host test を追加する | RT-77, RT-78 | lookup、次候補、前候補、キャンセル、確定を自動検知できる |
+| [ ] | RT-82 | IME 変換の QEMU smoke test を追加し、候補選択と保存を固定する | RT-80, RT-81 | 漢字変換の主要導線を QEMU 上で回帰検知できる |
+
 ## 先送りする項目
 
 - 複数 terminal セッション
 - タブ補完や高度な line editing
 - マウス入力
 - ウィンドウシステム
-- `vi` の undo/redo、検索、複数バッファ、visual mode
-- 日本語 IME の辞書変換、候補 UI、予測変換
+- `vi` の複数バッファ、text object、マクロ
+- 日本語 IME の予測変換、学習辞書、大規模辞書

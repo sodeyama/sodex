@@ -47,9 +47,10 @@ static struct vi_position vi_buffer_word_end_position(const struct vi_buffer *bu
                                                       struct vi_position pos);
 static int vi_buffer_first_nonblank_col(const struct vi_buffer *buffer, int row);
 static int vi_buffer_insert_empty_line(struct vi_buffer *buffer, int row);
-static int vi_buffer_delete_range(struct vi_buffer *buffer,
-                                  struct vi_position start,
-                                  struct vi_position end);
+static int vi_buffer_delete_range_internal(struct vi_buffer *buffer,
+                                           struct vi_position start,
+                                           struct vi_position end);
+static int vi_bytes_equal(const char *left, const char *right, int len);
 
 static int vi_is_blank_byte(unsigned char ch)
 {
@@ -350,9 +351,9 @@ static int vi_buffer_insert_empty_line(struct vi_buffer *buffer, int row)
   return 0;
 }
 
-static int vi_buffer_delete_range(struct vi_buffer *buffer,
-                                  struct vi_position start,
-                                  struct vi_position end)
+static int vi_buffer_delete_range_internal(struct vi_buffer *buffer,
+                                           struct vi_position start,
+                                           struct vi_position end)
 {
   struct vi_position tmp;
   struct vi_line *line;
@@ -414,6 +415,19 @@ static int vi_buffer_delete_range(struct vi_buffer *buffer,
   buffer->cursor_col = start.col;
   buffer->dirty = 1;
   return 0;
+}
+
+static int vi_bytes_equal(const char *left, const char *right, int len)
+{
+  int i;
+
+  if (left == NULL || right == NULL || len < 0)
+    return 0;
+  for (i = 0; i < len; i++) {
+    if (left[i] != right[i])
+      return 0;
+  }
+  return 1;
 }
 
 static int vi_buffer_reset_empty(struct vi_buffer *buffer)
@@ -721,7 +735,7 @@ int vi_buffer_delete_char(struct vi_buffer *buffer)
   start = vi_buffer_cursor_position(buffer);
   end = vi_make_position(start.row,
                          vi_line_next_boundary(line, start.col));
-  return vi_buffer_delete_range(buffer, start, end);
+  return vi_buffer_delete_range_internal(buffer, start, end);
 }
 
 int vi_buffer_delete_prev_char(struct vi_buffer *buffer)
@@ -741,7 +755,7 @@ int vi_buffer_delete_prev_char(struct vi_buffer *buffer)
   start = vi_make_position(buffer->cursor_row,
                            vi_line_prev_boundary(line, buffer->cursor_col));
   end = vi_buffer_cursor_position(buffer);
-  return vi_buffer_delete_range(buffer, start, end);
+  return vi_buffer_delete_range_internal(buffer, start, end);
 }
 
 int vi_buffer_delete_to_line_start(struct vi_buffer *buffer)
@@ -758,7 +772,7 @@ int vi_buffer_delete_to_line_start(struct vi_buffer *buffer)
 
   start = vi_make_position(buffer->cursor_row, 0);
   end = vi_buffer_cursor_position(buffer);
-  return vi_buffer_delete_range(buffer, start, end);
+  return vi_buffer_delete_range_internal(buffer, start, end);
 }
 
 int vi_buffer_delete_to_line_end(struct vi_buffer *buffer)
@@ -777,7 +791,7 @@ int vi_buffer_delete_to_line_end(struct vi_buffer *buffer)
 
   start = vi_buffer_cursor_position(buffer);
   end = vi_make_position(buffer->cursor_row, len);
-  return vi_buffer_delete_range(buffer, start, end);
+  return vi_buffer_delete_range_internal(buffer, start, end);
 }
 
 int vi_buffer_delete_line(struct vi_buffer *buffer)
@@ -831,7 +845,7 @@ int vi_buffer_delete_word_forward(struct vi_buffer *buffer)
   vi_buffer_clamp_cursor(buffer);
   start = vi_buffer_cursor_position(buffer);
   end = vi_buffer_word_forward_position(buffer, start);
-  return vi_buffer_delete_range(buffer, start, end);
+  return vi_buffer_delete_range_internal(buffer, start, end);
 }
 
 int vi_buffer_delete_word_backward(struct vi_buffer *buffer)
@@ -845,7 +859,7 @@ int vi_buffer_delete_word_backward(struct vi_buffer *buffer)
   vi_buffer_clamp_cursor(buffer);
   end = vi_buffer_cursor_position(buffer);
   start = vi_buffer_word_backward_position(buffer, end);
-  return vi_buffer_delete_range(buffer, start, end);
+  return vi_buffer_delete_range_internal(buffer, start, end);
 }
 
 int vi_buffer_delete_word_end(struct vi_buffer *buffer)
@@ -861,7 +875,7 @@ int vi_buffer_delete_word_end(struct vi_buffer *buffer)
   end = vi_buffer_word_end_position(buffer, start);
   if (!vi_buffer_position_is_eof(buffer, end))
     end = vi_buffer_next_position(buffer, end);
-  return vi_buffer_delete_range(buffer, start, end);
+  return vi_buffer_delete_range_internal(buffer, start, end);
 }
 
 int vi_buffer_open_line_below(struct vi_buffer *buffer)
@@ -1059,6 +1073,80 @@ void vi_buffer_move_word_end(struct vi_buffer *buffer)
   vi_buffer_set_cursor_position(buffer, pos);
 }
 
+int vi_buffer_delete_range(struct vi_buffer *buffer,
+                           int start_row, int start_col,
+                           int end_row, int end_col)
+{
+  return vi_buffer_delete_range_internal(buffer,
+                                         vi_make_position(start_row, start_col),
+                                         vi_make_position(end_row, end_col));
+}
+
+int vi_buffer_delete_lines(struct vi_buffer *buffer,
+                           int start_row, int end_row)
+{
+  int len;
+  int next_row;
+
+  if (buffer == NULL || buffer->line_count <= 0)
+    return -1;
+
+  if (start_row > end_row) {
+    int tmp = start_row;
+    start_row = end_row;
+    end_row = tmp;
+  }
+  if (start_row < 0)
+    start_row = 0;
+  if (end_row >= buffer->line_count)
+    end_row = buffer->line_count - 1;
+
+  next_row = end_row + 1;
+  if (next_row < buffer->line_count)
+    return vi_buffer_delete_range_internal(buffer,
+                                           vi_make_position(start_row, 0),
+                                           vi_make_position(next_row, 0));
+
+  len = vi_buffer_line_length(buffer, end_row);
+  return vi_buffer_delete_range_internal(buffer,
+                                         vi_make_position(start_row, 0),
+                                         vi_make_position(end_row, len));
+}
+
+int vi_buffer_next_char_col(const struct vi_buffer *buffer, int row, int col)
+{
+  const struct vi_line *line;
+
+  if (buffer == NULL || row < 0 || row >= buffer->line_count)
+    return col;
+
+  line = &buffer->lines[row];
+  if (col < 0)
+    col = 0;
+  if (col >= line->len)
+    return line->len;
+  while (col > 0 && col < line->len &&
+         vi_is_continuation_byte((unsigned char)line->data[col])) {
+    col--;
+  }
+  return vi_line_next_boundary(line, col);
+}
+
+int vi_buffer_prev_char_col(const struct vi_buffer *buffer, int row, int col)
+{
+  const struct vi_line *line;
+
+  if (buffer == NULL || row < 0 || row >= buffer->line_count)
+    return col;
+
+  line = &buffer->lines[row];
+  if (col <= 0)
+    return 0;
+  if (col > line->len)
+    col = line->len;
+  return vi_line_prev_boundary(line, col);
+}
+
 const char *vi_buffer_line_data(const struct vi_buffer *buffer, int row)
 {
   if (buffer == NULL || row < 0 || row >= buffer->line_count)
@@ -1095,6 +1183,144 @@ int vi_buffer_cursor_display_col(const struct vi_buffer *buffer)
     return 0;
   return vi_line_display_col_until(&buffer->lines[buffer->cursor_row],
                                    buffer->cursor_col);
+}
+
+int vi_buffer_find_forward(const struct vi_buffer *buffer, const char *needle,
+                           int start_row, int start_col,
+                           int *out_row, int *out_col)
+{
+  int row;
+  int needle_len;
+
+  if (buffer == NULL || needle == NULL || needle[0] == '\0')
+    return -1;
+
+  needle_len = strlen(needle);
+  if (needle_len <= 0)
+    return -1;
+  if (start_row < 0)
+    start_row = 0;
+  if (start_row >= buffer->line_count)
+    start_row = buffer->line_count - 1;
+
+  for (row = start_row; row < buffer->line_count; row++) {
+    const struct vi_line *line = &buffer->lines[row];
+    int col = (row == start_row) ? start_col : 0;
+
+    if (col < 0)
+      col = 0;
+    if (col > line->len)
+      col = line->len;
+    while (col > 0 && col < line->len &&
+           vi_is_continuation_byte((unsigned char)line->data[col])) {
+      col--;
+    }
+
+    while (col + needle_len <= line->len) {
+      if ((col == 0 ||
+           !vi_is_continuation_byte((unsigned char)line->data[col])) &&
+          vi_bytes_equal(line->data + col, needle, needle_len) != 0) {
+        if (out_row != NULL)
+          *out_row = row;
+        if (out_col != NULL)
+          *out_col = col;
+        return 0;
+      }
+      col = vi_line_next_boundary(line, col);
+      if (col < 0 || col > line->len)
+        break;
+    }
+  }
+
+  return -1;
+}
+
+int vi_buffer_find_backward(const struct vi_buffer *buffer, const char *needle,
+                            int start_row, int start_col,
+                            int *out_row, int *out_col)
+{
+  int row;
+  int needle_len;
+
+  if (buffer == NULL || needle == NULL || needle[0] == '\0')
+    return -1;
+
+  needle_len = strlen(needle);
+  if (needle_len <= 0)
+    return -1;
+  if (start_row < 0)
+    start_row = 0;
+  if (start_row >= buffer->line_count)
+    start_row = buffer->line_count - 1;
+
+  for (row = start_row; row >= 0; row--) {
+    const struct vi_line *line = &buffer->lines[row];
+    int col = (row == start_row) ? start_col : line->len;
+
+    if (col < 0)
+      continue;
+    if (col > line->len)
+      col = line->len;
+    if (col == line->len && col > 0)
+      col = vi_line_prev_boundary(line, col);
+    while (col > 0 && col < line->len &&
+           vi_is_continuation_byte((unsigned char)line->data[col])) {
+      col--;
+    }
+
+    while (col >= 0) {
+      if (col + needle_len <= line->len &&
+          (col == 0 ||
+           !vi_is_continuation_byte((unsigned char)line->data[col])) &&
+          vi_bytes_equal(line->data + col, needle, needle_len) != 0) {
+        if (out_row != NULL)
+          *out_row = row;
+        if (out_col != NULL)
+          *out_col = col;
+        return 0;
+      }
+      if (col == 0)
+        break;
+      col = vi_line_prev_boundary(line, col);
+    }
+  }
+
+  return -1;
+}
+
+int vi_buffer_serialize(const struct vi_buffer *buffer, char **out_data, int *out_len)
+{
+  char *data;
+  int total = 0;
+  int offset = 0;
+  int row;
+
+  if (buffer == NULL || out_data == NULL || out_len == NULL)
+    return -1;
+
+  for (row = 0; row < buffer->line_count; row++) {
+    total += buffer->lines[row].len;
+    if (row + 1 < buffer->line_count)
+      total++;
+  }
+
+  data = (char *)malloc((size_t)total + 1);
+  if (data == NULL)
+    return -1;
+
+  for (row = 0; row < buffer->line_count; row++) {
+    if (buffer->lines[row].len > 0) {
+      memcpy(data + offset, buffer->lines[row].data,
+             (size_t)buffer->lines[row].len);
+      offset += buffer->lines[row].len;
+    }
+    if (row + 1 < buffer->line_count)
+      data[offset++] = '\n';
+  }
+  data[offset] = '\0';
+  *out_data = data;
+  *out_len = total;
+  return 0;
 }
 
 void vi_buffer_clear_dirty(struct vi_buffer *buffer)

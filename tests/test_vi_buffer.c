@@ -1,5 +1,7 @@
 #include "test_framework.h"
 #include <vi.h>
+#include <stdlib.h>
+#include <string.h>
 
 TEST(insert_and_split_lines) {
     struct vi_buffer buffer;
@@ -183,6 +185,65 @@ TEST(command_parser_accepts_minimum_commands) {
     ASSERT_EQ(vi_parse_command("x"), VI_COMMAND_INVALID);
 }
 
+TEST(search_helpers_find_forward_and_backward) {
+    struct vi_buffer buffer;
+    int row;
+    int col;
+
+    ASSERT_EQ(vi_buffer_init(&buffer), 0);
+    ASSERT_EQ(vi_buffer_load(&buffer, "alpha\nbeta alpha\ngamma", 22), 0);
+
+    ASSERT_EQ(vi_buffer_find_forward(&buffer, "alpha", 0, 0, &row, &col), 0);
+    ASSERT_EQ(row, 0);
+    ASSERT_EQ(col, 0);
+
+    ASSERT_EQ(vi_buffer_find_forward(&buffer, "alpha", 0, 1, &row, &col), 0);
+    ASSERT_EQ(row, 1);
+    ASSERT_EQ(col, 5);
+
+    ASSERT_EQ(vi_buffer_find_backward(&buffer, "alpha", 2, 5, &row, &col), 0);
+    ASSERT_EQ(row, 1);
+    ASSERT_EQ(col, 5);
+
+    vi_buffer_free(&buffer);
+}
+
+TEST(delete_range_and_lines_keep_expected_text) {
+    struct vi_buffer buffer;
+
+    ASSERT_EQ(vi_buffer_init(&buffer), 0);
+    ASSERT_EQ(vi_buffer_load(&buffer, "alpha\nbeta\ngamma", 16), 0);
+
+    ASSERT_EQ(vi_buffer_delete_range(&buffer, 0, 2, 1, 2), 0);
+    ASSERT_STR_EQ(vi_buffer_line_data(&buffer, 0), "alta");
+    ASSERT_EQ(buffer.line_count, 2);
+
+    ASSERT_EQ(vi_buffer_delete_lines(&buffer, 0, 0), 0);
+    ASSERT_EQ(buffer.line_count, 1);
+    ASSERT_STR_EQ(vi_buffer_line_data(&buffer, 0), "gamma");
+
+    vi_buffer_free(&buffer);
+}
+
+TEST(serialize_and_char_boundaries_follow_utf8) {
+    struct vi_buffer buffer;
+    char *text = NULL;
+    int len = 0;
+    const char source[] = {'A', (char)0xe3, (char)0x81, (char)0x82, '\n', 'B'};
+
+    ASSERT_EQ(vi_buffer_init(&buffer), 0);
+    ASSERT_EQ(vi_buffer_load(&buffer, source, sizeof(source)), 0);
+
+    ASSERT_EQ(vi_buffer_next_char_col(&buffer, 0, 1), 4);
+    ASSERT_EQ(vi_buffer_prev_char_col(&buffer, 0, 4), 1);
+    ASSERT_EQ(vi_buffer_serialize(&buffer, &text, &len), 0);
+    ASSERT_EQ(len, 6);
+    ASSERT_EQ(memcmp(text, source, sizeof(source)), 0);
+
+    free(text);
+    vi_buffer_free(&buffer);
+}
+
 int main(void)
 {
     printf("=== vi buffer tests ===\n");
@@ -196,6 +257,9 @@ int main(void)
     RUN_TEST(delete_word_and_line_commands_work);
     RUN_TEST(open_line_helpers_insert_blank_rows);
     RUN_TEST(command_parser_accepts_minimum_commands);
+    RUN_TEST(search_helpers_find_forward_and_backward);
+    RUN_TEST(delete_range_and_lines_keep_expected_text);
+    RUN_TEST(serialize_and_char_boundaries_follow_utf8);
 
     TEST_REPORT();
 }

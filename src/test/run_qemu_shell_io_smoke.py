@@ -100,23 +100,46 @@ class QemuMonitor:
                 break
         return b"".join(chunks).decode(errors="replace")
 
+    def send_key(self, key: str, delay: float = 0.04) -> None:
+        self.command(f"sendkey {key}", pause=0.05)
+        time.sleep(delay)
+
     def send_text(self, text: str) -> None:
-        keymap = {
-            " ": "spc",
-            "/": "slash",
-            ".": "dot",
-            "-": "minus",
-            "\n": "ret",
-            ">": "shift-dot",
-            "<": "shift-comma",
-            "|": "shift-backslash",
-        }
         for ch in text:
-            self.command(f"sendkey {keymap.get(ch, ch)}", pause=0.05)
-            time.sleep(0.04)
+            self.send_key(qemu_key_for_char(ch))
 
     def close(self) -> None:
         self.sock.close()
+
+
+def qemu_key_for_char(ch: str) -> str:
+    keymap = {
+        " ": "spc",
+        "\n": "ret",
+        "/": "slash",
+        "?": "shift-slash",
+        ".": "dot",
+        ">": "shift-dot",
+        ",": "comma",
+        "<": "shift-comma",
+        "-": "minus",
+        "_": "shift-minus",
+        "=": "equal",
+        "+": "shift-equal",
+        "|": "shift-backslash",
+        "\\": "backslash",
+        "\"": "shift-apostrophe",
+        "'": "apostrophe",
+        ":": "shift-semicolon",
+        ";": "semicolon",
+        "(": "shift-9",
+        ")": "shift-0",
+    }
+    if ch in keymap:
+        return keymap[ch]
+    if "A" <= ch <= "Z":
+        return f"shift-{ch.lower()}"
+    return ch
 
 
 def wait_for_path(path: pathlib.Path, timeout: float) -> None:
@@ -193,15 +216,18 @@ def read_dir_entries(image: bytes, ino: int) -> dict[str, tuple[int, int]]:
 def assert_shell_io_state(fsboot: pathlib.Path) -> None:
     image = fsboot.read_bytes()
     root_entries = read_dir_entries(image, SODEX_ROOT_INO)
-    out_entry = root_entries.get("out.txt")
+    out_entry = root_entries.get("two words.txt")
     after_entry = root_entries.get("after.txt")
     if out_entry is None:
-        raise AssertionError("out.txt was not created")
+        raise AssertionError("two words.txt was not created")
     if after_entry is None:
         raise AssertionError("after.txt was not created after pipeline")
     content = read_file(image, out_entry[0]).decode("ascii", errors="ignore")
-    if "bootm.bin" not in content or "usr" not in content:
-        raise AssertionError("out.txt does not contain ls output")
+    after = read_file(image, after_entry[0]).decode("ascii", errors="ignore")
+    if content.count("bootm.bin") < 2 or content.count("usr") < 2:
+        raise AssertionError("two words.txt does not contain appended ls output")
+    if after != content:
+        raise AssertionError("after.txt does not match redirected input")
 
 
 def main() -> int:
@@ -241,10 +267,10 @@ def main() -> int:
 
     commands = [
         "ls > out.txt\n",
-        "cat < out.txt\n",
-        "ls | cat\n",
+        "mv out.txt \"two words.txt\"\n",
+        "ls | cat | cat >> \"two words.txt\"\n",
+        "cat < \"two words.txt\" > after.txt\n",
         "asdjfoaie\n",
-        "ls > after.txt\n",
     ]
 
     qemu = subprocess.Popen(

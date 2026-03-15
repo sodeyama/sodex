@@ -344,28 +344,32 @@ PUBLIC void sleep_on(struct wait_queue **wq)
 
 PUBLIC void sleep_on_timeout(struct wait_queue **wq, u_int32_t ticks)
 {
+  u_int32_t deadline;
+  struct wait_queue entry;
+  struct wait_queue **pp;
+
   if (current == (struct task_struct *)0)
     return;
+  if (wq == (struct wait_queue **)0)
+    return;
+  if (ticks == 0)
+    return;
 
-  struct wait_queue entry;
   entry.task = current;
   entry.next = *wq;
   *wq = &entry;
 
   current->state = TASK_INTERRUPTIBLE;
-  u_int32_t deadline = kernel_tick + ticks;
-
+  deadline = kernel_tick + ticks;
   enableInterrupt();
   while (current->state == TASK_INTERRUPTIBLE) {
     if (kernel_tick >= deadline) {
-      /* Timeout: wake ourselves up */
       current->state = TASK_RUNNING;
       break;
     }
   }
 
-  /* Remove ourselves from wait queue */
-  struct wait_queue **pp = wq;
+  pp = wq;
   while (*pp) {
     if ((*pp)->task == current) {
       *pp = (*pp)->next;

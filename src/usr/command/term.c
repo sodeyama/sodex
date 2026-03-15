@@ -7,6 +7,7 @@
 #include <fb.h>
 #include <ime.h>
 #include <key.h>
+#include <sleep.h>
 #include <terminal_surface.h>
 #include <tty.h>
 #include <vt_parser.h>
@@ -60,6 +61,7 @@ struct term_app {
 PRIVATE struct term_app term_state;
 
 PRIVATE int term_init(struct term_app *app);
+PRIVATE int term_current_viewport(struct term_app *app, int *cols, int *rows);
 PRIVATE int sync_viewport(struct term_app *app);
 PRIVATE int pump_master(struct term_app *app);
 PRIVATE int pump_keys(struct term_app *app);
@@ -132,10 +134,9 @@ int main(int argc, char** argv)
       render_surface(app, FALSE);
     }
 
-    if (output == 0 && input == 0) {
-      volatile int spin;
-      for (spin = 0; spin < 200000; spin++);
-    }
+    if (resized == 0 && output == 0 && input == 0 &&
+        terminal_surface_has_damage(&app->surface) == 0)
+      sleep_ticks(1);
   }
 
   return 0;
@@ -147,17 +148,8 @@ PRIVATE int term_init(struct term_app *app)
   int cols = 0;
   int rows = 0;
 
-  memset(&app->fb, 0, sizeof(app->fb));
-  if (get_fb_info(&app->fb) == 0 && app->fb.available != 0 &&
-      cell_renderer_init(&app->renderer, &app->fb) == 0) {
-    app->use_framebuffer = 1;
-    cols = app->renderer.cols;
-    rows = app->renderer.rows;
-  } else {
-    app->use_framebuffer = 0;
-    cols = console_cols();
-    rows = console_rows();
-  }
+  if (term_current_viewport(app, &cols, &rows) < 0)
+    return -1;
 
   if (cols <= 0)
     cols = 80;
@@ -181,14 +173,34 @@ PRIVATE int term_init(struct term_app *app)
   return 0;
 }
 
+PRIVATE int term_current_viewport(struct term_app *app, int *cols, int *rows)
+{
+  if (app == NULL || cols == NULL || rows == NULL)
+    return -1;
+
+  memset(&app->fb, 0, sizeof(app->fb));
+  if (get_fb_info(&app->fb) == 0 && app->fb.available != 0 &&
+      cell_renderer_init(&app->renderer, &app->fb) == 0) {
+    app->use_framebuffer = 1;
+    *cols = app->renderer.cols;
+    *rows = app->renderer.rows;
+    return 0;
+  }
+
+  app->use_framebuffer = 0;
+  *cols = console_cols();
+  *rows = console_rows();
+  return 0;
+}
+
 PRIVATE int sync_viewport(struct term_app *app)
 {
   struct term_cell blank;
   struct winsize winsize;
-  int cols = console_cols();
-  int rows = console_rows();
+  int cols = 0;
+  int rows = 0;
 
-  if (app->use_framebuffer != 0)
+  if (term_current_viewport(app, &cols, &rows) < 0)
     return 0;
   if (cols <= 0 || rows <= 0)
     return 0;
@@ -200,7 +212,8 @@ PRIVATE int sync_viewport(struct term_app *app)
   if (terminal_surface_resize(&app->surface, cols, rows, &blank) < 0)
     return 0;
 
-  console_clear();
+  if (app->use_framebuffer == 0)
+    console_clear();
   replay_scrollback(app);
   winsize.cols = cols;
   winsize.rows = rows;

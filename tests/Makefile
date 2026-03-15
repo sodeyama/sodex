@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 
 SRC = ../src
 
-TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji
+TESTS = test_lib test_memb test_memory test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_eshell_parser
 
 .PHONY: all clean test
 
@@ -129,8 +129,8 @@ test_vt_parser_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # VT fixture tests
-test_vt_fixtures: test_vt_fixtures.c test_vt_parser_surface.o test_vt_parser_parser.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vt_fixtures.c test_vt_parser_surface.o test_vt_parser_parser.o
+test_vt_fixtures: test_vt_fixtures.c test_vt_parser_surface.o test_vt_parser_parser.o test_vt_parser_utf8.o test_vt_parser_wcwidth.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vt_fixtures.c test_vt_parser_surface.o test_vt_parser_parser.o test_vt_parser_utf8.o test_vt_parser_wcwidth.o
 
 # ext3fs bitmap/parse tests (standalone, no ext3fs.c dependency)
 test_ext3fs: test_ext3fs.c
@@ -209,6 +209,13 @@ test_ime_romaji_ime.o: $(SRC)/usr/lib/libc/ime_romaji.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_ime_romaji_utf8.o: $(SRC)/usr/lib/libc/utf8.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# eshell parser tests
+test_eshell_parser: test_eshell_parser.c test_eshell_parser_parser.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_eshell_parser.c test_eshell_parser_parser.o
+
+test_eshell_parser_parser.o: $(SRC)/usr/lib/libc/eshell_parser.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:

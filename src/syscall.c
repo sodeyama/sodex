@@ -64,6 +64,7 @@ PRIVATE int sys_debug_write(const char *buf, size_t len);
 PRIVATE int sys_tcgetattr(int fd, struct termios *termios);
 PRIVATE int sys_tcsetattr(int fd, int optional_actions,
                           const struct termios *termios);
+PRIVATE int sys_sleep_ticks(u_int32_t ticks);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -206,6 +207,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_TCSETATTR:
     ret = sys_tcsetattr((int)p1, (int)p2, (const struct termios *)p3);
+    break;
+
+  case SYS_CALL_SLEEP_TICKS:
+    ret = sys_sleep_ticks(p1);
     break;
 
   case SYS_CALL_BRK:
@@ -553,6 +558,21 @@ PRIVATE int sys_tcsetattr(int fd, int optional_actions,
 
   tty = tty_lookup_file(current->files, fd);
   return tty_set_termios(tty, termios);
+}
+
+PRIVATE int sys_sleep_ticks(u_int32_t ticks)
+{
+  extern volatile u_int32_t kernel_tick;
+  u_int32_t deadline;
+
+  if (ticks == 0)
+    return 0;
+
+  deadline = kernel_tick + ticks;
+  while ((int)(kernel_tick - deadline) < 0) {
+    asm("sti\n\thlt");
+  }
+  return 0;
 }
 
 PRIVATE int sys_debug_write(const char *buf, size_t len)

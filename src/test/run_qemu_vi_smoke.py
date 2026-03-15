@@ -105,21 +105,41 @@ class QemuMonitor:
         self.command(f"sendkey {key}", pause=0.05)
         time.sleep(delay)
 
+    def send_ctrl(self, key: str, delay: float = 0.04) -> None:
+        self.command(f"sendkey ctrl-{key}", pause=0.05)
+        time.sleep(delay)
+
     def send_text(self, text: str) -> None:
-        keymap = {
-            " ": "spc",
-            "/": "slash",
-            ".": "dot",
-            "-": "minus",
-            ":": "shift-semicolon",
-            ">": "shift-dot",
-            "\n": "ret",
-        }
         for ch in text:
-            self.send_key(keymap.get(ch, ch))
+            self.send_key(qemu_key_for_char(ch))
 
     def close(self) -> None:
         self.sock.close()
+
+
+def qemu_key_for_char(ch: str) -> str:
+    keymap = {
+        " ": "spc",
+        "\n": "ret",
+        "/": "slash",
+        "?": "shift-slash",
+        ".": "dot",
+        ">": "shift-dot",
+        ",": "comma",
+        "<": "shift-comma",
+        "-": "minus",
+        "_": "shift-minus",
+        ":": "shift-semicolon",
+        ";": "semicolon",
+        "$": "shift-4",
+        "\"": "shift-apostrophe",
+        "'": "apostrophe",
+    }
+    if ch in keymap:
+        return keymap[ch]
+    if "A" <= ch <= "Z":
+        return f"shift-{ch.lower()}"
+    return ch
 
 
 def wait_for_path(path: pathlib.Path, timeout: float) -> None:
@@ -204,7 +224,7 @@ def assert_vi_state(fsboot: pathlib.Path) -> None:
         raise AssertionError("aftervi.txt was not created after returning to shell")
 
     content = read_file(image, memo_entry[0]).decode("ascii", errors="ignore")
-    if content != "first second\nfinal":
+    if content != "alpha beta\ngamma \nomega":
         raise AssertionError(f"memo.txt content mismatch: {content!r}")
 
 
@@ -257,34 +277,26 @@ def main() -> int:
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)
 
         monitor.send_text("vi memo.txt\n")
+        time.sleep(1.2)
+        monitor.send_text("ialpha beta\ngamma delta\nomega")
         time.sleep(1.0)
-        monitor.send_text("ifirst second")
+        monitor.send_key("esc")
         time.sleep(0.5)
-        monitor.send_key("esc")
-        time.sleep(0.3)
-        monitor.send_text("0dw")
-        time.sleep(0.3)
-        monitor.send_text("ifirst ")
-        time.sleep(0.4)
-        monitor.send_key("esc")
-        time.sleep(0.3)
-        monitor.send_text("exa")
-        time.sleep(0.2)
-        monitor.send_text("d")
-        time.sleep(0.2)
-        monitor.send_key("esc")
-        time.sleep(0.3)
-        monitor.send_text("ofinal")
-        time.sleep(0.4)
-        monitor.send_key("esc")
-        time.sleep(0.3)
-        monitor.send_text("ofiller")
-        time.sleep(0.4)
-        monitor.send_key("esc")
-        time.sleep(0.3)
-        monitor.send_text("ddgg")
+        monitor.send_text("gg/delta\n")
+        time.sleep(0.7)
+        monitor.send_text("v$d")
+        time.sleep(0.6)
+        monitor.send_text("u")
         time.sleep(0.5)
-        monitor.send_text(":wq\n")
+        monitor.send_ctrl("r")
+        time.sleep(0.6)
+        monitor.send_text("?alpha\n")
+        time.sleep(0.7)
+        monitor.send_text("Vjd")
+        time.sleep(0.6)
+        monitor.send_text("u")
+        time.sleep(0.9)
+        monitor.send_text("ZZ")
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)
         monitor.send_text("touch aftervi.txt\n")
         time.sleep(1.0)

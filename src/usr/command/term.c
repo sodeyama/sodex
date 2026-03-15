@@ -6,19 +6,30 @@
 #include <debug.h>
 #include <fb.h>
 #include <ime.h>
+#include <ime_conversion.h>
 #include <key.h>
 #include <sleep.h>
 #include <terminal_surface.h>
 #include <tty.h>
+#include <utf8.h>
 #include <vt_parser.h>
+#include <wcwidth.h>
 #include <winsize.h>
 
 #define TERM_SCROLLBACK_SIZE 32768
 #define TERM_LONG_OUTPUT_THRESHOLD 256
 #define TERM_PTY_READ_CHUNK 512
 #define TERM_PTY_READ_BATCH 8192
-#define TERM_INPUT_BUF 64
+#define TERM_INPUT_BUF 128
 #define TERM_IME_STATUS_COLS 16
+#define TERM_IME_CONVERSION_COLS 40
+#define TERM_IME_OVERLAY_MAX_CELLS 96
+#define TERM_IME_TARGET_FG TERM_COLOR_WHITE
+#define TERM_IME_TARGET_BG TERM_COLOR_RED
+#define TERM_IME_READING_FG TERM_COLOR_BLACK
+#define TERM_IME_READING_BG TERM_COLOR_YELLOW
+#define TERM_IME_SELECTED_FG TERM_COLOR_WHITE
+#define TERM_IME_SELECTED_BG TERM_COLOR_BLUE
 
 struct term_metrics {
   u_int32_t full_redraws;
@@ -36,7 +47,12 @@ enum term_ime_action {
   TERM_IME_ACTION_TOGGLE_LATIN_HIRA = 1,
   TERM_IME_ACTION_SET_HIRAGANA = 2,
   TERM_IME_ACTION_SET_KATAKANA = 3,
-  TERM_IME_ACTION_SET_LATIN = 4
+  TERM_IME_ACTION_SET_LATIN = 4,
+  TERM_IME_ACTION_START_CONVERSION = 5,
+  TERM_IME_ACTION_NEXT_CANDIDATE = 6,
+  TERM_IME_ACTION_PREV_CANDIDATE = 7,
+  TERM_IME_ACTION_COMMIT_CONVERSION = 8,
+  TERM_IME_ACTION_CANCEL_CONVERSION = 9
 };
 
 struct term_app {
@@ -78,11 +94,32 @@ PRIVATE char *metric_append_uint(char *dst, u_int32_t value);
 PRIVATE void emit_metric(struct term_app *app, const char *point,
                          u_int32_t last_bytes, u_int32_t last_cells);
 PRIVATE int append_output(char *buf, int len, const char *src, int src_len);
+PRIVATE int append_backspaces(char *buf, int len, int count);
 PRIVATE int flush_ime(struct term_app *app, char *buf, int len);
-PRIVATE enum term_ime_action ime_action_for_event(const struct key_event *event);
+PRIVATE enum term_ime_action ime_action_for_event(const struct ime_state *ime,
+                                                  const struct key_event *event);
 PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action);
 PRIVATE void render_ime_overlay(struct term_app *app);
+PRIVATE void render_conversion_target(struct term_app *app);
 PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap);
+PRIVATE int build_ime_overlay_cells(struct term_app *app,
+                                    struct term_cell *cells, int cap);
+PRIVATE int utf8_display_width(const char *text);
+PRIVATE int append_overlay_ascii(struct term_cell *cells, int len, int cap,
+                                 const char *text,
+                                 unsigned char fg,
+                                 unsigned char bg,
+                                 unsigned char attr);
+PRIVATE int append_overlay_utf8(struct term_cell *cells, int len, int cap,
+                                const char *text,
+                                unsigned char fg,
+                                unsigned char bg,
+                                unsigned char attr);
+PRIVATE int append_overlay_codepoint(struct term_cell *cells, int len, int cap,
+                                     u_int32_t codepoint,
+                                     unsigned char fg,
+                                     unsigned char bg,
+                                     unsigned char attr);
 
 int main(int argc, char** argv)
 {
@@ -273,21 +310,88 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
   if (event->flags & KEY_EVENT_RELEASE)
     return 0;
 
-  action = ime_action_for_event(event);
+  action = ime_action_for_event(&app->ime, event);
   if (action != TERM_IME_ACTION_NONE) {
-    len = flush_ime(app, buf, len);
-    if (len < 0)
-      return 0;
-    ime_apply_action(&app->ime, action);
+    switch (action) {
+    case TERM_IME_ACTION_TOGGLE_LATIN_HIRA:
+    case TERM_IME_ACTION_SET_HIRAGANA:
+    case TERM_IME_ACTION_SET_KATAKANA:
+    case TERM_IME_ACTION_SET_LATIN:
+      len = flush_ime(app, buf, len);
+      if (len < 0)
+        return 0;
+      ime_reset_segment(&app->ime);
+      ime_apply_action(&app->ime, action);
+      break;
+    case TERM_IME_ACTION_START_CONVERSION:
+      len = flush_ime(app, buf, len);
+      if (len < 0)
+        return 0;
+      ime_start_conversion(&app->ime);
+      break;
+    case TERM_IME_ACTION_NEXT_CANDIDATE:
+      ime_select_next_candidate(&app->ime);
+      break;
+    case TERM_IME_ACTION_PREV_CANDIDATE:
+      ime_select_prev_candidate(&app->ime);
+      break;
+    case TERM_IME_ACTION_COMMIT_CONVERSION:
+      {
+        char converted[TERM_INPUT_BUF];
+        int replace_chars = 0;
+        int converted_len;
+
+        converted_len = ime_commit_conversion(&app->ime, converted,
+                                              sizeof(converted),
+                                              &replace_chars);
+        if (converted_len <= 0)
+          return 0;
+        len = append_backspaces(buf, len, replace_chars);
+        if (len < 0)
+          return 0;
+        len = append_output(buf, len, converted, converted_len);
+        if (len < 0)
+          return 0;
+      }
+      break;
+    case TERM_IME_ACTION_CANCEL_CONVERSION:
+      ime_cancel_conversion(&app->ime);
+      break;
+    default:
+      break;
+    }
     if (needs_redraw != NULL)
       *needs_redraw = 1;
     return len;
+  }
+
+  if (app->ime.mode == IME_MODE_HIRAGANA &&
+      app->ime.preedit_len <= 0 &&
+      ime_reading_chars(&app->ime) > 0 &&
+      event->ascii == ' ') {
+    len = flush_ime(app, buf, len);
+    if (len < 0)
+      return 0;
+    if (ime_start_conversion(&app->ime) != 0) {
+      if (needs_redraw != NULL)
+        *needs_redraw = 1;
+      return len;
+    }
+  }
+
+  if (ime_conversion_active(&app->ime) != 0 &&
+      event->ascii != KEY_BACK) {
+    ime_cancel_conversion(&app->ime);
+    ime_reset_segment(&app->ime);
+    if (needs_redraw != NULL)
+      *needs_redraw = 1;
   }
 
   if (event->flags & KEY_EVENT_EXTENDED) {
     len = flush_ime(app, buf, len);
     if (len < 0)
       return 0;
+    ime_reset_segment(&app->ime);
     switch (event->scancode) {
     case KEY_SCANCODE_UP:
       return append_output(buf, len, "\x1b[A", 3);
@@ -305,11 +409,21 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
   if (event->ascii == 0)
     return 0;
 
-  if (event->ascii == KEY_BACK && app->ime.preedit_len > 0) {
-    ime_backspace(&app->ime);
-    if (needs_redraw != NULL)
-      *needs_redraw = 1;
-    return 0;
+  if (event->ascii == KEY_BACK) {
+    if (app->ime.preedit_len > 0) {
+      ime_backspace(&app->ime);
+      if (needs_redraw != NULL)
+        *needs_redraw = 1;
+      return 0;
+    }
+    if (app->ime.mode != IME_MODE_LATIN &&
+        ime_reading_chars(&app->ime) > 0 &&
+        ime_drop_last_reading_char(&app->ime) != 0) {
+      if (needs_redraw != NULL)
+        *needs_redraw = 1;
+      buf[0] = KEY_BACK;
+      return 1;
+    }
   }
 
   if ((event->modifiers & KEY_MOD_CTRL) != 0 &&
@@ -317,6 +431,7 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
     len = flush_ime(app, buf, len);
     if (len < 0)
       return 0;
+    ime_reset_segment(&app->ime);
     buf[len] = event->ascii - 'A' + 1;
     return len + 1;
   }
@@ -325,6 +440,7 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
     len = flush_ime(app, buf, len);
     if (len < 0)
       return 0;
+    ime_reset_segment(&app->ime);
     buf[len] = event->ascii - 'a' + 1;
     return len + 1;
   }
@@ -338,6 +454,7 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
     return len;
   }
 
+  ime_reset_segment(&app->ime);
   buf[0] = event->ascii;
   return 1;
 }
@@ -403,6 +520,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
     cell = terminal_surface_cell(&app->surface,
                                  app->surface.cursor_col,
                                  app->surface.cursor_row);
+    render_conversion_target(app);
     if (cell != NULL) {
       cell_renderer_draw_cell(&app->renderer,
                               app->surface.cursor_col,
@@ -473,6 +591,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
   if (force != FALSE || dirty_before == total_cells)
     emit_metric(app, "full_redraw", 0, rendered);
   terminal_surface_clear_damage(&app->surface);
+  render_conversion_target(app);
   render_ime_overlay(app);
   console_set_cursor(app->surface.cursor_col, app->surface.cursor_row);
 }
@@ -617,6 +736,20 @@ PRIVATE int append_output(char *buf, int len, const char *src, int src_len)
   return len + src_len;
 }
 
+PRIVATE int append_backspaces(char *buf, int len, int count)
+{
+  int i;
+
+  if (count < 0)
+    return -1;
+  for (i = 0; i < count; i++) {
+    if (len + 1 > TERM_INPUT_BUF)
+      return -1;
+    buf[len++] = KEY_BACK;
+  }
+  return len;
+}
+
 PRIVATE int flush_ime(struct term_app *app, char *buf, int len)
 {
   int emitted;
@@ -630,14 +763,39 @@ PRIVATE int flush_ime(struct term_app *app, char *buf, int len)
   return len + emitted;
 }
 
-PRIVATE enum term_ime_action ime_action_for_event(const struct key_event *event)
+PRIVATE enum term_ime_action ime_action_for_event(const struct ime_state *ime,
+                                                  const struct key_event *event)
 {
   if (event == NULL)
     return TERM_IME_ACTION_NONE;
+  if (ime != NULL && ime_conversion_active(ime) != 0) {
+    if ((event->flags & KEY_EVENT_EXTENDED) != 0) {
+      if (event->scancode == KEY_SCANCODE_RIGHT)
+        return TERM_IME_ACTION_NEXT_CANDIDATE;
+      if (event->scancode == KEY_SCANCODE_LEFT)
+        return TERM_IME_ACTION_PREV_CANDIDATE;
+    }
+    if (event->ascii == ' ' && (event->modifiers & KEY_MOD_SHIFT) != 0)
+      return TERM_IME_ACTION_PREV_CANDIDATE;
+    if (event->ascii == ' ')
+      return TERM_IME_ACTION_NEXT_CANDIDATE;
+    if (event->ascii == '\r' || event->ascii == '\n')
+      return TERM_IME_ACTION_COMMIT_CONVERSION;
+    if (event->ascii == KEY_ESC)
+      return TERM_IME_ACTION_CANCEL_CONVERSION;
+    if ((event->modifiers & KEY_MOD_CTRL) != 0 &&
+        (event->ascii == 'g' || event->ascii == 'G'))
+      return TERM_IME_ACTION_CANCEL_CONVERSION;
+  }
   if ((event->modifiers & KEY_MOD_CTRL) != 0 && event->ascii == ' ')
     return TERM_IME_ACTION_TOGGLE_LATIN_HIRA;
   if (event->scancode == KEY_SCANCODE_HANKAKU_ZENKAKU)
     return TERM_IME_ACTION_TOGGLE_LATIN_HIRA;
+  if (ime != NULL && ime->mode == IME_MODE_HIRAGANA &&
+      (ime->preedit_len > 0 || ime_reading_chars(ime) > 0)) {
+    if (event->scancode == KEY_SCANCODE_HENKAN)
+      return TERM_IME_ACTION_START_CONVERSION;
+  }
   if (event->scancode == KEY_SCANCODE_HENKAN)
     return TERM_IME_ACTION_SET_HIRAGANA;
   if (event->scancode == KEY_SCANCODE_MUHENKAN)
@@ -679,21 +837,16 @@ PRIVATE void ime_apply_action(struct ime_state *ime, enum term_ime_action action
 PRIVATE void render_ime_overlay(struct term_app *app)
 {
   struct term_cell cell;
+  struct term_cell cells[TERM_IME_OVERLAY_MAX_CELLS];
   char text[TERM_IME_STATUS_COLS + 1];
   int width;
   int start_col;
   int i;
   int text_len;
+  int cell_len;
 
   if (app == NULL || app->surface.rows <= 0 || app->surface.cols <= 0)
     return;
-
-  build_ime_overlay_text(app, text, sizeof(text));
-  width = TERM_IME_STATUS_COLS;
-  if (width > app->surface.cols)
-    width = app->surface.cols;
-  start_col = app->surface.cols - width;
-  text_len = (int)strlen(text);
 
   memset(&cell, 0, sizeof(cell));
   cell.fg = TERM_COLOR_BLACK;
@@ -701,25 +854,284 @@ PRIVATE void render_ime_overlay(struct term_app *app)
   cell.width = 1;
 
   if (app->use_framebuffer != 0) {
+    cell_len = build_ime_overlay_cells(app, cells, TERM_IME_OVERLAY_MAX_CELLS);
+    width = TERM_IME_STATUS_COLS;
+    if (ime_conversion_active(&app->ime) != 0)
+      width = TERM_IME_CONVERSION_COLS;
+    if (cell_len > width)
+      width = cell_len;
+    if (width > app->surface.cols)
+      width = app->surface.cols;
+    start_col = app->surface.cols - width;
     for (i = 0; i < width; i++) {
-      cell.ch = (u_int32_t)((i < text_len) ? text[i] : ' ');
-      cell_renderer_draw_cell(&app->renderer, start_col + i, 0, &cell, FALSE);
+      if (i < cell_len)
+        cell_renderer_draw_cell(&app->renderer, start_col + i, 0,
+                                &cells[i], FALSE);
+      else
+        cell_renderer_draw_cell(&app->renderer, start_col + i, 0,
+                                &cell, FALSE);
     }
     return;
   }
 
+  build_ime_overlay_text(app, text, sizeof(text));
+  width = TERM_IME_STATUS_COLS;
+  if (width > app->surface.cols)
+    width = app->surface.cols;
+  start_col = app->surface.cols - width;
+  text_len = (int)strlen(text);
   for (i = 0; i < width; i++) {
     char ch = (i < text_len) ? text[i] : ' ';
     console_putc_at(start_col + i, 0, render_color(&cell), ch);
   }
 }
 
+PRIVATE void render_conversion_target(struct term_app *app)
+{
+  const char *reading;
+  int target_cols;
+  int start_col;
+  int row;
+  int col;
+
+  if (app == NULL || ime_conversion_active(&app->ime) == 0)
+    return;
+
+  reading = ime_reading(&app->ime);
+  if (reading == NULL || reading[0] == '\0')
+    return;
+
+  target_cols = utf8_display_width(reading);
+  if (target_cols <= 0)
+    return;
+
+  row = app->surface.cursor_row;
+  if (row < 0 || row >= app->surface.rows)
+    return;
+  if (target_cols > app->surface.cursor_col)
+    return;
+
+  start_col = app->surface.cursor_col - target_cols;
+  col = start_col;
+  while (col < app->surface.cursor_col) {
+    const struct term_cell *cell = terminal_surface_cell(&app->surface, col, row);
+    struct term_cell marked;
+
+    if (cell == NULL)
+      break;
+    if ((cell->attr & TERM_ATTR_CONTINUATION) != 0) {
+      col++;
+      continue;
+    }
+
+    marked = *cell;
+    marked.fg = TERM_IME_TARGET_FG;
+    marked.bg = TERM_IME_TARGET_BG;
+    marked.attr &= ~TERM_ATTR_REVERSE;
+
+    if (app->use_framebuffer != 0)
+      cell_renderer_draw_cell(&app->renderer, col, row, &marked, FALSE);
+    else
+      console_putc_at(col, row, render_color(&marked), render_char(&marked));
+
+    if (marked.width > 1)
+      col += marked.width;
+    else
+      col++;
+  }
+}
+
+PRIVATE int build_ime_overlay_cells(struct term_app *app,
+                                    struct term_cell *cells, int cap)
+{
+  const char *mode;
+  const char *reading;
+  int i;
+  int len = 0;
+  char count[8];
+
+  if (app == NULL || cells == NULL || cap <= 0)
+    return 0;
+
+  memset(cells, 0, sizeof(struct term_cell) * (size_t)cap);
+  for (i = 0; i < cap; i++) {
+    cells[i].ch = ' ';
+    cells[i].fg = TERM_COLOR_BLACK;
+    cells[i].bg = TERM_COLOR_LIGHT_GRAY;
+    cells[i].width = 1;
+  }
+
+  mode = ime_mode_label(&app->ime);
+  len = append_overlay_ascii(cells, len, cap, "IME ",
+                             TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+  len = append_overlay_ascii(cells, len, cap, mode,
+                             TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+  if (ime_conversion_active(&app->ime) == 0) {
+    if (app->ime.preedit_len > 0) {
+      len = append_overlay_ascii(cells, len, cap, " ",
+                                 TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+      len = append_overlay_ascii(cells, len, cap, ime_preedit(&app->ime),
+                                 TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+    }
+    return len;
+  }
+
+  count[0] = '\0';
+  count[0] = (char)('0' + ((ime_candidate_index(&app->ime) + 1) % 10));
+  count[1] = '/';
+  count[2] = (char)('0' + (ime_candidate_count(&app->ime) % 10));
+  count[3] = '\0';
+
+  len = append_overlay_ascii(cells, len, cap, " ",
+                             TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+  len = append_overlay_ascii(cells, len, cap, count,
+                             TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+  reading = ime_reading(&app->ime);
+  if (reading[0] != '\0') {
+    len = append_overlay_ascii(cells, len, cap, " [",
+                               TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+    len = append_overlay_utf8(cells, len, cap, reading,
+                              TERM_IME_READING_FG, TERM_IME_READING_BG, 0);
+    len = append_overlay_ascii(cells, len, cap, "]",
+                               TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+  }
+  for (i = 0; i < ime_candidate_count(&app->ime); i++) {
+    unsigned char fg = TERM_COLOR_BLACK;
+    unsigned char bg = TERM_COLOR_LIGHT_GRAY;
+
+    if (i == 0)
+      len = append_overlay_ascii(cells, len, cap, " ",
+                                 TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+    else
+      len = append_overlay_ascii(cells, len, cap, " / ",
+                                 TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+    if (i == ime_candidate_index(&app->ime)) {
+      fg = TERM_IME_SELECTED_FG;
+      bg = TERM_IME_SELECTED_BG;
+    }
+    len = append_overlay_utf8(cells, len, cap, app->ime.candidates[i],
+                              fg, bg, 0);
+  }
+
+  return len;
+}
+
+PRIVATE int utf8_display_width(const char *text)
+{
+  int len;
+  int index = 0;
+  int total = 0;
+
+  if (text == NULL)
+    return 0;
+
+  len = (int)strlen(text);
+  while (index < len) {
+    u_int32_t codepoint;
+    int consumed = 0;
+    int width;
+
+    utf8_decode_one(text + index, len - index, &codepoint, &consumed);
+    if (consumed <= 0)
+      break;
+    width = unicode_wcwidth(codepoint);
+    if (width <= 0)
+      width = 1;
+    total += width;
+    index += consumed;
+  }
+
+  return total;
+}
+
+PRIVATE int append_overlay_ascii(struct term_cell *cells, int len, int cap,
+                                 const char *text,
+                                 unsigned char fg,
+                                 unsigned char bg,
+                                 unsigned char attr)
+{
+  if (text == NULL)
+    return len;
+  while (*text != '\0' && len < cap)
+    len = append_overlay_codepoint(cells, len, cap,
+                                   (unsigned char)*text++,
+                                   fg, bg, attr);
+  return len;
+}
+
+PRIVATE int append_overlay_utf8(struct term_cell *cells, int len, int cap,
+                                const char *text,
+                                unsigned char fg,
+                                unsigned char bg,
+                                unsigned char attr)
+{
+  int text_len;
+  int index = 0;
+
+  if (text == NULL)
+    return len;
+
+  text_len = (int)strlen(text);
+  while (index < text_len && len < cap) {
+    u_int32_t codepoint;
+    int consumed = 0;
+
+    utf8_decode_one(text + index, text_len - index, &codepoint, &consumed);
+    if (consumed <= 0)
+      break;
+    len = append_overlay_codepoint(cells, len, cap, codepoint,
+                                   fg, bg, attr);
+    index += consumed;
+  }
+
+  return len;
+}
+
+PRIVATE int append_overlay_codepoint(struct term_cell *cells, int len, int cap,
+                                     u_int32_t codepoint,
+                                     unsigned char fg,
+                                     unsigned char bg,
+                                     unsigned char attr)
+{
+  int width;
+
+  if (cells == NULL || len >= cap)
+    return len;
+
+  width = unicode_wcwidth(codepoint);
+  if (width <= 0)
+    width = 1;
+  if (len + width > cap)
+    return cap;
+
+  cells[len].ch = codepoint;
+  cells[len].fg = fg;
+  cells[len].bg = bg;
+  cells[len].attr = attr;
+  cells[len].width = (unsigned char)width;
+  len++;
+
+  if (width == 2) {
+    cells[len].ch = ' ';
+    cells[len].fg = fg;
+    cells[len].bg = bg;
+    cells[len].attr = attr | TERM_ATTR_CONTINUATION;
+    cells[len].width = 1;
+    len++;
+  }
+
+  return len;
+}
+
 PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
 {
   const char *mode;
   const char *preedit;
+  const char *candidate;
   int pos = 0;
   int tail_len;
+  int selected;
+  int total;
 
   if (text == NULL || cap <= 0)
     return;
@@ -729,6 +1141,7 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
 
   mode = ime_mode_label(&app->ime);
   preedit = ime_preedit(&app->ime);
+  candidate = ime_current_candidate(&app->ime);
 
   if (cap > 4) {
     memcpy(text + pos, "IME ", 4);
@@ -737,6 +1150,30 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
   while (pos < cap - 1 && *mode != '\0') {
     text[pos++] = *mode;
     mode++;
+  }
+  if (ime_conversion_active(&app->ime) != 0) {
+    selected = ime_candidate_index(&app->ime) + 1;
+    total = ime_candidate_count(&app->ime);
+    if (pos < cap - 1)
+      text[pos++] = ' ';
+    if (pos < cap - 1)
+      text[pos++] = 'C';
+    if (pos < cap - 1)
+      text[pos++] = (char)('0' + (selected % 10));
+    if (pos < cap - 1)
+      text[pos++] = '/';
+    if (pos < cap - 1)
+      text[pos++] = (char)('0' + (total % 10));
+    if (candidate[0] != '\0' && pos < cap - 2) {
+      text[pos++] = ' ';
+      while (*candidate != '\0' && pos < cap - 1) {
+        unsigned char ch = (unsigned char)*candidate;
+        if (ch >= 0x20 && ch <= 0x7e)
+          text[pos++] = *candidate;
+        candidate++;
+      }
+    }
+    return;
   }
   if (*preedit == '\0' || pos >= cap - 2)
     return;

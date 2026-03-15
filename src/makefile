@@ -16,7 +16,7 @@ INIT2   = ${INITDIR}/bin/ptest2
 KMKFS   = ${BUILDDIR}/tools/kmkfs
 GETSIZE = ${BUILDDIR}/tools/getsize
 UDEV_GOTHIC_TTF = ${BASEDIR}/third_party/fonts/UDEVGothic-Regular.ttf
-UDEV_GOTHIC_UTF8_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6,65e5,672c,8a9e
+UDEV_GOTHIC_UTF8_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6,5909,5b57,611b,611f,63db,65e5,672c,6f22,85cd,8a9e
 
 # Test process
 PTEST   = ${INITDIR}/bin/ptest

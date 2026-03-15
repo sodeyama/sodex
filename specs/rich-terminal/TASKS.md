@@ -163,13 +163,14 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | RT-76 | `ime_state` を拡張し、かな読み、候補列、選択 index、変換状態を保持できるようにする | RT-59, RT-66 | preedit と変換中候補を別状態として保持できる |
-| [ ] | RT-77 | 最小辞書 format と lookup 層を追加し、読みから候補列を引けるようにする | RT-76 | `かな` 読みから 1 件以上の候補を得られる |
-| [ ] | RT-78 | `term` の入力経路に変換開始、候補移動、確定、キャンセル action を追加する | RT-77 | `Space` / `変換` / `Enter` / `Esc` で候補操作ができる |
-| [ ] | RT-79 | `term` overlay に候補 UI を追加し、preedit と候補一覧を描画する | RT-78, RT-67 | 候補選択中の状態が terminal 上で見える |
-| [ ] | RT-80 | shell と `vi` の両方で、候補確定済み UTF-8 を保存まで通す | RT-79, RT-75 | 漢字を含む入力が raw / canonical の両経路で破綻しない |
-| [ ] | RT-81 | IME 辞書 lookup と候補遷移の host test を追加する | RT-77, RT-78 | lookup、次候補、前候補、キャンセル、確定を自動検知できる |
-| [ ] | RT-82 | IME 変換の QEMU smoke test を追加し、候補選択と保存を固定する | RT-80, RT-81 | 漢字変換の主要導線を QEMU 上で回帰検知できる |
+| [x] | RT-76 | `ime_state` を拡張し、かな読み、候補列、選択 index、変換状態を保持できるようにする | RT-59, RT-66 | preedit と変換中候補を別状態として保持できる |
+| [x] | RT-77 | 最小辞書 format と lookup 層を追加し、読みから候補列を引けるようにする | RT-76 | `かな` 読みから 1 件以上の候補を得られる |
+| [x] | RT-78 | IME の変換 state machine を pure logic helper へ分離し、候補遷移と commit / cancel を `term` 非依存で扱えるようにする | RT-76, RT-77 | 変換開始、次候補、前候補、確定、キャンセル、`Backspace` 復帰を pure logic で扱える |
+| [x] | RT-79 | `term` の入力経路に変換開始、候補移動、確定、キャンセル action を追加する | RT-78 | `Space` / `変換` / `Enter` / `Esc` で候補操作ができる |
+| [x] | RT-80 | `term` overlay に候補 UI を追加し、preedit と候補一覧を描画する | RT-79, RT-67 | 候補選択中の状態が terminal 上で見える |
+| [x] | RT-81 | shell と `vi` の両方で、候補確定済み UTF-8 を保存まで通す | RT-80, RT-75 | 漢字を含む入力が raw / canonical の両経路で破綻しない |
+| [x] | RT-82 | IME 辞書 lookup と候補遷移の host test を追加する | RT-77, RT-78 | lookup、次候補、前候補、キャンセル、確定、`Backspace` 復帰を自動検知できる |
+| [x] | RT-83 | IME 変換の QEMU smoke test を追加し、候補選択と保存を固定する | RT-81, RT-82 | 漢字変換の主要導線を QEMU 上で回帰検知できる |
 
 ## 先送りする項目
 

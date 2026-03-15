@@ -4,6 +4,8 @@
 #include <sys/types.h>
 
 #define IME_PREEDIT_MAX 16
+#define IME_READING_MAX 64
+#define IME_CANDIDATE_MAX 8
 
 enum ime_mode {
   IME_MODE_LATIN = 0,
@@ -15,6 +17,13 @@ struct ime_state {
   enum ime_mode mode;
   char preedit[IME_PREEDIT_MAX];
   int preedit_len;
+  char reading[IME_READING_MAX];
+  int reading_len;
+  int reading_chars;
+  const char *candidates[IME_CANDIDATE_MAX];
+  int candidate_count;
+  int candidate_index;
+  int conversion_active;
 };
 
 void ime_init(struct ime_state *state);
@@ -23,6 +32,10 @@ void ime_cycle_mode(struct ime_state *state);
 void ime_cycle_mode_reverse(struct ime_state *state);
 const char *ime_mode_label(const struct ime_state *state);
 const char *ime_preedit(const struct ime_state *state);
+const char *ime_reading(const struct ime_state *state);
+int ime_reading_chars(const struct ime_state *state);
+void ime_reset_segment(struct ime_state *state);
+int ime_drop_last_reading_char(struct ime_state *state);
 int ime_feed_ascii(struct ime_state *state, char ch, char *out, int out_cap);
 int ime_backspace(struct ime_state *state);
 int ime_flush(struct ime_state *state, char *out, int out_cap);

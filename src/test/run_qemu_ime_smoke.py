@@ -19,8 +19,8 @@ INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 45
-IME_FILE_TEXT = "にほんご あいうえお ABC".encode("utf-8")
-SHELL_FILENAME = "あいう"
+IME_FILE_TEXT = "日本語 感じ ABC".encode("utf-8")
+SHELL_FILENAME = "漢字"
 LATIN_FILENAME = "latin.txt"
 
 
@@ -70,15 +70,23 @@ def crop_matches(ppm_path: pathlib.Path, reference: dict[str, int | str]) -> boo
 
 class QemuMonitor:
     def __init__(self, sock_path: pathlib.Path) -> None:
-        deadline = time.time() + 15.0
+        deadline = time.time() + 20.0
 
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(1.0)
+        self.sock: socket.socket | None = None
         while True:
+            sock: socket.socket | None = None
             try:
-                self.sock.connect(str(sock_path))
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(1.0)
+                sock.connect(str(sock_path))
+                self.sock = sock
                 break
             except OSError:
+                try:
+                    if sock is not None:
+                        sock.close()
+                except Exception:
+                    pass
                 if time.time() >= deadline:
                     raise
                 time.sleep(0.1)
@@ -137,7 +145,8 @@ class QemuMonitor:
             self.send_key(keymap.get(ch, ch))
 
     def close(self) -> None:
-        self.sock.close()
+        if self.sock is not None:
+            self.sock.close()
 
 
 def wait_for_path(path: pathlib.Path, timeout: float) -> None:
@@ -257,6 +266,7 @@ def main() -> int:
     ime_reference = json.loads((repo_root / "src/test/data/term_ime_line_reference.json").read_text())
     hira_overlay_reference = json.loads((repo_root / "src/test/data/term_ime_hira_overlay_reference.json").read_text())
     latin_overlay_reference = json.loads((repo_root / "src/test/data/term_ime_latin_overlay_reference.json").read_text())
+    conversion_overlay_reference = json.loads((repo_root / "src/test/data/term_ime_conversion_overlay_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
     monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_i_{os.getpid()}.sock"
@@ -310,6 +320,17 @@ def main() -> int:
         monitor.send_text("\n")
         time.sleep(1.0)
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+
+        monitor.send_text("touch ")
+        monitor.send_hankaku_zenkaku()
+        monitor.send_text("kanji")
+        monitor.send_key("spc")
+        wait_for_screen(monitor, overlay_ppm, conversion_overlay_reference, timeout, "conversion overlay")
+        monitor.send_key("ret")
+        monitor.send_muhenkan()
+        monitor.send_text("\n")
+        time.sleep(1.0)
+        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
         monitor.send_text(f"touch {LATIN_FILENAME}\n")
         time.sleep(1.0)
 
@@ -317,10 +338,16 @@ def main() -> int:
         time.sleep(1.0)
         monitor.send_text("i")
         monitor.send_henkan()
-        monitor.send_text("nihongo ")
+        monitor.send_text("nihongo")
+        monitor.send_key("spc")
+        monitor.send_key("ret")
         monitor.send_muhenkan()
+        monitor.send_text(" ")
         monitor.send_henkan()
-        monitor.send_text("aiueo")
+        monitor.send_text("kanji")
+        monitor.send_key("spc")
+        monitor.send_key("right")
+        monitor.send_key("ret")
         monitor.send_muhenkan()
         monitor.send_text(" ABC")
         time.sleep(0.5)

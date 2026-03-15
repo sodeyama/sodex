@@ -9,9 +9,12 @@ struct ime_mapping {
   int count;
 };
 
+static void ime_clear_candidates(struct ime_state *state);
 static int ime_append_bytes(char *out, int out_len, int out_cap,
                             const char *src, int src_len);
-static int ime_emit_codepoint(enum ime_mode mode, u_int32_t codepoint,
+static int ime_append_reading_bytes(struct ime_state *state,
+                                    const char *src, int src_len, int chars);
+static int ime_emit_codepoint(struct ime_state *state, u_int32_t codepoint,
                               char *out, int out_len, int out_cap);
 static int ime_emit_ascii(char ch, char *out, int out_len, int out_cap);
 static int ime_process_preedit(struct ime_state *state, int force,
@@ -150,6 +153,51 @@ const char *ime_preedit(const struct ime_state *state)
   return state->preedit;
 }
 
+const char *ime_reading(const struct ime_state *state)
+{
+  if (state == NULL)
+    return "";
+  return state->reading;
+}
+
+int ime_reading_chars(const struct ime_state *state)
+{
+  if (state == NULL)
+    return 0;
+  return state->reading_chars;
+}
+
+void ime_reset_segment(struct ime_state *state)
+{
+  if (state == NULL)
+    return;
+
+  memset(state->reading, 0, sizeof(state->reading));
+  state->reading_len = 0;
+  state->reading_chars = 0;
+  ime_clear_candidates(state);
+}
+
+int ime_drop_last_reading_char(struct ime_state *state)
+{
+  int start;
+
+  if (state == NULL || state->reading_len <= 0 || state->reading_chars <= 0)
+    return 0;
+
+  start = utf8_prev_char_start(state->reading, state->reading_len,
+                               state->reading_len);
+  if (start < 0)
+    start = 0;
+  state->reading_len = start;
+  state->reading[state->reading_len] = '\0';
+  state->reading_chars--;
+  if (state->reading_chars < 0)
+    state->reading_chars = 0;
+  ime_clear_candidates(state);
+  return 1;
+}
+
 int ime_feed_ascii(struct ime_state *state, char ch, char *out, int out_cap)
 {
   int out_len = 0;
@@ -158,6 +206,7 @@ int ime_feed_ascii(struct ime_state *state, char ch, char *out, int out_cap)
     return -1;
 
   if (state->mode == IME_MODE_LATIN) {
+    ime_reset_segment(state);
     out[0] = ch;
     return 1;
   }
@@ -181,6 +230,7 @@ int ime_feed_ascii(struct ime_state *state, char ch, char *out, int out_cap)
     return -1;
   if (ime_emit_ascii(ch, out, out_len, out_cap) < 0)
     return -1;
+  ime_reset_segment(state);
   return out_len + 1;
 }
 
@@ -201,6 +251,19 @@ int ime_flush(struct ime_state *state, char *out, int out_cap)
   return ime_process_preedit(state, 1, out, out_cap);
 }
 
+static void ime_clear_candidates(struct ime_state *state)
+{
+  int i;
+
+  if (state == NULL)
+    return;
+  for (i = 0; i < IME_CANDIDATE_MAX; i++)
+    state->candidates[i] = NULL;
+  state->candidate_count = 0;
+  state->candidate_index = 0;
+  state->conversion_active = 0;
+}
+
 static int ime_append_bytes(char *out, int out_len, int out_cap,
                             const char *src, int src_len)
 {
@@ -210,17 +273,38 @@ static int ime_append_bytes(char *out, int out_len, int out_cap,
   return out_len + src_len;
 }
 
-static int ime_emit_codepoint(enum ime_mode mode, u_int32_t codepoint,
+static int ime_append_reading_bytes(struct ime_state *state,
+                                    const char *src, int src_len, int chars)
+{
+  if (state == NULL || src == NULL || src_len < 0 || chars < 0)
+    return -1;
+  if (state->reading_len + src_len >= IME_READING_MAX)
+    return -1;
+
+  memcpy(state->reading + state->reading_len, src, (size_t)src_len);
+  state->reading_len += src_len;
+  state->reading[state->reading_len] = '\0';
+  state->reading_chars += chars;
+  ime_clear_candidates(state);
+  return 0;
+}
+
+static int ime_emit_codepoint(struct ime_state *state, u_int32_t codepoint,
                               char *out, int out_len, int out_cap)
 {
   char encoded[4];
   int encoded_len;
 
-  codepoint = ime_mode_codepoint(mode, codepoint);
+  codepoint = ime_mode_codepoint(state->mode, codepoint);
   encoded_len = utf8_encode(codepoint, encoded);
   if (encoded_len < 0)
     return -1;
-  return ime_append_bytes(out, out_len, out_cap, encoded, encoded_len);
+  out_len = ime_append_bytes(out, out_len, out_cap, encoded, encoded_len);
+  if (out_len < 0)
+    return -1;
+  if (ime_append_reading_bytes(state, encoded, encoded_len, 1) < 0)
+    return -1;
+  return out_len;
 }
 
 static int ime_emit_ascii(char ch, char *out, int out_len, int out_cap)
@@ -243,7 +327,7 @@ static int ime_process_preedit(struct ime_state *state, int force,
     if (state->preedit_len >= 2 &&
         state->preedit[0] == state->preedit[1] &&
         ime_is_sokuon_target(state->preedit[0]) != 0) {
-      out_len = ime_emit_codepoint(state->mode, 0x3063U, out, out_len, out_cap);
+      out_len = ime_emit_codepoint(state, 0x3063U, out, out_len, out_cap);
       if (out_len < 0)
         return -1;
       ime_consume_preedit(state, 1);
@@ -252,7 +336,7 @@ static int ime_process_preedit(struct ime_state *state, int force,
 
     if (state->preedit[0] == 'n') {
       if (state->preedit_len >= 2 && state->preedit[1] == '\'') {
-        out_len = ime_emit_codepoint(state->mode, 0x3093U, out, out_len, out_cap);
+        out_len = ime_emit_codepoint(state, 0x3093U, out, out_len, out_cap);
         if (out_len < 0)
           return -1;
         ime_consume_preedit(state, 2);
@@ -260,7 +344,7 @@ static int ime_process_preedit(struct ime_state *state, int force,
       }
       if (state->preedit_len >= 2 && state->preedit[1] == 'n') {
         if (state->preedit_len >= 3 || force != 0) {
-          out_len = ime_emit_codepoint(state->mode, 0x3093U, out, out_len, out_cap);
+          out_len = ime_emit_codepoint(state, 0x3093U, out, out_len, out_cap);
           if (out_len < 0)
             return -1;
           ime_consume_preedit(state, force != 0 && state->preedit_len == 2 ? 2 : 1);
@@ -269,13 +353,13 @@ static int ime_process_preedit(struct ime_state *state, int force,
       } else if (state->preedit_len >= 2 &&
                  ime_is_consonant(state->preedit[1]) != 0 &&
                  state->preedit[1] != 'y') {
-        out_len = ime_emit_codepoint(state->mode, 0x3093U, out, out_len, out_cap);
+        out_len = ime_emit_codepoint(state, 0x3093U, out, out_len, out_cap);
         if (out_len < 0)
           return -1;
         ime_consume_preedit(state, 1);
         continue;
       } else if (force != 0 && state->preedit_len == 1) {
-        out_len = ime_emit_codepoint(state->mode, 0x3093U, out, out_len, out_cap);
+        out_len = ime_emit_codepoint(state, 0x3093U, out, out_len, out_cap);
         if (out_len < 0)
           return -1;
         ime_consume_preedit(state, 1);
@@ -288,7 +372,7 @@ static int ime_process_preedit(struct ime_state *state, int force,
       int i;
 
       for (i = 0; i < mapping->count; i++) {
-        out_len = ime_emit_codepoint(state->mode, mapping->codepoints[i],
+        out_len = ime_emit_codepoint(state, mapping->codepoints[i],
                                      out, out_len, out_cap);
         if (out_len < 0)
           return -1;

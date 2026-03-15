@@ -48,7 +48,7 @@ make
 bin/start.sh
 ```
 
-この起動スクリプトは現在 `-display cocoa` を使うため、macOS 前提です。別環境で使う場合は [bin/start.sh](bin/start.sh) の display 設定を調整してください。
+通常の `bin/start.sh` は `-display cocoa` を使うため、macOS 前提です。headless 実行は `bin/start.sh server-headless` を使ってください。
 既定の QEMU RAM は `512MB` です。`SODEX_QEMU_MEM_MB=1024 bin/start.sh` のように上書きできます。
 
 ネットワーク付きで起動したい場合:
@@ -56,6 +56,36 @@ bin/start.sh
 ```sh
 bin/start.sh net
 ```
+
+server runtime を headless で起動したい場合:
+
+```sh
+bin/start.sh server-headless
+```
+
+Docker 上で server runtime を常駐させたい場合:
+
+```sh
+docker build -f docker/server-runtime/Dockerfile -t sodex-server-runtime .
+mkdir -p build/log/server-runtime
+docker run --rm \
+  -p 18080:18080 \
+  -p 10023:10023 \
+  -v "$(pwd)/build/log/server-runtime:/var/log/sodex" \
+  sodex-server-runtime
+```
+
+この image は container 内で `i686-linux-gnu` cross toolchain を使って guest を build します。
+Apple Silicon を含む arm64 host でも native image として build / run できます。
+
+published port の peer IP は host により異なります。
+Linux host の既定は `10.0.2.2`、Docker Desktop/macOS では `192.168.65.1` を確認しました。
+allowlist を変えるときは `SODEX_ADMIN_ALLOW_IP=...` を指定してください。
+
+ready 条件は container の serial/stdout に `AUDIT server_runtime_ready ...` が出た時点です。
+`qemu_debug.log` と `monitor.sock` は mount した `/var/log/sodex` 配下に出ます。
+
+`/dev/kvm` を使える Linux なら、`--device /dev/kvm -e SODEX_QEMU_ACCEL=kvm` を追加できます。
 
 ## テスト
 
@@ -82,6 +112,69 @@ make -C src test-qemu-shell-io
 make -C src test-qemu-vi
 make -C src test-qemu-ime
 ```
+
+Docker/headless server runtime smoke:
+
+```sh
+make test-docker-server
+```
+
+ポート衝突を避けたいときは `SODEX_HOST_HTTP_PORT` / `SODEX_HOST_ADMIN_PORT` を上書きできます。
+Docker Desktop/macOS では `SODEX_ADMIN_ALLOW_IP=192.168.65.1 make test-docker-server` を使います。
+
+QEMU debug shell smoke:
+
+```sh
+make test-qemu-debug-shell
+```
+
+debug shell の guest port は `10024` です。
+host 側ポートを変えたいときは `SODEX_HOST_DEBUG_SHELL_PORT=11024 make test-qemu-debug-shell` のように上書きできます。
+
+raw TCP client から手で試すときの最小例:
+
+```sh
+printf 'TOKEN control-secret\n' | nc 127.0.0.1 10024
+```
+
+返答は最初に `OK shell` が 1 行返り、その後は line protocol ではなく raw stream に切り替わります。
+対話用途では `nc` より `socat` の方が扱いやすいです。
+
+```sh
+socat -,rawer,echo=0 TCP:127.0.0.1:10024
+```
+
+接続したら最初の 1 行で `TOKEN control-secret` を送り、以後は shell 入力をそのまま流します。
+
+QEMU SSH smoke:
+
+```sh
+make test-qemu-ssh
+```
+
+host 側ポートを変えたいときは `SODEX_HOST_SSH_PORT=11022 make test-qemu-ssh` のように上書きできます。
+
+手で試すときは、まず guest を SSH 付きで起動します。
+
+```sh
+bin/start.sh server-headless --ssh
+```
+
+その後、別ターミナルから接続します。
+現時点では最小実装なので、auth method と host key 確認を明示した `ssh -tt` を前提にします。
+
+```sh
+ssh -tt -F /dev/null \
+  -o PreferredAuthentications=password \
+  -o PubkeyAuthentication=no \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null \
+  -p 10022 root@127.0.0.1
+```
+
+既定 password は `root-secret` です。
+login 後は `sodex />` prompt が出るので、`ls` / `pwd` / `cat` を実行でき、
+`Backspace`, `Ctrl-C`, `exit` も通ります。
 
 `make -C src test-qemu-memory` は `128/256/512/1024MB` の memory scaling matrix を回します。
 `make -C src test-qemu-user-memory` は shell 経由で `memgrow` を起動し、`execve` と `malloc/brk` の userland 回帰を確認します。

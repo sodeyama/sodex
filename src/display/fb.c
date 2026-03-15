@@ -8,6 +8,10 @@ PRIVATE int fb_init_result = -1;
 
 PRIVATE int fb_bytes_per_pixel(void);
 PRIVATE void fb_copy_bytes(u_int8_t *dst, const u_int8_t *src, u_int32_t size);
+PRIVATE int fb_info_valid(void);
+PRIVATE int fb_span_valid(const void *ptr, u_int32_t size);
+
+#define FB_MAPPED_WINDOW_BYTES 0x400000U
 
 PRIVATE int fb_bytes_per_pixel(void)
 {
@@ -22,6 +26,8 @@ PRIVATE void fb_copy_bytes(u_int8_t *dst, const u_int8_t *src, u_int32_t size)
 
   if (dst == src || size == 0)
     return;
+  if (fb_span_valid(dst, size) == FALSE || fb_span_valid(src, size) == FALSE)
+    return;
 
   if (dst < src) {
     for (i = 0; i < size; i++)
@@ -30,6 +36,50 @@ PRIVATE void fb_copy_bytes(u_int8_t *dst, const u_int8_t *src, u_int32_t size)
     for (i = size; i > 0; i--)
       dst[i - 1] = src[i - 1];
   }
+}
+
+PRIVATE int fb_info_valid(void)
+{
+  u_int32_t base;
+  u_int32_t end;
+
+  if (kernel_fb_info.available == 0 || kernel_fb_info.base == NULL)
+    return FALSE;
+  if (kernel_fb_info.width == 0 || kernel_fb_info.height == 0 ||
+      kernel_fb_info.pitch == 0 || kernel_fb_info.bpp == 0 ||
+      kernel_fb_info.size == 0)
+    return FALSE;
+
+  base = (u_int32_t)kernel_fb_info.base;
+  end = base + kernel_fb_info.size;
+  if (base < BGA_FB_VADDR || base >= BGA_FB_VADDR + FB_MAPPED_WINDOW_BYTES)
+    return FALSE;
+  if (end < base || end > BGA_FB_VADDR + FB_MAPPED_WINDOW_BYTES)
+    return FALSE;
+  return TRUE;
+}
+
+PRIVATE int fb_span_valid(const void *ptr, u_int32_t size)
+{
+  u_int32_t start;
+  u_int32_t end;
+  u_int32_t fb_base;
+  u_int32_t fb_end;
+
+  if (fb_info_valid() == FALSE)
+    return FALSE;
+  if (size == 0)
+    return TRUE;
+
+  start = (u_int32_t)ptr;
+  end = start + size;
+  fb_base = (u_int32_t)kernel_fb_info.base;
+  fb_end = fb_base + kernel_fb_info.size;
+  if (end < start)
+    return FALSE;
+  if (start < fb_base || end > fb_end)
+    return FALSE;
+  return TRUE;
 }
 
 PUBLIC int fb_init(void)
@@ -51,20 +101,27 @@ PUBLIC int fb_init(void)
 
 PUBLIC int fb_is_available(void)
 {
-  return kernel_fb_info.available;
+  if (fb_info_valid() == FALSE) {
+    kernel_fb_info.available = FALSE;
+    return FALSE;
+  }
+  return TRUE;
 }
 
 PUBLIC const struct fb_info *fb_get_info(void)
 {
+  if (fb_info_valid() == FALSE)
+    kernel_fb_info.available = FALSE;
   return &kernel_fb_info;
 }
 
 PUBLIC void fb_putpixel(int x, int y, u_int32_t color)
 {
   int bytes_per_pixel;
+  u_int32_t offset;
   u_int8_t *pixel;
 
-  if (kernel_fb_info.available == 0 || kernel_fb_info.base == NULL)
+  if (fb_is_available() == FALSE)
     return;
   if (x < 0 || y < 0 || x >= kernel_fb_info.width || y >= kernel_fb_info.height)
     return;
@@ -73,8 +130,13 @@ PUBLIC void fb_putpixel(int x, int y, u_int32_t color)
   if (bytes_per_pixel != 4)
     return;
 
-  pixel = (u_int8_t *)kernel_fb_info.base + y * kernel_fb_info.pitch +
-          x * bytes_per_pixel;
+  offset = (u_int32_t)y * kernel_fb_info.pitch + (u_int32_t)x * bytes_per_pixel;
+  if (offset > kernel_fb_info.size - (u_int32_t)bytes_per_pixel)
+    return;
+
+  pixel = (u_int8_t *)kernel_fb_info.base + offset;
+  if (fb_span_valid(pixel, (u_int32_t)bytes_per_pixel) == FALSE)
+    return;
   *(u_int32_t *)pixel = color;
 }
 
@@ -83,7 +145,7 @@ PUBLIC void fb_fillrect(int x, int y, int width, int height, u_int32_t color)
   int row;
   int col;
 
-  if (kernel_fb_info.available == 0 || kernel_fb_info.base == NULL)
+  if (fb_is_available() == FALSE)
     return;
   if (width <= 0 || height <= 0)
     return;
@@ -117,9 +179,11 @@ PUBLIC void fb_blit(int dst_x, int dst_y, int src_x, int src_y,
   int start;
   int end;
   int step;
-  int row_width;
+  u_int32_t dst_offset;
+  u_int32_t row_width;
+  u_int32_t src_offset;
 
-  if (kernel_fb_info.available == 0 || kernel_fb_info.base == NULL)
+  if (fb_is_available() == FALSE)
     return;
   if (width <= 0 || height <= 0)
     return;
@@ -169,17 +233,26 @@ PUBLIC void fb_blit(int dst_x, int dst_y, int src_x, int src_y,
     step = -1;
   }
 
-  row_width = width * bytes_per_pixel;
+  row_width = (u_int32_t)width * (u_int32_t)bytes_per_pixel;
+  if (row_width == 0 || row_width > kernel_fb_info.size)
+    return;
+
   for (row = start; row != end; row += step) {
     u_int8_t *dst;
     const u_int8_t *src;
 
-    dst = (u_int8_t *)kernel_fb_info.base +
-          (dst_y + row) * kernel_fb_info.pitch +
-          dst_x * bytes_per_pixel;
-    src = (u_int8_t *)kernel_fb_info.base +
-          (src_y + row) * kernel_fb_info.pitch +
-          src_x * bytes_per_pixel;
+    dst_offset = (u_int32_t)(dst_y + row) * kernel_fb_info.pitch +
+                 (u_int32_t)dst_x * (u_int32_t)bytes_per_pixel;
+    src_offset = (u_int32_t)(src_y + row) * kernel_fb_info.pitch +
+                 (u_int32_t)src_x * (u_int32_t)bytes_per_pixel;
+    if (dst_offset > kernel_fb_info.size || src_offset > kernel_fb_info.size)
+      return;
+
+    dst = (u_int8_t *)kernel_fb_info.base + dst_offset;
+    src = (u_int8_t *)kernel_fb_info.base + src_offset;
+    if (fb_span_valid(dst, row_width) == FALSE ||
+        fb_span_valid(src, row_width) == FALSE)
+      return;
     fb_copy_bytes(dst, src, row_width);
   }
 }

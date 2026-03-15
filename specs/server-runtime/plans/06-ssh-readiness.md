@@ -58,8 +58,16 @@
 
 のどちらかを明示的に決める。
 
+## 現時点の判断
+
+2026-03-15 時点では `SSH` 実装は `no-go` とする。
+
+- host Linux 側の `SSH` と guest `sodex` の管理 API 分離で運用要件を満たせる
+- guest 側は text protocol / HTTP / token / allowlist / audit に絞った方が attack surface を小さく保てる
+- `TLS`, `PTY`, 鍵管理, 認証方式の整理が終わるまでは `SSH` を追加しない
+
 ## 完了条件
 
-- [ ] `SSH` の前提条件が整理されている
-- [ ] 代替案との比較ができている
-- [ ] go/no-go を判断できる材料が揃っている
+- [x] `SSH` の前提条件が整理されている
+- [x] 代替案との比較ができている
+- [x] go/no-go を判断できる材料が揃っている

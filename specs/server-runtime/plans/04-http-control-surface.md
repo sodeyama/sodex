@@ -45,8 +45,8 @@
 ## テスト
 
 - `curl http://127.0.0.1:18080/healthz`
-- `curl http://127.0.0.1:18080/status`
-- `curl -X POST http://127.0.0.1:18080/agent/start`
+- `curl -H 'Authorization: Bearer status-secret' http://127.0.0.1:18080/status`
+- `curl -X POST -H 'Authorization: Bearer control-secret' http://127.0.0.1:18080/agent/start`
 
 ## 変更対象
 
@@ -58,6 +58,6 @@
 
 ## 完了条件
 
-- [ ] `healthz` と `status` が取れる
-- [ ] `POST` で管理操作ができる
-- [ ] host 側の標準的な HTTP client から扱える
+- [x] `healthz` と `status` が取れる
+- [x] `POST` で管理操作ができる
+- [x] host 側の標準的な HTTP client から扱える

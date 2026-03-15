@@ -24,9 +24,13 @@ VRAM_ADDRESS = 0xc00b8000
 .global memset, memcpy      
 .extern vga_text_backend_cols
 .extern vga_text_backend_vram
+.extern process_in_timer_interrupt
 
 enableInterrupt:
+        cmpl    $0, process_in_timer_interrupt
+        jne     1f
         sti
+1:
         ret
         
 disableInterrupt:
@@ -352,7 +356,6 @@ switch_to_outer_privilege:
         movl    NEXT_EDI(%ebp), %edi
         movl    NEXT_EAX(%ebp), %eax        
         movl    NEXT_EBP(%ebp), %ebp
-        sti
         iret
 
 /* 
@@ -426,7 +429,6 @@ switch_to_same_privilege:
         movl    NEXT_EDI(%ebp), %edi
         movl    NEXT_EAX(%ebp), %eax        
         movl    NEXT_EBP(%ebp), %ebp
-        sti
         iret
 
         

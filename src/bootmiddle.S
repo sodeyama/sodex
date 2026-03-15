@@ -14,7 +14,7 @@
 
 #define DEBUG
 
-INITSEG         = 0x9000
+INITSEG         = 0x9800
 __KERNEL_CS     = 0x08
 
 MEMORY_SIZE     = 0x0       
@@ -38,11 +38,10 @@ middle_start:
         movw    %ax, %ds
         movw    %ax, %es
 
-        # Get the max size of the physical memory,
-        # and we'll set it at 0x90000.
+        # 物理メモリ情報は INITSEG 上に退避する。
         xorl    %ecx, %ecx
         xorl    %edx, %edx
-        movw    $0x9000, %ax
+        movw    $INITSEG, %ax
         movw    %ax, %fs
         xorl    %eax, %eax
         movl    %eax, %fs:(0x0)
@@ -254,7 +253,7 @@ a20_end:
         
 flush_pipe_queue:
         .byte   0x66, 0xea
-        .long   first_code32 + 0x90000
+        .long   first_code32 + (INITSEG << 4)
         .word   __KERNEL_CS
 
 

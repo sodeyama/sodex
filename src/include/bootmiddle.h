@@ -7,9 +7,9 @@
 PUBLIC u_int16_t MEMORY_SIZE;
 
 //#define MEMSIZE ((u_int16_t*)(&MEMORY_SIZE))
-//#define MEMSIZE_OFFSET 0x90000/2
+//#define MEMSIZE_OFFSET 0x98000/2
 //#define MAXMEMSIZE (u_int32_t)(MEMSIZE[MEMSIZE_OFFSET])*1024*1024
-#define MAXMEMSIZE (((u_int16_t*)(0xc0090000))[0])
+#define MAXMEMSIZE (((u_int16_t*)(0xc0098000))[0])
 
 
 #endif /* _BOOTMIDDLE_H */

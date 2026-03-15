@@ -41,7 +41,7 @@ struct task_struct {
   u_int32_t         stime;
   u_int32_t         state;
   u_int32_t         signal;
-  struct sigaction* sigactions[MAX_SIGNALS];
+  sighandler_t      sigactions[MAX_SIGNALS];
 };
 
 struct hard_context {

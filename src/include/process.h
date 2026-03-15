@@ -18,6 +18,8 @@ struct tty;
 
 #define PROC_STACK  0xC0000000
 #define PROC_STACK_SIZE 0x4000
+/* SSH の KEX と audit 出力で kernel stack が深くなるため余裕を持たせる。 */
+#define PROC_KERNEL_STACK_PAGES 8
 
 #define PROC_LEN_FILENAME 32
 
@@ -90,8 +92,9 @@ struct task_struct {
   u_int32_t         utime;
   u_int32_t         stime;
   u_int32_t         state;
+  int               auto_reap;
   u_int32_t         signal;
-  struct sigaction* sigactions[MAX_SIGNALS];
+  sighandler_t      sigactions[MAX_SIGNALS];
 };
 
 struct hard_context {
@@ -152,8 +155,11 @@ PUBLIC int sys_waitpid(pid_t pid, int *status, int options);
 PUBLIC void sleep_on(struct wait_queue **wq);
 PUBLIC void sleep_on_timeout(struct wait_queue **wq, u_int32_t ticks);
 PUBLIC void wakeup(struct wait_queue **wq);
+PUBLIC struct task_struct *process_find_pid(pid_t pid);
+PUBLIC int process_has_pid(pid_t pid);
 
 PUBLIC volatile u_int32_t kernel_tick;
+PUBLIC volatile int process_in_timer_interrupt;
 
 #define SAME_PRIVILEGE 0
 #define OUTER_PRIVILEGE 1

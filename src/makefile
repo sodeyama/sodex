@@ -70,7 +70,18 @@ ASMOBJS = $(addprefix $(OBJDIR)/,$(ASMSRC:.S=.o))
 EXTRA_CFLAGS ?=
 SODEX_QEMU_MEM_MB ?= 512
 SODEX_RAM_CAP_MB ?= 0
+SODEX_ROOTFS_OVERLAY ?=
+SODEX_ADMIN_STATUS_TOKEN ?= status-secret
+SODEX_ADMIN_CONTROL_TOKEN ?= control-secret
+SODEX_ADMIN_ALLOW_IP ?= 10.0.2.2
+SODEX_DEBUG_SHELL_PORT ?= 10024
+SODEX_HOST_DEBUG_SHELL_PORT ?= 10024
+SODEX_SSH_PORT ?= 10022
+SODEX_SSH_PASSWORD ?= root-secret
+SODEX_SSH_HOSTKEY_ED25519_SEED ?= 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+SODEX_SSH_RNG_SEED ?= ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100
 MEMORY_SCALE_CFLAGS =
+ROOTFS_OVERLAY_ARG = $(if $(strip $(SODEX_ROOTFS_OVERLAY)),$(SODEX_ROOTFS_OVERLAY))
 
 ifneq ($(strip $(SODEX_RAM_CAP_MB)),0)
 MEMORY_SCALE_CFLAGS += -DSODEX_RAM_CAP_MB=$(SODEX_RAM_CAP_MB)
@@ -86,7 +97,7 @@ $(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/
 all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} kernel-subdirs ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
-	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
+	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2} ${ROOTFS_OVERLAY_ARG}
 
 regen-font8x16: ${FONT8X16_HEADER}
 
@@ -163,7 +174,7 @@ ${ACIENT} : ${FIRST_BOOT_FILE} ${KERNEL} ${GETSIZE}
 
 ${MIDDLE} : bootmiddle.S
 	${AS} ${ASFLAGS} bootmiddle.S -I ${INCLUDE} -o $(OBJDIR)/bootmiddle.o -a > ${LIST}/bootm.lst
-	${LD} ${BOOTM_LFLAGS} $(OBJDIR)/bootmiddle.o -o $@
+	${LD} ${BOOTM_LFLAGS} -Ttext 0x400 $(OBJDIR)/bootmiddle.o -o $@
 
 # === Linker script preprocessing ===
 
@@ -188,7 +199,7 @@ $(OBJDIR)/%.o: %.S
 tools: ${KMKFS} ${GETSIZE}
 
 ${KMKFS} : ${TOOLDIR}/kmkfs.cpp
-	$(C++) -D PATH_USRBIN=\"${BASEDIR}/src/usr/bin/\" -o $@ ${TOOLDIR}/kmkfs.cpp
+	$(CXX) -D PATH_USRBIN=\"${BASEDIR}/src/usr/bin/\" -o $@ ${TOOLDIR}/kmkfs.cpp
 	chmod 755 $@
 
 ${GETSIZE} : ${TOOLDIR}/getsize.c
@@ -210,7 +221,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -249,6 +260,27 @@ test-qemu-ime: all
 	@echo "=== Running IME smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ime_smoke.py $(FSBOOT) $(LOGDIR)
 
+test-qemu-server:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/server-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/server-rootfs-overlay all
+	@echo "=== Running server runtime smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) python3 $(BASEDIR)/src/test/run_qemu_server_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-debug-shell:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_DEBUG_SHELL_PORT=$(SODEX_DEBUG_SHELL_PORT) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/debug-shell-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/debug-shell-rootfs-overlay all
+	@echo "=== Running debug shell smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_DEBUG_SHELL_PORT=$(SODEX_DEBUG_SHELL_PORT) SODEX_HOST_DEBUG_SHELL_PORT=$(SODEX_HOST_DEBUG_SHELL_PORT) python3 $(BASEDIR)/src/test/run_qemu_debug_shell_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-ssh:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_HOSTKEY_ED25519_SEED=$(SODEX_SSH_HOSTKEY_ED25519_SEED) SODEX_SSH_RNG_SEED=$(SODEX_SSH_RNG_SEED) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/ssh-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/ssh-rootfs-overlay all
+	@echo "=== Running SSH smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_HOST_SSH_PORT=$(SODEX_HOST_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) python3 $(BASEDIR)/src/test/run_qemu_ssh_smoke.py $(FSBOOT) $(LOGDIR)
+
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
@@ -263,7 +295,7 @@ ktest-link: kernel-subdirs ${OBJS} ${ASMOBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
 	$(MAKE) ${ACIENT} ${MIDDLE}
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
-	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
+	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2} ${ROOTFS_OVERLAY_ARG}
 
 # === Misc ===
 

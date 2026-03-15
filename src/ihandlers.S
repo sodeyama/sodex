@@ -276,7 +276,9 @@ outer_privilege_switch:                   # user to kernel
         pushl   IRET_1(%ebp)
         pushl   %eax
         call    i20h_do_timer
-#The following parts are never executed        
+        # 通常は schedule() から別文脈へ移るが、
+        # 戻った場合でも push 済み引数を捨てて元の割り込みフレームへ戻す。
+        addl    $28, %esp
         popa
         popl    %ebp
         movw    $0x2B, %ax
@@ -284,7 +286,8 @@ outer_privilege_switch:                   # user to kernel
         movw    %ax, %es
         movw    %ax, %fs
         movw    %ax, %gs
-        sti
+        # iret で復帰する直前に割り込みを再開すると、
+        # 未整合な復帰フレームへ再入して壊れる。
         iret
 
 .global asm_pictimer

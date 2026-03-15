@@ -66,6 +66,6 @@
 
 ## 完了条件
 
-- [ ] `accept()` が child socket を返す
-- [ ] inbound TCP で `recv()` まで通る
-- [ ] close 後に新しい接続を再度受けられる
+- [x] `accept()` が child socket を返す
+- [x] inbound TCP で `recv()` まで通る
+- [x] close 後に新しい接続を再度受けられる

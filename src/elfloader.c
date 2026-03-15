@@ -50,7 +50,6 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
   _kprintf("i_size:%x\n", inode->i_size);
 #endif
   ext3_read(fd, elf_buf, inode->i_size);
-  disable_pic_interrupt(IRQ_TIMER);
 
   elf_header *header = kalloc(sizeof(elf_header));
   if (header == NULL) {

@@ -32,9 +32,29 @@ void tcpip_output(void)
 
 void uip_appcall(void) {
   int sockfd = uip_conn->appstate;
+
+  if (uip_connected()) {
+    if (sockfd < 0 || sockfd >= MAX_SOCKETS ||
+        socket_table[sockfd].tcp_conn != uip_conn) {
+      sockfd = socket_bind_inbound_tcp(uip_conn);
+      if (sockfd < 0) {
+        dbg_puts("TCP: INBOUND REJECTED\n");
+        uip_abort();
+        return;
+      }
+      dbg_puts("TCP: INBOUND ACCEPT sockfd=");
+      dbg_dec(sockfd);
+      dbg_puts("\n");
+    }
+  }
+
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return;
+  if (socket_table[sockfd].tcp_conn != uip_conn) return;
   struct kern_socket *sk = &socket_table[sockfd];
-  int ready_for_output = (uip_poll() || uip_acked() || uip_connected());
+  /* 受信中の appcall では送信を defer し、server tick 後に flush する。 */
+  int ready_for_output =
+      (uip_poll() || uip_acked() || uip_connected());
+  int sent_output = 0;
 
   if (uip_connected()) {
     dbg_puts("TCP: CONNECTED sockfd=");
@@ -59,12 +79,22 @@ void uip_appcall(void) {
 
   /* appcall 中だけ uip_send() / uip_close() を呼ぶ */
   if (ready_for_output && sk->tx_pending) {
+    dbg_puts("TCP: SEND sockfd=");
+    dbg_dec(sockfd);
+    dbg_puts(" len=");
+    dbg_dec(sk->tx_len);
+    dbg_puts("\n");
     uip_send(sk->tx_buf, sk->tx_len);
     sk->tx_pending = 0;
+    sent_output = 1;
   }
 
-  if (ready_for_output && sk->close_pending && !sk->tx_pending &&
+  if (ready_for_output && !sent_output &&
+      sk->close_pending && !sk->tx_pending &&
       !uip_outstanding(uip_conn)) {
+    dbg_puts("TCP: CLOSE sockfd=");
+    dbg_dec(sockfd);
+    dbg_puts("\n");
     sk->close_pending = 0;
     uip_close();
   }
@@ -72,6 +102,11 @@ void uip_appcall(void) {
   if (uip_rexmit()) {
     /* Retransmit the last sent data */
     if (sk->tx_len > 0) {
+      dbg_puts("TCP: REXMIT sockfd=");
+      dbg_dec(sockfd);
+      dbg_puts(" len=");
+      dbg_dec(sk->tx_len);
+      dbg_puts("\n");
       uip_send(sk->tx_buf, sk->tx_len);
     }
   }

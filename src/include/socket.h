@@ -3,7 +3,8 @@
 
 #include <sodex/const.h>
 #include <sys/types.h>
-#include <process.h>
+
+struct wait_queue;
 
 #define MAX_SOCKETS      16
 
@@ -24,6 +25,7 @@
 #define SOCK_STATE_CONNECTED  4
 #define SOCK_STATE_CLOSED     5
 
+#define SOCK_ACCEPT_BACKLOG_SIZE 4
 #define SOCK_RXBUF_SIZE  4096
 #define SOCK_TXBUF_SIZE  1460  /* Max TCP segment payload (MSS) */
 
@@ -61,8 +63,11 @@ struct kern_socket {
     struct wait_queue *connect_wq;
 
     /* Accept backlog */
-    int backlog_fds[4];
+    int backlog_fds[SOCK_ACCEPT_BACKLOG_SIZE];
     int backlog_count;
+    int backlog_limit;
+    int parent_fd;
+    int pending_accept;
 
     /* TCP transmit buffer (pending data for uip_send in appcall) */
     u_int8_t tx_buf[SOCK_TXBUF_SIZE];
@@ -84,6 +89,10 @@ PUBLIC int  kern_recv(int sockfd, void *buf, int len, int flags);
 PUBLIC int  kern_sendto(int sockfd, void *buf, int len, int flags, struct sockaddr_in *addr);
 PUBLIC int  kern_recvfrom(int sockfd, void *buf, int len, int flags, struct sockaddr_in *addr);
 PUBLIC int  kern_close_socket(int sockfd);
+PUBLIC int  socket_try_accept(int sockfd, struct sockaddr_in *addr);
+PUBLIC int  socket_begin_close(int sockfd);
+PUBLIC int  socket_bind_inbound_tcp(struct uip_conn *conn);
+PUBLIC void socket_service_pending_tcp(void);
 PUBLIC void socket_icmp_input(u_int8_t *pkt, u_int16_t len);
 PUBLIC void socket_udp_input(struct uip_udp_conn *udp_conn,
                              u_int8_t *data, u_int16_t len);

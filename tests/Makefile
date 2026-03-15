@@ -9,7 +9,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_ssh_crypto test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -18,7 +18,7 @@ IME_DICT_SOURCE_TOOL = $(SRC)/tools/build_ime_dictionary_source.py
 IME_DICT_MOZC_DIR = ../third_party/dictionaries/mozc/dictionary_oss
 IME_DICT_MOZC_SOURCES = $(wildcard $(IME_DICT_MOZC_DIR)/dictionary*.txt)
 
-.PHONY: all clean test
+.PHONY: all clean test derive_ssh_keypair ssh_signer
 
 all: $(TESTS)
 
@@ -199,6 +199,55 @@ test_netpoll: test_netpoll.c
 test_socket: test_socket.c
 	$(CC) $(CFLAGS) -o $@ test_socket.c
 
+# Admin text protocol parser/auth tests
+test_admin_parser: test_admin_parser.c test_admin_parser_admin.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ test_admin_parser.c test_admin_parser_admin.o
+
+test_admin_parser_admin.o: $(SRC)/net/admin_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# HTTP parser/mapper tests
+test_http_server_parser: test_http_server_parser.c test_http_server_parser_http.o test_http_server_parser_admin.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ test_http_server_parser.c test_http_server_parser_http.o test_http_server_parser_admin.o
+
+test_http_server_parser_http.o: $(SRC)/net/http_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_http_server_parser_admin.o: $(SRC)/net/admin_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# Debug shell parser/config tests
+test_debug_shell_parser: test_debug_shell_parser.c test_debug_shell_parser_debug_shell.o test_debug_shell_parser_admin.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ test_debug_shell_parser.c test_debug_shell_parser_debug_shell.o test_debug_shell_parser_admin.o
+
+test_debug_shell_parser_debug_shell.o: $(SRC)/net/debug_shell_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_debug_shell_parser_admin.o: $(SRC)/net/admin_server.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+# SSH crypto primitives tests
+test_ssh_crypto: test_ssh_crypto.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ test_ssh_crypto.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+
+test_ssh_crypto_crypto.o: $(SRC)/lib/ssh_crypto.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_ssh_crypto_tweetnacl.o: $(SRC)/lib/tweetnacl.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_ssh_crypto_sha256.o: $(SRC)/lib/sha256.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+test_ssh_crypto_aes.o: $(SRC)/lib/aes.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -c -o $@ $<
+
+derive_ssh_keypair: derive_ssh_keypair.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ derive_ssh_keypair.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+
+ssh_signer: ssh_signer.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/include -o $@ ssh_signer.c test_ssh_crypto_crypto.o test_ssh_crypto_tweetnacl.o test_ssh_crypto_sha256.o test_ssh_crypto_aes.o
+
 # vi buffer tests
 test_vi_buffer: test_vi_buffer.c test_vi_buffer_vi_buffer.o test_vi_buffer_utf8.o test_vi_buffer_wcwidth.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vi_buffer.c test_vi_buffer_vi_buffer.o test_vi_buffer_utf8.o test_vi_buffer_wcwidth.o
@@ -297,4 +346,4 @@ test_eshell_parser_parser.o: $(SRC)/usr/lib/libc/eshell_parser.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:
-	rm -f $(TESTS) $(IME_FIXTURE) $(IME_FIXTURE_SOURCE) *.o
+	rm -f $(TESTS) $(IME_FIXTURE) $(IME_FIXTURE_SOURCE) derive_ssh_keypair ssh_signer *.o

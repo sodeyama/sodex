@@ -8,7 +8,7 @@
 一方で server 側は `bind()` / `listen()` までは存在するが、`accept()` が未実装で、受け口としてはまだ成立していない。
 
 また、`SSH server` を直接目標にすると、TCP 受け付け、認証、暗号、PTY 統合まで一気に広がってしまう。
-そのため、この spec ではまず以下の順で段階導入する。
+そのため、この spec ではまず以下の順で段階導入し、最後に最小 `SSH server` を別 plan として足す。
 
 1. 受動 TCP 接続の成立
 2. 軽量な管理プロトコルまたは HTTP 制御面
@@ -75,6 +75,10 @@ Linux ホスト
 | 04 | [04-http-control-surface.md](plans/04-http-control-surface.md) | HTTP ベースの control / health 面 | 01, 02 |
 | 05 | [05-auth-and-capability-boundary.md](plans/05-auth-and-capability-boundary.md) | 認証、権限制御、接続制限 | 03 または 04 |
 | 06 | [06-ssh-readiness.md](plans/06-ssh-readiness.md) | `SSH` 実装の前提と go/no-go 判定 | 01-05 |
+| 07 | [07-tcp-pty-bridge.md](plans/07-tcp-pty-bridge.md) | 暗号なしで shell relay を検証する最小 TCP-PTY bridge | 01-06 |
+| 08 | [08-ssh-server.md](plans/08-ssh-server.md) | 暗号込み `SSH server` の段階導入 | 06, 07 |
+
+実装タスクと残フォローアップは [TASKS.md](TASKS.md) で管理する。
 
 ## 実装順序
 
@@ -84,6 +88,8 @@ Linux ホスト
 4. health / status / 制御操作を HTTP 化するか判断する
 5. token / capability / allowlist で絞る
 6. その上で `SSH` が必要かを再評価する
+7. 必要なら最小 TCP-PTY bridge で shell relay を先に検証する
+8. それでも必要なら暗号込み `SSH server` を 1 suite から段階導入する
 
 ## 設計判断
 
@@ -109,10 +115,28 @@ Linux ホスト
   - `src/test/run_qemu_server_smoke.py`
   - `tests/test_socket_server.c`
 
+## 実装状況
+
+2026-03-15 時点で、以下を確認済み。
+
+- passive TCP の inbound accept と backlog 処理
+- `QEMU user net + hostfwd` による host `127.0.0.1:18080` -> guest `10.0.2.15:8080`
+- `QEMU user net + hostfwd` による host `127.0.0.1:10023` -> guest `10.0.2.15:10023`
+- text protocol の `PING`, `STATUS`, `AGENT START`, `AGENT STOP`, `LOG TAIL`
+- HTTP の `GET /healthz`, `GET /status`, `POST /agent/start`, `POST /agent/stop`
+- `/etc/sodex-admin.conf` による起動時 token / allowlist 注入
+- allowlist と audit ring buffer
+- 認証失敗に対する peer 単位 rate limit と backoff
+- `docker/server-runtime/Dockerfile` / `entrypoint.sh` / `run_docker_server_smoke.py` による Docker/headless 常駐起動と published-port smoke
+- `debug_shell_port` と raw TCP preface、`PTY` relay、`test-qemu-debug-shell` による reconnect smoke
+- `curve25519-sha256` + `ssh-ed25519` + `aes128-ctr` + `hmac-sha2-256` + `password` に絞った最小 `SSH server`
+- host の `ssh -tt` から guest `eshell` へ login し、`backspace` 付き `pwd` / `ls` / `cat` + `Ctrl-C` / `exit` / wrong password / reconnect を `test-qemu-ssh` で確認
+- host Linux の `SSH` と guest `sodex` 管理 API の分離方針は維持しつつ、guest 内 `SSH server` は最小 scope で検証を継続
+
 ## 完了条件
 
-- [ ] guest `sodex` が TCP 接続を受けられる
-- [ ] Docker/QEMU 上で host から guest 管理ポートへ接続できる
-- [ ] 最低限の health / status / control 操作ができる
-- [ ] 認証なしの広い制御面を残さない
-- [ ] `SSH` を実装するか、代替構成で十分とするかを文書で決められる
+- [x] guest `sodex` が TCP 接続を受けられる
+- [x] Docker/QEMU 上で host から guest 管理ポートへ接続できる
+- [x] 最低限の health / status / control 操作ができる
+- [x] 認証なしの広い制御面を残さない
+- [x] `SSH` を実装するか、代替構成で十分とするかを文書で決められる

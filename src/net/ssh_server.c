@@ -105,7 +105,9 @@ struct ssh_channel_state {
   int shell_start_pending;
   int shell_start_in_progress;
   int shell_reply_pending;
+  int prompt_kick_pending;
   u_int32_t shell_start_tick;
+  u_int32_t shell_started_tick;
   int tx_prev_cr;
   int close_sent;
   int eof_sent;
@@ -1388,6 +1390,8 @@ PRIVATE int ssh_start_pending_shell(struct ssh_connection *conn)
   conn->channel.shell_start_pending = FALSE;
   conn->channel.shell_start_in_progress = FALSE;
   conn->channel.shell_start_tick = 0;
+  conn->channel.shell_started_tick = kernel_tick;
+  conn->channel.prompt_kick_pending = TRUE;
   admin_runtime_audit_line("ssh_spawn_ok");
   ssh_audit_start(conn->peer_addr, pid);
   if (conn->channel.shell_reply_pending) {
@@ -1983,9 +1987,17 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
     raw_cap = sizeof(raw_chunk);
 
   read_len = (int)tty_master_read(conn->channel.tty, raw_chunk, raw_cap);
-  if (read_len <= 0)
+  if (read_len <= 0) {
+    /* 初回 prompt が client 入力待ちで見えない run を避ける。 */
+    if (conn->channel.prompt_kick_pending &&
+        (int)(kernel_tick - conn->channel.shell_started_tick) >= 1) {
+      tty_master_write(conn->channel.tty, "\n", 1);
+      conn->channel.prompt_kick_pending = FALSE;
+    }
     return;
+  }
 
+  conn->channel.prompt_kick_pending = FALSE;
   send_len = ssh_translate_tty_chunk(conn, raw_chunk, read_len,
                                      cooked_chunk, (int)cap);
   if (send_len <= 0)

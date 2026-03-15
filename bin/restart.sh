@@ -1,5 +1,15 @@
 #!/bin/sh
 
+is_valid_port() {
+  case "$1" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
 find_repo_root() {
   dir="$1"
 
@@ -19,6 +29,47 @@ REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")" || {
   echo "リポジトリルートが見つかりません: $SCRIPT_DIR" >&2
   exit 1
 }
+BUILD_ROOT="${SODEX_BUILD_ROOT:-$REPO_ROOT/build}"
+LOG_DIR="${SODEX_LOG_DIR:-$BUILD_ROOT/log}"
+SSH_OVERLAY_DIR="${SODEX_SSH_OVERLAY_DIR:-$LOG_DIR/ssh-rootfs-overlay}"
+ENABLE_SSH=0
+SSH_GUEST_PORT="${SODEX_SSH_PORT:-10022}"
+
+for arg in "$@"; do
+  case "$arg" in
+    --ssh|--ssh-host-port=*)
+      ENABLE_SSH=1
+      ;;
+    --ssh-guest-port=*)
+      ENABLE_SSH=1
+      SSH_GUEST_PORT="${arg#*=}"
+      ;;
+  esac
+done
+
+if [ "$ENABLE_SSH" -eq 1 ]; then
+  if ! is_valid_port "$SSH_GUEST_PORT"; then
+    echo "不正な guest SSH ポートです: $SSH_GUEST_PORT" >&2
+    exit 1
+  fi
+
+  : "${SODEX_ADMIN_ALLOW_IP:=10.0.2.2}"
+  : "${SODEX_SSH_PASSWORD:=root-secret}"
+  : "${SODEX_SSH_HOSTKEY_ED25519_SEED:=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff}"
+  : "${SODEX_SSH_RNG_SEED:=ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100}"
+  SODEX_SSH_PORT="$SSH_GUEST_PORT"
+  export SODEX_ADMIN_ALLOW_IP
+  export SODEX_SSH_PORT
+  export SODEX_SSH_PASSWORD
+  export SODEX_SSH_HOSTKEY_ED25519_SEED
+  export SODEX_SSH_RNG_SEED
+
+  make -C "$REPO_ROOT" clean || exit 1
+  mkdir -p "$LOG_DIR" || exit 1
+  python3 "$REPO_ROOT/src/test/write_server_runtime_overlay.py" "$SSH_OVERLAY_DIR" || exit 1
+  SODEX_ROOTFS_OVERLAY="$SSH_OVERLAY_DIR" make -C "$REPO_ROOT" || exit 1
+  exec "$REPO_ROOT/bin/start.sh" "$@"
+fi
 
 make -C "$REPO_ROOT" clean || exit 1
 make -C "$REPO_ROOT" || exit 1

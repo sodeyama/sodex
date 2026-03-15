@@ -4,6 +4,15 @@
 
 通常起動、QEMU test、将来の headless 運用でネットワーク設定の意味を揃える。
 
+## 完了メモ
+
+この plan は完了。
+
+- `src/include/network_config.h` と `src/net/network_config.c` を追加
+- `network_apply_default_config()` を通常起動と `ktest` の両方で使用
+- gateway は `10.0.2.2` に統一
+- raw ICMP の source IP も `uip_hostaddr` 参照へ変更した
+
 ## 現状
 
 設定が揺れている。
@@ -26,6 +35,6 @@
 
 ## 完了条件
 
-- [ ] host IP / gateway / guest IP の意味が文書化されている
-- [ ] `kernel.c` と `ktest.c` の差分理由が説明できる
-- [ ] spec のネットワーク例が現行実装と一致する
+- [x] host IP / gateway / guest IP の意味が文書化されている
+- [x] `kernel.c` と `ktest.c` の差分理由が説明できる
+- [x] spec のネットワーク例が現行実装と一致する

@@ -5,15 +5,13 @@
 Plan 1.1〜1.6の実装を統合してQEMU上でテストし、pingが通ることを確認する。
 Phase 1全体の最終統合テスト。
 
-## 現状注記
+## 完了メモ
 
-現時点では、QEMU 上の統合テスト基盤と `guestfwd` を使った TCP echo 検証はある。
-一方で、この plan がゴールにしている `ping` 疎通は、再現可能な標準手順としてはまだ閉じていない。
+この plan は完了。
 
-- `src/test/run_qemu_ktest.py` は存在する
-- `src/test/ktest.c` は TCP 接続テストまで入っている
-- `src/usr/command/ping.c` は存在する
-- ただし `ping` をどう検証完了にするかは別途整理が必要
+- `src/test/run_qemu_ktest.py` で QEMU 上の統合テストを実行できる
+- `src/test/ktest.c` に `icmp_ping_gateway` を追加し、`10.0.2.2` への ICMP echo reply を確認できる
+- 通常カーネルは `make -C src test-qemu-shell-io` で別経路の smoke を通した
 
 ## QEMUネットワーク設定
 
@@ -49,8 +47,8 @@ qemu-system-i386 \
 Sodex側から10.0.2.2（QEMUゲートウェイ）にICMP echo requestを送信し、
 echo replyが返ってくることを確認。
 
-`ping` コマンド自体は存在するが、現状の QEMU 自動テストにどう組み込むかは未整理。
-必要に応じて、カーネル内テストまたはユーザ空間起動手順のどちらかに寄せる:
+現行では、`ktest` に raw ICMP の確認を組み込み、QEMU `user net` のまま検証している。
+必要に応じて、将来はユーザ空間 `ping` へ寄せ替えてもよい:
 
 ```c
 // kernel.c の start_kernel() 末尾等
@@ -170,11 +168,11 @@ PING 10.0.2.15: 64 bytes from 10.0.2.15: icmp_seq=0 ttl=64 time=...
 
 ## Phase 1 全体の完了条件
 
-- [ ] clock_time() が正しい時間を返す（Plan 1.1）
-- [ ] NE2000がパケットを受信できる（Plan 1.2）
-- [ ] 割り込みハンドラが正しく動作する（Plan 1.3）
-- [ ] カーネル起動時にNE2000とuIPが初期化される（Plan 1.4）
-- [ ] ネットワークポーリングループが動作する（Plan 1.5）
-- [ ] tcpip_output()が送信コールバックとして機能する（Plan 1.6）
-- [ ] **ARP要求に対してARP応答が返る**
-- [ ] **ICMP echo requestに対してecho replyが返る**（tapモード推奨）
+- [x] clock_time() が正しい時間を返す（Plan 1.1）
+- [x] NE2000がパケットを受信できる（Plan 1.2）
+- [x] 割り込みハンドラが正しく動作する（Plan 1.3）
+- [x] カーネル起動時にNE2000とuIPが初期化される（Plan 1.4）
+- [x] ネットワークポーリングループが動作する（Plan 1.5）
+- [x] tcpip_output()が送信コールバックとして機能する（Plan 1.6）
+- [x] **ARP要求に対してARP応答が返る**
+- [x] **ICMP echo requestに対してecho replyが返る**

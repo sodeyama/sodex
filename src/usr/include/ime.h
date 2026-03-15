@@ -5,7 +5,9 @@
 
 #define IME_PREEDIT_MAX 16
 #define IME_READING_MAX 64
-#define IME_CANDIDATE_MAX 8
+#define IME_CANDIDATE_MAX 16
+#define IME_CANDIDATE_PAGE_SIZE 4
+#define IME_CANDIDATE_STORAGE_MAX 1024
 
 enum ime_mode {
   IME_MODE_LATIN = 0,
@@ -20,6 +22,7 @@ struct ime_state {
   char reading[IME_READING_MAX];
   int reading_len;
   int reading_chars;
+  char candidate_storage[IME_CANDIDATE_STORAGE_MAX];
   const char *candidates[IME_CANDIDATE_MAX];
   int candidate_count;
   int candidate_index;

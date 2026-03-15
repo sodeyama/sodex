@@ -9,12 +9,19 @@
 #define EXT3_N_BLOCKS       15
 #define EXT3_NAME_LEN       256
 #define BLOCK_SIZE          4096    //4096Byte
-#define BLOCK_MAX           360     //360個
+#define BLOCK_MAX           4096    //4096個
 #define GROUP_MAX           128     // max number of group desc at 1 BLOCK
 #define INODE_SIZE          128     //128Byte
 #define INODE_MAX           128     //128個
 #define INODE_PER_BLOCK     ((BLOCK_SIZE)/(INODE_SIZE)) //32
 #define IBLOCK_SIZE         512
+
+#define EXT3_DIRECT_BLOCKS  12
+#define EXT3_PTRS_PER_BLOCK (BLOCK_SIZE/sizeof(u_int32_t))
+#define EXT3_IND_BLOCK      EXT3_DIRECT_BLOCKS
+#define EXT3_DIND_BLOCK     (EXT3_DIRECT_BLOCKS+1)
+#define EXT3_TIND_BLOCK     (EXT3_DIRECT_BLOCKS+2)
+#define EXT3_DOUBLE_BLOCKS  (EXT3_PTRS_PER_BLOCK*EXT3_PTRS_PER_BLOCK)
 
 // super block
 #define EXT3_SUPER_MAGIC        0xEF53
@@ -257,10 +264,10 @@ typedef struct _ext3_dirty {
 
 #define BLOCK_PER_SECTOR 8  // BLOCK_SIZE/FDC_SECTOR_SIZE
 
-#define BLOCK_ZERO_STAGE 11
-#define BLOCK_FIRST_STAGE (11+BLOCK_SIZE/4)
-#define BLOCK_SECOND_STAGE (11+BLOCK_SIZE/4+(BLOCK_SIZE/4)*(BLOCK_SIZE/4))
-#define BLOCK_THIRD_STAGE (11+BLOCK_SIZE/4+(BLOCK_SIZE/4)*(BLOCK_SIZE/4) \
-                           +(BLOCK_SIZE/4)*(BLOCK_SIZE/4)*(BLOCK_SIZE/4))
+#define BLOCK_ZERO_STAGE    (EXT3_DIRECT_BLOCKS-1)
+#define BLOCK_FIRST_STAGE   (BLOCK_ZERO_STAGE+EXT3_PTRS_PER_BLOCK)
+#define BLOCK_SECOND_STAGE  (BLOCK_FIRST_STAGE+EXT3_DOUBLE_BLOCKS)
+#define BLOCK_THIRD_STAGE   (BLOCK_SECOND_STAGE \
+                           +(EXT3_PTRS_PER_BLOCK*EXT3_DOUBLE_BLOCKS))
 
 #endif /* _EXT3FS_H */

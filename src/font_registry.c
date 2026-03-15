@@ -24,7 +24,7 @@ PUBLIC const struct font_face *font_registry_default(void)
   return &g_default_font;
 }
 
-PUBLIC const unsigned char *font_registry_lookup_narrow(unsigned int codepoint)
+PUBLIC const unsigned int *font_registry_lookup_narrow(unsigned int codepoint)
 {
   return font_default_narrow_glyph(codepoint);
 }

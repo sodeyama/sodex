@@ -7,6 +7,8 @@ static void renderer_resolve_colors(const struct term_cell *cell,
                                     int cursor,
                                     u_int32_t *fg,
                                     u_int32_t *bg);
+static u_int32_t *renderer_row_ptr(struct cell_renderer *renderer,
+                                   int x, int y);
 static void renderer_putpixel(struct cell_renderer *renderer,
                               int x, int y, u_int32_t color);
 static void renderer_fill_rect(struct cell_renderer *renderer,
@@ -26,6 +28,13 @@ static const u_int32_t renderer_palette[16] = {
 static u_int32_t renderer_palette_color(unsigned char index)
 {
   return renderer_palette[index & 0x0f];
+}
+
+static u_int32_t *renderer_row_ptr(struct cell_renderer *renderer,
+                                   int x, int y)
+{
+  return (u_int32_t *)((u_int8_t *)renderer->fb.base +
+                       y * renderer->fb.pitch + x * 4);
 }
 
 static void renderer_resolve_colors(const struct term_cell *cell,
@@ -79,13 +88,33 @@ static void renderer_fill_rect(struct cell_renderer *renderer,
                                int x, int y, int width, int height,
                                u_int32_t color)
 {
-  int px;
   int py;
+  int px;
+
+  if (renderer == 0 || renderer->fb.base == 0 || width <= 0 || height <= 0)
+    return;
+  if (x < 0) {
+    width += x;
+    x = 0;
+  }
+  if (y < 0) {
+    height += y;
+    y = 0;
+  }
+  if (x >= renderer->fb.width || y >= renderer->fb.height)
+    return;
+  if (x + width > renderer->fb.width)
+    width = renderer->fb.width - x;
+  if (y + height > renderer->fb.height)
+    height = renderer->fb.height - y;
+  if (width <= 0 || height <= 0)
+    return;
 
   for (py = 0; py < height; py++) {
-    for (px = 0; px < width; px++) {
-      renderer_putpixel(renderer, x + px, y + py, color);
-    }
+    u_int32_t *row = renderer_row_ptr(renderer, x, y + py);
+
+    for (px = 0; px < width; px++)
+      row[px] = color;
   }
 }
 
@@ -134,15 +163,17 @@ int cell_renderer_init(struct cell_renderer *renderer,
 
 void cell_renderer_clear(struct cell_renderer *renderer, u_int32_t color)
 {
-  int x;
   int y;
+  int x;
 
   if (renderer == 0 || renderer->fb.base == 0)
     return;
 
   for (y = 0; y < renderer->fb.height; y++) {
+    u_int32_t *row = renderer_row_ptr(renderer, 0, y);
+
     for (x = 0; x < renderer->fb.width; x++)
-      renderer_putpixel(renderer, x, y, color);
+      row[x] = color;
   }
 }
 
@@ -151,7 +182,7 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
                              const struct term_cell *cell,
                              int cursor)
 {
-  const unsigned char *glyph;
+  const unsigned int *glyph;
   const unsigned int *wide_glyph;
   u_int32_t fg;
   u_int32_t bg;
@@ -163,6 +194,9 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
   int cell_y;
   int cell_width;
   int cell_height;
+  int pixel_width;
+  int draw_width;
+  int draw_height;
 
   if (renderer == 0 || renderer->fb.base == 0)
     return;
@@ -196,16 +230,27 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
   if (width == 2)
     wide_glyph = font_default_wide_glyph(ch);
 
-  for (y = 0; y < cell_height; y++) {
-    for (x = 0; x < font_default_pixels_for_cells(width); x++) {
+  pixel_width = font_default_pixels_for_cells(width);
+  draw_width = pixel_width;
+  draw_height = cell_height;
+  if (cell_x + draw_width > renderer->fb.width)
+    draw_width = renderer->fb.width - cell_x;
+  if (cell_y + draw_height > renderer->fb.height)
+    draw_height = renderer->fb.height - cell_y;
+  if (draw_width <= 0 || draw_height <= 0)
+    return;
+
+  renderer_fill_rect(renderer, cell_x, cell_y, draw_width, draw_height, bg);
+  for (y = 0; y < draw_height; y++) {
+    u_int32_t *row_ptr = renderer_row_ptr(renderer, cell_x, cell_y + y);
+
+    for (x = 0; x < draw_width; x++) {
       if (glyph != 0 && x < cell_width &&
-          (glyph[y] & (1 << (cell_width - 1 - x))) != 0)
-        renderer_putpixel(renderer, cell_x + x, cell_y + y, fg);
+          (glyph[y] & (1U << (cell_width - 1 - x))) != 0)
+        row_ptr[x] = fg;
       else if (wide_glyph != 0 &&
-               (wide_glyph[y] & (1U << (font_default_pixels_for_cells(width) - 1 - x))) != 0)
-        renderer_putpixel(renderer, cell_x + x, cell_y + y, fg);
-      else
-        renderer_putpixel(renderer, cell_x + x, cell_y + y, bg);
+               (wide_glyph[y] & (1U << (pixel_width - 1 - x))) != 0)
+        row_ptr[x] = fg;
     }
   }
 

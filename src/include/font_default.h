@@ -26,7 +26,7 @@ static inline int font_default_pixels_for_cells(int cells)
   return FONT8X16_WIDTH * cells;
 }
 
-static inline const unsigned char *font_default_narrow_glyph(unsigned int codepoint)
+static inline const unsigned int *font_default_narrow_glyph(unsigned int codepoint)
 {
   if (codepoint < 32 || codepoint > 126)
     codepoint = '?';

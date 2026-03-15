@@ -19,12 +19,14 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
   - shell と `vi` で基本語彙を広く変換できる
   - host test と QEMU smoke で lookup、候補ページング、memory budget を回帰検知できる
 
-## 現状
+## 実装後の状態
 
-- Plan 17 の辞書は固定 table で、語彙は最小限しかない
-- lookup は完全 RAM 常駐前提に近く、大規模辞書をそのまま載せる設計ではない
-- 候補 UI は少数候補を前提としており、長い候補列の paging や切り詰め戦略は最小限である
-- memory budget や dictionary cache の telemetry はない
+- 辞書 source は Mozc `dictionary_oss` と手製補助語彙 TSV に確定した
+- build 時に source TSV を再生成し、そこから compact blob を作る構成になっている
+- runtime は on-disk lookup + small cache + fallback 辞書で候補を引く
+- 候補 UI は page 単位で表示でき、host/QEMU の回帰 test も入っている
+- 現在の生成規模は約 11 万読み / 14 万候補、blob は約 5.2MiB である
+- tuning として reading fingerprint、4KiB block cache、recent-reading result cache、overlay 差分描画、renderer 高速化を追加した
 
 ## 方針
 
@@ -40,6 +42,7 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
 - lookup ロジックは引き続き pure helper 化する
   - `term` は action と描画に集中させる
 - 辞書 source とライセンスを明確にする
+  - Mozc `dictionary_oss` と手製補助語彙の組み合わせに固定する
   - build 再現性と配布時の取り扱いを曖昧にしない
 
 ## 設計判断
@@ -53,6 +56,10 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
 - 辞書が見つからない場合は Plan 17 の最小固定辞書へ fallback できるようにする
 - source 辞書は build 時に compile し、fs image に含める
   - runtime で raw text 辞書を parse しない
+- Mozc 辞書はそのまま全件入れず、基本語彙寄りへ絞る
+  - `cost <= 6000`
+  - 候補に漢字を含む
+  - 手製補助語彙にある読みは手製側を優先する
 
 ## 実装ステップ
 
@@ -64,6 +71,7 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
 6. shell と `vi` で基本語彙の保存導線を確認する
 7. host test で blob lookup、cache hit/miss、候補順、memory budget を固定する
 8. QEMU smoke で大規模辞書の代表語彙変換と保存を固定する
+9. tuning として lookup の無駄 read、同一変換の繰り返し、overlay redraw、framebuffer 描画の hot path を順に削る
 
 ## 変更対象
 
@@ -90,6 +98,8 @@ Plan 17 で guest 内 IME の最小漢字変換と候補 UI は成立した。
 - RAM 常駐量が budget を超えない
 - 辞書 blob 欠落時に最小固定辞書 fallback が働く
 - shell と `vi` の両方で確定保存し、`cat` で再確認できる
+- 同一読みの連続変換で runtime cache hit を観測できる
+- overlay と framebuffer 描画の変更後も host/QEMU の表示回帰が出ない
 
 ## 完了条件
 

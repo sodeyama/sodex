@@ -257,6 +257,7 @@ static void ime_clear_candidates(struct ime_state *state)
 
   if (state == NULL)
     return;
+  memset(state->candidate_storage, 0, sizeof(state->candidate_storage));
   for (i = 0; i < IME_CANDIDATE_MAX; i++)
     state->candidates[i] = NULL;
   state->candidate_count = 0;

@@ -4,8 +4,19 @@ CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 	-Wno-incompatible-library-redeclaration
 
 SRC = ../src
+FONT_HEADERS = $(SRC)/include/font_default.h $(SRC)/include/font8x16_data.h $(SRC)/include/font16x16_data.h
+IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
+	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
+	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dictionary test_ime_conversion test_eshell_parser
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser
+
+IME_FIXTURE = ime_dictionary_fixture.blob
+IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
+IME_DICT_MANUAL_SOURCE = $(SRC)/tools/ime_dictionary_manual.tsv
+IME_DICT_SOURCE_TOOL = $(SRC)/tools/build_ime_dictionary_source.py
+IME_DICT_MOZC_DIR = ../third_party/dictionaries/mozc/dictionary_oss
+IME_DICT_MOZC_SOURCES = $(wildcard $(IME_DICT_MOZC_DIR)/dictionary*.txt)
 
 .PHONY: all clean test
 
@@ -119,11 +130,11 @@ test_terminal_surface_surface.o: $(SRC)/usr/lib/libc/terminal_surface.c
 test_cell_renderer: test_cell_renderer.c test_cell_renderer_renderer.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_cell_renderer.c test_cell_renderer_renderer.o
 
-test_cell_renderer_renderer.o: $(SRC)/usr/lib/libc/cell_renderer.c
+test_cell_renderer_renderer.o: $(SRC)/usr/lib/libc/cell_renderer.c $(FONT_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Shared default font lookup tests
-test_font_default: test_font_default.c
+test_font_default: test_font_default.c $(FONT_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_font_default.c
 
 # VT parser tests
@@ -225,24 +236,54 @@ test_ime_romaji_ime.o: $(SRC)/usr/lib/libc/ime_romaji.c
 test_ime_romaji_utf8.o: $(SRC)/usr/lib/libc/utf8.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
-# IME dictionary tests
-test_ime_dictionary: test_ime_dictionary.c test_ime_dictionary_dict.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_ime_dictionary.c test_ime_dictionary_dict.o
+$(IME_FIXTURE_SOURCE): $(IME_DICT_SOURCE_TOOL) $(IME_DICT_MANUAL_SOURCE) $(IME_DICT_MOZC_SOURCES)
+	python3 $(IME_DICT_SOURCE_TOOL) \
+		--manual $(IME_DICT_MANUAL_SOURCE) \
+		--mozc-dir $(IME_DICT_MOZC_DIR) \
+		--max-cost 6000 \
+		--output $@
 
-test_ime_dictionary_dict.o: $(SRC)/usr/lib/libc/ime_dictionary.c
+$(IME_FIXTURE): $(SRC)/tools/mkimeblob.py $(IME_FIXTURE_SOURCE)
+	python3 $(SRC)/tools/mkimeblob.py --input $(IME_FIXTURE_SOURCE) --output $@
+
+# IME blob lookup tests
+test_ime_dict_blob: test_ime_dict_blob.c test_ime_dict_blob_blob.o $(IME_FIXTURE)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_ime_dict_blob.c test_ime_dict_blob_blob.o
+
+test_ime_dict_blob_blob.o: $(SRC)/usr/lib/libc/ime_dict_blob.c $(IME_HEADERS)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# IME cache tests
+test_ime_cache: test_ime_cache.c test_ime_cache_blob.o $(IME_FIXTURE)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_ime_cache.c test_ime_cache_blob.o
+
+test_ime_cache_blob.o: $(SRC)/usr/lib/libc/ime_dict_blob.c $(IME_HEADERS)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# IME dictionary tests
+test_ime_dictionary: test_ime_dictionary.c test_ime_dictionary_dict.o test_ime_dictionary_blob.o $(IME_FIXTURE)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_ime_dictionary.c test_ime_dictionary_dict.o test_ime_dictionary_blob.o
+
+test_ime_dictionary_dict.o: $(SRC)/usr/lib/libc/ime_dictionary.c $(IME_HEADERS)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_ime_dictionary_blob.o: $(SRC)/usr/lib/libc/ime_dict_blob.c $(IME_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # IME conversion tests
-test_ime_conversion: test_ime_conversion.c test_ime_conversion_ime.o test_ime_conversion_conv.o test_ime_conversion_dict.o test_ime_conversion_utf8.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_ime_conversion.c test_ime_conversion_ime.o test_ime_conversion_conv.o test_ime_conversion_dict.o test_ime_conversion_utf8.o
+test_ime_conversion: test_ime_conversion.c test_ime_conversion_ime.o test_ime_conversion_conv.o test_ime_conversion_dict.o test_ime_conversion_blob.o test_ime_conversion_utf8.o $(IME_FIXTURE)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_ime_conversion.c test_ime_conversion_ime.o test_ime_conversion_conv.o test_ime_conversion_dict.o test_ime_conversion_blob.o test_ime_conversion_utf8.o
 
-test_ime_conversion_ime.o: $(SRC)/usr/lib/libc/ime_romaji.c
+test_ime_conversion_ime.o: $(SRC)/usr/lib/libc/ime_romaji.c $(IME_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
-test_ime_conversion_conv.o: $(SRC)/usr/lib/libc/ime_conversion.c
+test_ime_conversion_conv.o: $(SRC)/usr/lib/libc/ime_conversion.c $(IME_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
-test_ime_conversion_dict.o: $(SRC)/usr/lib/libc/ime_dictionary.c
+test_ime_conversion_dict.o: $(SRC)/usr/lib/libc/ime_dictionary.c $(IME_HEADERS)
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_ime_conversion_blob.o: $(SRC)/usr/lib/libc/ime_dict_blob.c $(IME_HEADERS)
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_ime_conversion_utf8.o: $(SRC)/usr/lib/libc/utf8.c
@@ -256,4 +297,4 @@ test_eshell_parser_parser.o: $(SRC)/usr/lib/libc/eshell_parser.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:
-	rm -f $(TESTS) *.o
+	rm -f $(TESTS) $(IME_FIXTURE) $(IME_FIXTURE_SOURCE) *.o

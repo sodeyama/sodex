@@ -16,7 +16,24 @@ INIT2   = ${INITDIR}/bin/ptest2
 KMKFS   = ${BUILDDIR}/tools/kmkfs
 GETSIZE = ${BUILDDIR}/tools/getsize
 UDEV_GOTHIC_TTF = ${BASEDIR}/third_party/fonts/UDEVGothic-Regular.ttf
-UDEV_GOTHIC_UTF8_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6,5909,5b57,611b,611f,63db,65e5,672c,6f22,85cd,8a9e
+FONT8X16_HEADER = ${INCLUDE}/font8x16_data.h
+FONT16X16_HEADER = ${INCLUDE}/font16x16_data.h
+FONT_HEADERS = ${FONT8X16_HEADER} ${FONT16X16_HEADER}
+FONT16X16_BASE_RANGES = 3000-303f,3040-309f,30a0-30ff,ff01-ff60,ffe0-ffe6
+FONT_NARROW_CELL_WIDTH = 12
+FONT_NARROW_CELL_HEIGHT = 24
+FONT_WIDE_CELL_WIDTH = 24
+FONT_WIDE_CELL_HEIGHT = 24
+FONT_NARROW_SIZE = 19
+FONT_WIDE_SIZE = 21
+FONT_SUPERSAMPLE = 3
+IME_DICT_SOURCE = ${BUILDDIR}/tools/ime_dictionary_source.tsv
+IME_DICT_MANUAL_SOURCE = ${TOOLDIR}/ime_dictionary_manual.tsv
+IME_DICT_SOURCE_TOOL = ${TOOLDIR}/build_ime_dictionary_source.py
+IME_DICT_MOZC_DIR = ${BASEDIR}/third_party/dictionaries/mozc/dictionary_oss
+IME_DICT_MOZC_SOURCES = $(wildcard ${IME_DICT_MOZC_DIR}/dictionary*.txt)
+IME_DICT_TOOL = ${TOOLDIR}/mkimeblob.py
+IME_DICT_BLOB = ${USRDIR}/bin/ime_dictionary.blob
 
 # Test process
 PTEST   = ${INITDIR}/bin/ptest
@@ -65,51 +82,76 @@ $(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/
 # === Main targets ===
 
 .PHONY: all usr-build regen-font8x16 regen-font16x16 regen-fonts
-all : usr-build ${KERNEL} ${ACIENT} ${MIDDLE} tools
+.PHONY: kernel-subdirs drivers-build lib-build net-build display-build tty-build
+all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} kernel-subdirs ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2}
 
-regen-font8x16:
-	python3 ${TOOLDIR}/mkfontpack.py \
-		--font-path ${UDEV_GOTHIC_TTF} \
-		--font-size 13 \
-		--output-header ${INCLUDE}/font8x16_data.h \
-		--source-name UDEVGothic-Regular.ttf
+regen-font8x16: ${FONT8X16_HEADER}
 
-regen-font16x16:
-	python3 ${TOOLDIR}/mkfontpack.py \
-		--font-path ${UDEV_GOTHIC_TTF} \
-		--output-header ${INCLUDE}/font16x16_data.h \
-		--cell-width 16 \
-		--cell-height 16 \
-		--font-size 14 \
-		--codepoint-ranges ${UDEV_GOTHIC_UTF8_RANGES} \
-		--symbol-name font16x16_glyphs \
-		--source-name UDEVGothic-Regular.ttf
+regen-font16x16: ${FONT16X16_HEADER}
 
 regen-fonts: regen-font8x16 regen-font16x16
 
-usr-build:
+usr-build: ${FONT_HEADERS}
 	cd usr; make
 
-${KERNEL} : ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${BUILDDIR}/boot.ld
-	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} -o $@
+${FONT8X16_HEADER}: ${TOOLDIR}/mkfontpack.py ${UDEV_GOTHIC_TTF}
+	python3 ${TOOLDIR}/mkfontpack.py \
+		--font-path ${UDEV_GOTHIC_TTF} \
+		--cell-width ${FONT_NARROW_CELL_WIDTH} \
+		--cell-height ${FONT_NARROW_CELL_HEIGHT} \
+		--font-size ${FONT_NARROW_SIZE} \
+		--supersample ${FONT_SUPERSAMPLE} \
+		--threshold 88 \
+		--output-header $@ \
+		--source-name UDEVGothic-Regular.ttf
 
-${DRIVER_OBJS} :
+${FONT16X16_HEADER}: ${TOOLDIR}/mkfontpack.py ${UDEV_GOTHIC_TTF} ${IME_DICT_SOURCE}
+	python3 ${TOOLDIR}/mkfontpack.py \
+		--font-path ${UDEV_GOTHIC_TTF} \
+		--output-header $@ \
+		--cell-width ${FONT_WIDE_CELL_WIDTH} \
+		--cell-height ${FONT_WIDE_CELL_HEIGHT} \
+		--font-size ${FONT_WIDE_SIZE} \
+		--supersample ${FONT_SUPERSAMPLE} \
+		--threshold 88 \
+		--codepoint-ranges ${FONT16X16_BASE_RANGES} \
+		--text-source ${IME_DICT_SOURCE} \
+		--symbol-name font16x16_glyphs \
+		--source-name UDEVGothic-Regular.ttf
+
+${IME_DICT_SOURCE}: ${IME_DICT_SOURCE_TOOL} ${IME_DICT_MANUAL_SOURCE} ${IME_DICT_MOZC_SOURCES}
+	python3 ${IME_DICT_SOURCE_TOOL} \
+		--manual ${IME_DICT_MANUAL_SOURCE} \
+		--mozc-dir ${IME_DICT_MOZC_DIR} \
+		--max-cost 6000 \
+		--output $@
+
+${IME_DICT_BLOB}: ${IME_DICT_SOURCE} ${IME_DICT_TOOL}
+	mkdir -p ${USRDIR}/bin
+	python3 ${IME_DICT_TOOL} --input ${IME_DICT_SOURCE} --output $@
+
+kernel-subdirs: drivers-build lib-build net-build display-build tty-build
+
+drivers-build:
 	cd drivers; make
 
-${KLIB_OBJS} :
+lib-build:
 	cd lib; make
 
-${NET_OBJS} :
+net-build:
 	cd net; make
 
-${DISPLAY_OBJS} :
+display-build:
 	cd display; make
 
-${TTY_OBJS} :
+tty-build:
 	cd tty; make
+
+${KERNEL} : kernel-subdirs ${FONT_HEADERS} ${OBJS} ${ASMOBJS} ${BUILDDIR}/boot.ld
+	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} -o $@
 
 # === Boot loader ===
 
@@ -134,7 +176,7 @@ ${BUILDDIR}/boot.ld: boot.ld.S
 
 # === Pattern rules (C and assembly -> build/obj/) ===
 
-$(OBJDIR)/%.o: %.c
+$(OBJDIR)/%.o: %.c ${FONT_HEADERS}
 	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} ${EXTRA_CFLAGS} ${MEMORY_SCALE_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(OBJDIR)/%.o: %.S
@@ -168,7 +210,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -191,6 +233,10 @@ test-qemu-fs: all
 	@echo "=== Running fs CRUD smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_fs_crud_smoke.py $(FSBOOT) $(LOGDIR)
 
+test-qemu-ext3-large:
+	@echo "=== Running ext3 large file smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ext3_large_file_smoke.py $(LOGDIR)
+
 test-qemu-shell-io: all
 	@echo "=== Running shell IO smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_shell_io_smoke.py $(FSBOOT) $(LOGDIR)
@@ -210,7 +256,7 @@ ktest-build:
 	$(MAKE) clean
 	$(MAKE) EXTRA_CFLAGS="-DKTEST_BUILD" ktest-link
 
-ktest-link: ${OBJS} ${ASMOBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
+ktest-link: kernel-subdirs ${OBJS} ${ASMOBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
 	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
 	$(MAKE) usr-build
 	$(MAKE) tools
@@ -239,4 +285,5 @@ clean :
 	cd net; make clean
 	cd display; make clean
 	cd tty; make clean
+	rm -f ${IME_DICT_BLOB}
 	rm -rf ${BUILDDIR}

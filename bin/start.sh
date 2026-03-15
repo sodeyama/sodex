@@ -21,7 +21,7 @@ REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")" || {
 }
 BUILD_BIN="$REPO_ROOT/build/bin"
 LOG_DIR="$REPO_ROOT/build/log"
-QEMU_MEM_MB="${SODEX_QEMU_MEM_MB:-128}"
+QEMU_MEM_MB="${SODEX_QEMU_MEM_MB:-512}"
 mkdir -p "$LOG_DIR"
 
 COMMON_OPTS="-drive file=$BUILD_BIN/fsboot.bin,format=raw,if=ide \

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_QEMU_MEM_MB = 128
+DEFAULT_QEMU_MEM_MB = 512
 
 
 def get_qemu_memory_mb() -> int:

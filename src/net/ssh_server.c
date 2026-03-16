@@ -2609,6 +2609,7 @@ PRIVATE int ssh_pump_rx(struct ssh_connection *conn)
     enableInterrupt();
     if (read_len <= 0)
       break;
+    ssh_audit_state("ssh_rx_read_len", read_len);
     if (ssh_append_rx(conn, chunk, read_len) < 0)
       return -1;
     conn->last_activity_tick = kernel_tick;
@@ -2845,8 +2846,11 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
       ssh_queue_close(conn, "packet_invalid");
       break;
     }
-    if (result == 0)
+    if (result == 0) {
+      if (conn->rx_len > 0)
+        ssh_audit_state("ssh_packet_wait_rx", conn->rx_len);
       break;
+    }
     if (ssh_handle_payload(conn, ssh_decode_payload_buf, payload_len) < 0) {
       ssh_queue_close(conn, "protocol_error");
       break;

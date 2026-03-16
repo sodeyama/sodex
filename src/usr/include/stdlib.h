@@ -6,9 +6,10 @@
 #include <ext3fs.h>
 #include <process.h>
 #include <signal.h>
-#include <admin_server.h>
 
 #define CEIL(a, b) ((a&(~(b-1)))+b)
+
+struct admin_ssh_config;
 
 extern ssize_t write(int fd, const void *buf, size_t count);
 extern int open(const char *pathname, int flags, mode_t mode);

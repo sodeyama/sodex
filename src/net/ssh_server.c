@@ -1772,38 +1772,19 @@ PRIVATE int ssh_request_host_signature(
   u_int8_t request[SSH_SIGNER_REQUEST_BYTES];
   u_int8_t response[SSH_SIGNER_RESPONSE_BYTES];
 #ifdef USERLAND_SSHD_BUILD
-  struct sockaddr_in signer_addr;
-  int fd;
-  int result = -1;
-
-  if (admin_runtime_ssh_signer_port() <= 0)
-    return -1;
-
-  fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (fd < 0)
-    return -1;
-
-  network_fill_gateway_addr(&signer_addr,
-                            (u_int16_t)admin_runtime_ssh_signer_port());
   memcpy(request, SSH_SIGNER_MAGIC, SSH_SIGNER_MAGIC_BYTES);
   memcpy(request + SSH_SIGNER_MAGIC_BYTES, hash, SSH_CRYPTO_SHA256_BYTES);
-  if (kern_sendto(fd, request, sizeof(request), 0, &signer_addr) !=
-      (int)sizeof(request)) {
-    goto done;
-  }
-  if (ssh_signer_recv_exact(fd, response, sizeof(response)) < 0)
-    goto done;
+  if (ssh_signer_roundtrip(admin_runtime_ssh_signer_port(),
+                           request, sizeof(request),
+                           response, sizeof(response)) < 0)
+    return -1;
   if (memcmp(response, SSH_SIGNER_MAGIC, SSH_SIGNER_MAGIC_BYTES) != 0)
-    goto done;
+    return -1;
 
   memcpy(signature,
          response + SSH_SIGNER_MAGIC_BYTES,
          SSH_CRYPTO_ED25519_SIGNATURE_BYTES);
-  result = 0;
-
-done:
-  kern_close_socket(fd);
-  return result;
+  return 0;
 #else
   struct sockaddr_in signer_addr;
   int fd;
@@ -1847,19 +1828,6 @@ PRIVATE int ssh_request_host_curve25519(
   u_int8_t request[SSH_CURVE25519_REQUEST_BYTES];
   u_int8_t response[SSH_CURVE25519_RESPONSE_BYTES];
 #ifdef USERLAND_SSHD_BUILD
-  struct sockaddr_in signer_addr;
-  int fd;
-  int result = -1;
-
-  if (admin_runtime_ssh_signer_port() <= 0)
-    return -1;
-
-  fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (fd < 0)
-    return -1;
-
-  network_fill_gateway_addr(&signer_addr,
-                            (u_int16_t)admin_runtime_ssh_signer_port());
   memcpy(request, SSH_CURVE25519_MAGIC, SSH_SIGNER_MAGIC_BYTES);
   memcpy(request + SSH_SIGNER_MAGIC_BYTES,
          server_secret,
@@ -1867,14 +1835,12 @@ PRIVATE int ssh_request_host_curve25519(
   memcpy(request + SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES,
          client_public,
          SSH_CRYPTO_CURVE25519_BYTES);
-  if (kern_sendto(fd, request, sizeof(request), 0, &signer_addr) !=
-      (int)sizeof(request)) {
-    goto done;
-  }
-  if (ssh_signer_recv_exact(fd, response, sizeof(response)) < 0)
-    goto done;
+  if (ssh_signer_roundtrip(admin_runtime_ssh_signer_port(),
+                           request, sizeof(request),
+                           response, sizeof(response)) < 0)
+    return -1;
   if (memcmp(response, SSH_CURVE25519_MAGIC, SSH_SIGNER_MAGIC_BYTES) != 0)
-    goto done;
+    return -1;
 
   memcpy(server_public,
          response + SSH_SIGNER_MAGIC_BYTES,
@@ -1882,11 +1848,7 @@ PRIVATE int ssh_request_host_curve25519(
   memcpy(shared_secret,
          response + SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES,
          SSH_CRYPTO_CURVE25519_BYTES);
-  result = 0;
-
-done:
-  kern_close_socket(fd);
-  return result;
+  return 0;
 #else
   struct sockaddr_in signer_addr;
   int fd;
@@ -1967,6 +1929,24 @@ PRIVATE void ssh_audit_sign_mode(const char *mode, int signer_port)
                     portbuf);
   }
   admin_runtime_audit_line(message);
+}
+
+PRIVATE const char *ssh_protocol_close_reason(const u_int8_t *payload,
+                                              int payload_len)
+{
+  if (payload == 0 || payload_len <= 0)
+    return "protocol_error";
+
+  switch (payload[0]) {
+  case SSH_MSG_KEXINIT:
+    return "kexinit_invalid";
+  case SSH_MSG_KEX_ECDH_INIT:
+    return "kex_failed";
+  case SSH_MSG_NEWKEYS:
+    return "newkeys_invalid";
+  default:
+    return "protocol_error";
+  }
 }
 
 PRIVATE void ssh_derive_key_material(struct ssh_connection *conn,
@@ -2080,15 +2060,10 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   ssh_runtime_random_reset();
   ssh_runtime_random_fill(ssh_kex_server_secret,
                           sizeof(ssh_kex_server_secret));
-#ifdef USERLAND_SSHD_BUILD
-  if (ssh_request_host_curve25519(ssh_kex_server_public, ssh_kex_shared_secret,
-                                  ssh_kex_server_secret, client_public) < 0) {
-    return -1;
-  }
-#else
   if (use_remote_signer) {
     if (ssh_request_host_curve25519(ssh_kex_server_public, ssh_kex_shared_secret,
                                     ssh_kex_server_secret, client_public) < 0) {
+      admin_runtime_audit_line("ssh_kex_curve_remote_failed");
       return -1;
     }
   } else {
@@ -2098,10 +2073,10 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
     if (ssh_crypto_curve25519_shared(ssh_kex_shared_secret,
                                      ssh_kex_server_secret,
                                      client_public) < 0) {
+      admin_runtime_audit_line("ssh_kex_curve_local_failed");
       return -1;
     }
   }
-#endif
   admin_runtime_audit_line("ssh_kex_curve_done");
 
   hostkey_len = ssh_build_hostkey_blob(ssh_kex_hostkey_blob,
@@ -2139,13 +2114,6 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
     memcpy(conn->session_id, conn->exchange_hash, sizeof(conn->session_id));
     conn->session_id_set = TRUE;
   }
-#ifdef USERLAND_SSHD_BUILD
-  ssh_audit_sign_mode("kernel", 0);
-  if (ssh_request_host_signature(ssh_kex_signature, conn->exchange_hash) < 0) {
-    ssh_audit_sign_mode("kernel_fail", 0);
-    return -1;
-  }
-#else
   if (use_remote_signer) {
     ssh_audit_sign_mode("remote", admin_runtime_ssh_signer_port());
     if (ssh_request_host_signature(ssh_kex_signature, conn->exchange_hash) < 0) {
@@ -2157,10 +2125,10 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
     if (ssh_crypto_ed25519_sign(ssh_kex_signature, ssh_hostkey_secret,
                                 conn->exchange_hash,
                                 sizeof(conn->exchange_hash)) < 0) {
+      ssh_audit_sign_mode("local_fail", 0);
       return -1;
     }
   }
-#endif
   ssh_audit_sign_mode("sign_done", admin_runtime_ssh_signer_port());
 
   ssh_writer_init(&writer, ssh_kex_signature_blob, sizeof(ssh_kex_signature_blob));
@@ -3107,7 +3075,8 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
       break;
     }
     if (ssh_handle_payload(conn, ssh_decode_payload_buf, payload_len) < 0) {
-      ssh_queue_close(conn, "protocol_error");
+      ssh_queue_close(conn, ssh_protocol_close_reason(ssh_decode_payload_buf,
+                                                      payload_len));
       break;
     }
     iterations++;

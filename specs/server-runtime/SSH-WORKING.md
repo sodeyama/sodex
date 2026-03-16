@@ -91,11 +91,13 @@
 
 - `bin/start.sh --ssh`
 - QEMU の `hostfwd` だけを追加する
+- 既に SSH overlay を焼いた image を起動し直す用途向けで、fresh build の手順ではない
 
 ### overlay を含めて作り直す経路
 
 - `bin/restart.sh --ssh`
 - `sodex-admin.conf` を生成して build し直してから起動する
+- 手動確認の既定手順は `bin/restart.sh server-headless --ssh` を使う
 
 ### smoke
 
@@ -126,7 +128,6 @@
 ## 未完了事項
 
 - host key fingerprint と `known_hosts` を固定した手順
-- 追加オプションなしの `ssh -p ... root@127.0.0.1` の確認
 - auth retry 制限の SSH login path への統合
 - packet / auth policy / channel state machine の host test 拡充
 - 複数 channel や scope 外 request の reject をさらに明示的に固定すること
@@ -135,5 +136,6 @@
 
 - server runtime の管理用途としては、まず HTTP / admin protocol が主
 - SSH は「最小 remote shell が通る」段階まで来ている
+- signer-less 既定で `make -C src test-qemu-ssh` と `bin/restart.sh server-headless --ssh` + README 手順の login は確認済み
 - ただし運用面では fingerprint 固定と retry 制限がまだ弱い
 - そのため、現時点では完成済みの汎用 `sshd` と見なさず、最小機能の検証実装として扱うのが妥当

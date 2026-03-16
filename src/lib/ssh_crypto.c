@@ -37,6 +37,20 @@ PRIVATE int ssh_crypto_hex_value(char c)
   return -1;
 }
 
+PRIVATE int ssh_crypto_is_all_zero(const uint8_t *data, size_t len)
+{
+  size_t i;
+
+  if (data == 0)
+    return 1;
+
+  for (i = 0; i < len; i++) {
+    if (data[i] != 0)
+      return 0;
+  }
+  return 1;
+}
+
 PRIVATE void ssh_crypto_random_block(uint8_t out[SSH_RANDOM_BLOCK_BYTES])
 {
   struct ssh_aes_ctr_ctx ctx;
@@ -190,7 +204,14 @@ PUBLIC int ssh_crypto_curve25519_shared(
     const uint8_t secret_key[SSH_CRYPTO_CURVE25519_BYTES],
     const uint8_t public_key[SSH_CRYPTO_CURVE25519_BYTES])
 {
-  return crypto_scalarmult(shared_secret, secret_key, public_key);
+  if (crypto_scalarmult(shared_secret, secret_key, public_key) != 0)
+    return -1;
+
+  /* RFC 8731 に合わせて all-zero shared secret を拒否する。 */
+  if (ssh_crypto_is_all_zero(shared_secret, SSH_CRYPTO_CURVE25519_BYTES))
+    return -1;
+
+  return 0;
 }
 
 PUBLIC void ssh_crypto_aes128_ctr_init(struct ssh_aes_ctr_ctx *ctx,

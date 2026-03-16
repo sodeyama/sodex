@@ -9,7 +9,10 @@
 - kernel 常駐の `ssh_server_init()` / `ssh_server_tick()` 呼び出しは既定経路から外し、userland `sshd` へ切り替え済み
 - host signer の 2 本目 reply を読めず KEX で止まる問題は、signer request ごとの UDP socket 開閉と userland `recvfrom` 直読みに寄せて解消した
 - `SSH_MSG_NEWKEYS` 後で止まっていた主因は scheduler の double-skip で、`TASK_INTERRUPTIBLE` task の直後にいる `sshd` が starvation していた
-- `src/process.c` の timer path を修正後、`test-qemu-ssh` は login / wrong password / reconnect を含めて green
+- 2026-03-16 の再調査で signer-less regression を確認したが、`ssh_signer_roundtrip()` ベースの単一経路へ寄せることで解消した
+- `USERLAND_SSHD_BUILD` でも `ssh_signer_port=0` が既定で通り、`test-qemu-ssh` は signer-less 既定で green に戻った
+- `curve25519` shared secret の all-zero check を追加し、KEX failure は `protocol_error` 一括ではなく `kexinit_invalid` / `kex_failed` / `newkeys_invalid` へ分けた
+- `src/makefile` と `bin/restart.sh` の `ssh_signer_port` 既定値は `0` に揃え、`bin/restart.sh server-headless --ssh` と README 記載の host 側 `ssh` 手順で login / exit を再確認した
 
 ## 優先順
 
@@ -19,6 +22,7 @@
 4. userland `sshd` の bring-up
 5. `PTY` relay と shell lifecycle
 6. cutover と hardening
+7. regression recovery と signer-less 完全復旧
 
 ## M0: 境界整理
 
@@ -51,3 +55,13 @@
 | [ ] | USS-10 | `ssh_*` config を `admin_server` 依存からさらに分離するか判断する | USS-07 | `/etc/sodex-admin.conf` 継続か、専用 config file へ分離するかを決める |
 | [ ] | USS-11 | audit sink を userland server 共通で使える形に整理する | USS-07 | `debug shell` や将来の daemon と共通の監査出力方針を持てる |
 | [ ] | USS-12 | 単一接続制限を維持したまま、timeout と auth retry 制限を見直す | USS-08 | userland 化後も現在の制限と hardening を落とさない |
+
+## M4: signer-less 復旧と完走条件の再固定
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | USS-13 | userland `sshd` の signer request 経路を local fallback 付きの単一経路へ統一する | USS-07, USS-08 | `USERLAND_SSHD_BUILD` でも `ssh_signer_port=0` で KEX が通り、`bin/restart.sh server-headless --ssh` 単体で password prompt まで進む |
+| [x] | USS-14 | KEX helper の責務を整理し、最低限の protocol gap を埋める | USS-13 | `curve25519` shared secret の all-zero check を追加し、signer を使う場合も使わない場合も同じ KEX hash / sign path を通る |
+| [x] | USS-15 | KEX / transport failure の audit と close reason を分離する | USS-13, USS-14 | `protocol_error` 一括ではなく `kex_failed_*` などで識別でき、必要なら `SSH_MSG_DISCONNECT` reason code を返せる |
+| [x] | USS-16 | signer mode の起動導線、smoke、README を現実の挙動と一致させる | USS-13 | 既定は signer-less で通り、signer 付きは opt-in として `start.sh` / `restart.sh` / smoke / README / spec の期待値が一致する |
+| [x] | USS-17 | userland `sshd` の最終受け入れ条件を再度 green に固定する | USS-13, USS-14, USS-15, USS-16 | `test-qemu-ssh` が signer-less 既定で login / wrong password / reconnect を通し、manual でも README 記載の host 側 `ssh` 手順で login / exit が成立する |

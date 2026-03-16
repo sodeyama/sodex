@@ -153,6 +153,46 @@ recvfrom:
         popl    %ebp
         ret
 
+.global recvfrom_nowait
+recvfrom_nowait:
+        pushl   %ebp
+        movl    %esp, %ebp
+        pushl   %ebx
+        pushl   %esi
+        pushl   %edi
+        movl    $SYS_CALL_RECVFROM_NOWAIT, %eax
+        movl    0x8(%ebp), %ebx
+        movl    0xc(%ebp), %ecx
+        movl    0x10(%ebp), %edx
+        movl    0x14(%ebp), %esi
+        movl    0x18(%ebp), %edi
+        int     $0x80
+        popl    %edi
+        popl    %esi
+        popl    %ebx
+        popl    %ebp
+        ret
+
+.global ssh_signer_roundtrip
+ssh_signer_roundtrip:
+        pushl   %ebp
+        movl    %esp, %ebp
+        pushl   %ebx
+        pushl   %esi
+        pushl   %edi
+        movl    $SYS_CALL_SSH_SIGNER_ROUNDTRIP, %eax
+        movl    0x8(%ebp), %ebx
+        movl    0xc(%ebp), %ecx
+        movl    0x10(%ebp), %edx
+        movl    0x14(%ebp), %esi
+        movl    0x18(%ebp), %edi
+        int     $0x80
+        popl    %edi
+        popl    %esi
+        popl    %ebx
+        popl    %ebp
+        ret
+
 .global closesocket
 closesocket:
         pushl   %ebp

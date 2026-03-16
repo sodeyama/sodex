@@ -725,9 +725,12 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
 PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
                         struct sockaddr_in *addr)
 {
+  int signer = FALSE;
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
   struct kern_socket *sk = &socket_table[sockfd];
   if (sk->state == SOCK_STATE_UNUSED) return -1;
+  if (sk->type == SOCK_DGRAM && sk->udp_conn != 0)
+    signer = socket_dbg_is_signer_port(sk->udp_conn->rport);
 
   /* If no data, poll NE2000 directly (interrupts disabled to avoid context switch) */
   if (sk->rx_len == 0) {
@@ -740,6 +743,9 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
       if (sk->rx_len > 0)
         break;
     }
+    if (signer && sk->rx_len > 0)
+      socket_dbg_udp_event("KRECV-HAVE", sockfd, sk->udp_conn->lport,
+                           sk->udp_conn->rport, sk->rx_len);
     if (sk->rx_len == 0)
       return 0; /* timeout */
   }
@@ -747,6 +753,9 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
   disableInterrupt();
   int ret = rxbuf_read(sk, (u_int8_t *)buf, len, addr);
   enableInterrupt();
+  if (signer)
+    socket_dbg_udp_event("KRECV-RET", sockfd, sk->udp_conn->lport,
+                         sk->udp_conn->rport, (u_int16_t)ret);
 
   return ret;
 }
@@ -866,8 +875,26 @@ PUBLIC int kern_close_socket(int sockfd)
 PUBLIC int rxbuf_read_direct(int sockfd, u_int8_t *buf, u_int16_t maxlen,
                              struct sockaddr_in *from)
 {
+  struct kern_socket *sk;
+  int signer = FALSE;
+  u_int16_t lport = 0;
+  u_int16_t rport = 0;
+  int ret;
+
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
-  return rxbuf_read(&socket_table[sockfd], buf, maxlen, from);
+  sk = &socket_table[sockfd];
+  if (sk->type == SOCK_DGRAM && sk->udp_conn != 0) {
+    lport = sk->udp_conn->lport;
+    rport = sk->udp_conn->rport;
+    signer = socket_dbg_is_signer_port(rport);
+  }
+  if (signer && sk->rx_len > 0)
+    socket_dbg_udp_event("DIRECT-HAVE", sockfd, lport, rport, sk->rx_len);
+
+  ret = rxbuf_read(sk, buf, maxlen, from);
+  if (signer && ret > 0)
+    socket_dbg_udp_event("DIRECT-READ", sockfd, lport, rport, (u_int16_t)ret);
+  return ret;
 }
 
 PUBLIC void socket_service_pending_tcp(void)
@@ -951,6 +978,9 @@ PUBLIC void socket_udp_input(struct uip_udp_conn *udp_conn,
       if (socket_dbg_is_signer_port(udp_conn->rport))
         socket_dbg_udp_event("RECV", i, udp_conn->lport, udp_conn->rport, len);
       rxbuf_write(sk, data, len, &from);
+      if (socket_dbg_is_signer_port(udp_conn->rport))
+        socket_dbg_udp_event("RECVBUF", i, udp_conn->lport, udp_conn->rport,
+                             sk->rx_len);
       wakeup(&sk->recv_wq);
       poll_notify_all();
       return;

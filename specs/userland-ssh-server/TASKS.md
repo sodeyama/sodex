@@ -7,7 +7,9 @@
 
 - 2026-03-16 時点で `/usr/bin/sshd`、`poll` syscall、`get_foreground_pid` syscall、`init` からの既定起動は入っている
 - kernel 常駐の `ssh_server_init()` / `ssh_server_tick()` 呼び出しは既定経路から外し、userland `sshd` へ切り替え済み
-- 未解決は `test-qemu-ssh` の安定化で、初回 session は通る run がある一方、`wrong password` と reconnect が teardown / reaccept で不安定
+- host signer の 2 本目 reply を読めず KEX で止まる問題は、signer request ごとの UDP socket 開閉と userland `recvfrom` 直読みに寄せて解消した
+- `SSH_MSG_NEWKEYS` 後で止まっていた主因は scheduler の double-skip で、`TASK_INTERRUPTIBLE` task の直後にいる `sshd` が starvation していた
+- `src/process.c` の timer path を修正後、`test-qemu-ssh` は login / wrong password / reconnect を含めて green
 
 ## 優先順
 
@@ -31,16 +33,16 @@
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
 | [x] | USS-04 | `/usr/bin/sshd` の build / image 収録 / manual 起動経路を追加する | USS-01, USS-03 | `src/usr/command/sshd.c` を追加し、image 収録と `init` からの起動経路を入れた |
-| [~] | USS-05 | userland `sshd` で listener, version exchange, KEX, `password` auth を通す | USS-02, USS-03, USS-04 | listener / banner / KEX / auth は初回 session で到達する run があるが、`wrong password` を含む安定化が未完 |
-| [~] | USS-06 | `session`, `pty-req`, `shell`, `window-change` と `PTY` relay を userland 側で実装する | USS-05 | `eshell` 起動と `PTY` relay は userland 化済み。`exit` 後の clean close と reconnect の整合が未完 |
+| [x] | USS-05 | userland `sshd` で listener, version exchange, KEX, `password` auth を通す | USS-02, USS-03, USS-04 | signer 経由 KEX と `password` auth が通り、`wrong password` も smoke で確認済み |
+| [x] | USS-06 | `session`, `pty-req`, `shell`, `window-change` と `PTY` relay を userland 側で実装する | USS-05 | `PTY` relay, shell 起動, `exit` 後 close, reconnect を smoke で確認済み |
 
 ## M2: cutover
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
 | [x] | USS-07 | `server` / `server-headless` の既定起動を userland `sshd` へ切り替える | USS-05, USS-06 | `init` の既定起動と kernel 側 call site の切替は完了した |
-| [~] | USS-08 | host test と `test-qemu-ssh` を userland `sshd` 前提で固定する | USS-05, USS-06 | smoke script は userland 前提へ更新したが、login / wrong password / reconnect の全緑は未達 |
-| [~] | USS-09 | kernel listener と `ssh_server_tick()` 依存を削り、cleanup する | USS-07, USS-08 | 既定経路の依存削除は入ったが、関連 cleanup と green test までは未完 |
+| [x] | USS-08 | host test と `test-qemu-ssh` を userland `sshd` 前提で固定する | USS-05, USS-06 | `src/test/run_qemu_ssh_smoke.py` が login / wrong password / reconnect を通す |
+| [~] | USS-09 | kernel listener と `ssh_server_tick()` 依存を削り、cleanup する | USS-07, USS-08 | 既定経路の依存削除と green test は完了。調査用 audit / helper の整理は残る |
 
 ## M3: 残フォローアップ
 

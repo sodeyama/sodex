@@ -33,6 +33,8 @@
 #include <termios.h>
 #include <rs232c.h>
 #include <admin_server.h>
+#include <network_config.h>
+#include <ssh_crypto.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_creat(const char* pathname, mode_t mode);
@@ -72,6 +74,163 @@ PRIVATE int sys_get_foreground_pid(int fd);
 PRIVATE int sys_get_admin_ssh_config(struct admin_ssh_config *out);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
+PRIVATE int sys_ssh_signer_roundtrip(int port, const void *request,
+                                     int request_len, void *response,
+                                     int response_len);
+
+PRIVATE void syscall_copy_text(char *dest, int cap, const char *src)
+{
+  int i = 0;
+
+  if (dest == 0 || cap <= 0)
+    return;
+  if (src == 0) {
+    dest[0] = '\0';
+    return;
+  }
+
+  while (src[i] != '\0' && i < cap - 1) {
+    dest[i] = src[i];
+    i++;
+  }
+  dest[i] = '\0';
+}
+
+PRIVATE int syscall_append_int(char *buf, int cap, int pos, int value)
+{
+  char digits[16];
+  int len = 0;
+  unsigned int current;
+
+  if (buf == 0 || cap <= 0 || pos < 0)
+    return pos;
+
+  if (value < 0) {
+    if (pos < cap - 1)
+      buf[pos++] = '-';
+    current = (unsigned int)(-value);
+  } else {
+    current = (unsigned int)value;
+  }
+
+  if (current == 0) {
+    digits[len++] = '0';
+  } else {
+    while (current > 0 && len < (int)sizeof(digits)) {
+      digits[len++] = (char)('0' + (current % 10));
+      current /= 10;
+    }
+  }
+
+  while (len > 0 && pos < cap - 1) {
+    buf[pos++] = digits[--len];
+  }
+  buf[pos] = '\0';
+  return pos;
+}
+
+PRIVATE void syscall_audit_signer_state(const char *label, int value)
+{
+  char message[64];
+  int pos;
+
+  syscall_copy_text(message, sizeof(message), label);
+  pos = (int)strlen(message);
+  if (pos < (int)sizeof(message) - 1)
+    message[pos++] = '=';
+  message[pos] = '\0';
+  pos = syscall_append_int(message, sizeof(message), pos, value);
+  message[pos] = '\0';
+  admin_runtime_audit_line(message);
+}
+
+#define SYS_SSH_SIGNER_MAGIC_BYTES 4
+#define SYS_SSH_SIGNER_REQUEST_BYTES \
+  (SYS_SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_SHA256_BYTES)
+#define SYS_SSH_SIGNER_RESPONSE_BYTES \
+  (SYS_SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_ED25519_SIGNATURE_BYTES)
+#define SYS_SSH_CURVE25519_REQUEST_BYTES \
+  (SYS_SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES + \
+   SSH_CRYPTO_CURVE25519_BYTES)
+#define SYS_SSH_CURVE25519_RESPONSE_BYTES \
+  (SYS_SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES + \
+   SSH_CRYPTO_CURVE25519_BYTES)
+
+PRIVATE int sys_ssh_signer_local_roundtrip(const void *request, int request_len,
+                                           void *response, int response_len)
+{
+  static const u_int8_t signer_magic[SYS_SSH_SIGNER_MAGIC_BYTES] =
+      {'S', 'I', 'G', '1'};
+  static const u_int8_t curve_magic[SYS_SSH_SIGNER_MAGIC_BYTES] =
+      {'K', 'E', 'X', '1'};
+  u_int8_t local_request[SYS_SSH_CURVE25519_REQUEST_BYTES];
+  u_int8_t secret_key[SSH_CRYPTO_ED25519_SECRETKEY_BYTES];
+  u_int8_t local_response[SYS_SSH_CURVE25519_RESPONSE_BYTES];
+  const u_int8_t *req = local_request;
+  const char *secret_hex;
+  int ret = -1;
+
+  if (request == 0 || response == 0)
+    return -1;
+  if (request_len > (int)sizeof(local_request))
+    return -1;
+  memcpy(local_request, request, (size_t)request_len);
+
+  if (request_len == SYS_SSH_CURVE25519_REQUEST_BYTES &&
+      response_len == SYS_SSH_CURVE25519_RESPONSE_BYTES &&
+      memcmp(req, curve_magic, SYS_SSH_SIGNER_MAGIC_BYTES) == 0) {
+    admin_runtime_audit_line("ssh_sys_curve_enter");
+    memcpy(local_response, curve_magic, SYS_SSH_SIGNER_MAGIC_BYTES);
+    if (ssh_crypto_curve25519_public_key(
+            local_response + SYS_SSH_SIGNER_MAGIC_BYTES,
+            req + SYS_SSH_SIGNER_MAGIC_BYTES) < 0) {
+      goto done;
+    }
+    admin_runtime_audit_line("ssh_sys_curve_pub_done");
+    if (ssh_crypto_curve25519_shared(
+            local_response + SYS_SSH_SIGNER_MAGIC_BYTES +
+                SSH_CRYPTO_CURVE25519_BYTES,
+            req + SYS_SSH_SIGNER_MAGIC_BYTES,
+            req + SYS_SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES) < 0) {
+      goto done;
+    }
+    admin_runtime_audit_line("ssh_sys_curve_shared_done");
+    memcpy(response, local_response, SYS_SSH_CURVE25519_RESPONSE_BYTES);
+    ret = 0;
+    goto done;
+  }
+
+  if (request_len != SYS_SSH_SIGNER_REQUEST_BYTES ||
+      response_len != SYS_SSH_SIGNER_RESPONSE_BYTES ||
+      memcmp(req, signer_magic, SYS_SSH_SIGNER_MAGIC_BYTES) != 0) {
+    return -1;
+  }
+
+  secret_hex = admin_runtime_ssh_hostkey_ed25519_secret();
+  if (secret_hex == 0 || secret_hex[0] == '\0')
+    return -1;
+  if (ssh_crypto_hex_to_bytes(secret_hex,
+                              secret_key,
+                              SSH_CRYPTO_ED25519_SECRETKEY_BYTES) < 0) {
+    return -1;
+  }
+
+  memcpy(local_response, signer_magic, SYS_SSH_SIGNER_MAGIC_BYTES);
+  admin_runtime_audit_line("ssh_sys_sign_enter");
+  if (ssh_crypto_ed25519_sign(local_response + SYS_SSH_SIGNER_MAGIC_BYTES,
+                              secret_key,
+                              req + SYS_SSH_SIGNER_MAGIC_BYTES,
+                              SSH_CRYPTO_SHA256_BYTES) < 0) {
+    goto done;
+  }
+  admin_runtime_audit_line("ssh_sys_sign_done");
+  memcpy(response, local_response, SYS_SSH_SIGNER_RESPONSE_BYTES);
+  ret = 0;
+
+done:
+  admin_runtime_audit_line("ssh_sys_local_return");
+  return ret;
+}
 
 PUBLIC void init_syscall()
 {
@@ -320,6 +479,16 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_RECVFROM:
     ret = kern_recvfrom(p1, (void *)p2, p3, p4, (struct sockaddr_in *)p5);
+    break;
+
+  case SYS_CALL_RECVFROM_NOWAIT:
+    ret = rxbuf_read_direct((int)p1, (u_int8_t *)p2, (u_int16_t)p3,
+                            (struct sockaddr_in *)p5);
+    break;
+
+  case SYS_CALL_SSH_SIGNER_ROUNDTRIP:
+    ret = sys_ssh_signer_roundtrip((int)p1, (const void *)p2, (int)p3,
+                                   (void *)p4, (int)p5);
     break;
 
   case SYS_CALL_CLOSE_SOCK:
@@ -621,6 +790,58 @@ PRIVATE int sys_get_foreground_pid(int fd)
 PRIVATE int sys_get_admin_ssh_config(struct admin_ssh_config *out)
 {
   return admin_runtime_copy_ssh_config(out);
+}
+
+PRIVATE int sys_ssh_signer_roundtrip(int port, const void *request,
+                                     int request_len, void *response,
+                                     int response_len)
+{
+  struct sockaddr_in signer_addr;
+  u_int16_t net_port;
+  int fd;
+  int read_len;
+  int retry = 0;
+
+  if (request == 0 || response == 0)
+    return -1;
+  if (request_len <= 0 || response_len <= 0)
+    return -1;
+  if (port <= 0) {
+    disableInterrupt();
+    int local_ret = sys_ssh_signer_local_roundtrip(request, request_len,
+                                                   response, response_len);
+    admin_runtime_audit_line("ssh_sys_roundtrip_local_done");
+    enableInterrupt();
+    return local_ret;
+  }
+
+  fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (fd < 0)
+    return -1;
+
+  net_port = (u_int16_t)((((u_int16_t)port & 0x00ffU) << 8) |
+                         (((u_int16_t)port & 0xff00U) >> 8));
+  network_fill_gateway_addr(&signer_addr, net_port);
+  if (kern_sendto(fd, (void *)request, request_len, 0, &signer_addr) !=
+      request_len) {
+    kern_close_socket(fd);
+    return -1;
+  }
+  while (retry < 16) {
+    read_len = kern_recvfrom(fd, response, response_len, 0, 0);
+    if (read_len < 0) {
+      kern_close_socket(fd);
+      return -1;
+    }
+    if (read_len > 0) {
+      kern_close_socket(fd);
+      return read_len == response_len ? 0 : -1;
+    }
+    retry++;
+  }
+
+  kern_close_socket(fd);
+  return -1;
 }
 
 PRIVATE int sys_debug_write(const char *buf, size_t len)

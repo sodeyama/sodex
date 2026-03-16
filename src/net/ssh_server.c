@@ -500,16 +500,9 @@ PUBLIC int rxbuf_read_direct(int sockfd, u_int8_t *buf, u_int16_t maxlen,
 {
   int ret;
 
-  /* kernel 側 recv は内部で短い network_poll を回すので、
-   * userland 側での事前 poll に依存しない。 */
-  if (socket_table[sockfd].type == SOCK_STREAM) {
-    ret = recv_msg(sockfd, buf, (int)maxlen, 0);
-  } else {
-    ret = recvfrom(sockfd, buf, (int)maxlen, 0, (struct sockaddr *)from, 0);
-  }
+  ret = kern_recvfrom(sockfd, buf, (int)maxlen, 0, from);
   if (ret > 0)
     ssh_audit_state("ssh_rx_direct_len", ret);
-  ssh_userland_refresh_socket(sockfd);
   return ret;
 }
 
@@ -824,10 +817,10 @@ struct ssh_connection {
 
 PRIVATE int ssh_listener_fd = -1;
 PRIVATE int ssh_listener_port = 0;
+PRIVATE int ssh_signer_fd = -1;
 PRIVATE struct ssh_connection ssh_conn;
 PRIVATE struct tty *ssh_cleanup_tty = 0;
 PRIVATE pid_t ssh_cleanup_pid = -1;
-PRIVATE int ssh_signer_fd = -1;
 PRIVATE u_int8_t ssh_hostkey_public[SSH_CRYPTO_ED25519_PUBLICKEY_BYTES];
 PRIVATE u_int8_t ssh_hostkey_secret[SSH_CRYPTO_ED25519_SECRETKEY_BYTES];
 PRIVATE u_int8_t ssh_runtime_rng_seed[SSH_CRYPTO_SEED_BYTES];
@@ -855,6 +848,7 @@ PRIVATE u_int8_t ssh_decode_payload_buf[SSH_PAYLOAD_MAX];
 PRIVATE u_int8_t ssh_channel_payload_buf[SSH_PAYLOAD_MAX];
 PRIVATE int ssh_runtime_loaded = FALSE;
 PRIVATE int ssh_tick_active = FALSE;
+PRIVATE void ssh_close_signer_socket(void);
 PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn);
 
 PRIVATE u_int32_t ssh_runtime_random_rotl(u_int32_t value, int bits)
@@ -1579,6 +1573,7 @@ PRIVATE void ssh_release_connection(struct ssh_connection *conn)
 
   if (conn->fd >= 0)
     kern_close_socket(conn->fd);
+  ssh_close_signer_socket();
   ssh_reset_connection(conn);
 }
 
@@ -1706,21 +1701,32 @@ PRIVATE int ssh_build_hostkey_blob(u_int8_t *buf, int cap)
 
 PRIVATE int ssh_signer_recv_exact(int fd, u_int8_t *buf, int len)
 {
-  int retry = 0;
   int read_len;
 
-  while (retry < SSH_SIGNER_RECV_RETRIES) {
 #ifdef USERLAND_SSHD_BUILD
-    struct pollfd pfd;
+  struct pollfd pfd;
+  int wait_result;
 
-    pfd.fd = fd;
-    pfd.events = POLLIN | POLLHUP;
-    pfd.revents = 0;
-    if (poll(&pfd, 1, 1) <= 0 || (pfd.revents & POLLIN) == 0) {
-      retry++;
-      continue;
-    }
-#endif
+  pfd.fd = fd;
+  pfd.events = POLLIN | POLLHUP;
+  pfd.revents = 0;
+  wait_result = poll(&pfd, 1, SSH_SIGNER_RECV_RETRIES);
+  if (wait_result <= 0 || (pfd.revents & POLLIN) == 0) {
+    ssh_audit_state("ssh_signer_wait", wait_result);
+    ssh_audit_state("ssh_signer_wait_revents", pfd.revents);
+    return -1;
+  }
+  read_len = recvfrom_nowait(fd, buf, len, 0, 0);
+  if (read_len < 0) {
+    ssh_audit_state("ssh_signer_err", read_len);
+    return -1;
+  }
+  ssh_audit_state("ssh_signer_read_len", read_len);
+  return read_len == len ? 0 : -1;
+#else
+  int retry = 0;
+
+  while (retry < SSH_SIGNER_RECV_RETRIES) {
     read_len = kern_recv(fd, buf, len, 0);
 
     if (read_len < 0)
@@ -1735,32 +1741,45 @@ PRIVATE int ssh_signer_recv_exact(int fd, u_int8_t *buf, int len)
   }
 
   return -1;
+#endif
 }
 
-PRIVATE int ssh_get_signer_fd(int *cached_fd)
+PRIVATE void ssh_close_signer_socket(void)
 {
-  if (cached_fd == 0)
-    return -1;
-  if (*cached_fd >= 0)
-    return *cached_fd;
+  if (ssh_signer_fd < 0)
+    return;
+  kern_close_socket(ssh_signer_fd);
+  ssh_signer_fd = -1;
+}
 
-  *cached_fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  return *cached_fd;
+PRIVATE int ssh_get_signer_socket(void)
+{
+  if (admin_runtime_ssh_signer_port() <= 0) {
+    ssh_close_signer_socket();
+    return -1;
+  }
+  if (ssh_signer_fd >= 0)
+    return ssh_signer_fd;
+
+  ssh_signer_fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  return ssh_signer_fd;
 }
 
 PRIVATE int ssh_request_host_signature(
     u_int8_t signature[SSH_CRYPTO_ED25519_SIGNATURE_BYTES],
     const u_int8_t hash[SSH_CRYPTO_SHA256_BYTES])
 {
-  struct sockaddr_in signer_addr;
   u_int8_t request[SSH_SIGNER_REQUEST_BYTES];
   u_int8_t response[SSH_SIGNER_RESPONSE_BYTES];
+#ifdef USERLAND_SSHD_BUILD
+  struct sockaddr_in signer_addr;
   int fd;
+  int result = -1;
 
   if (admin_runtime_ssh_signer_port() <= 0)
     return -1;
 
-  fd = ssh_get_signer_fd(&ssh_signer_fd);
+  fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (fd < 0)
     return -1;
 
@@ -1770,17 +1789,53 @@ PRIVATE int ssh_request_host_signature(
   memcpy(request + SSH_SIGNER_MAGIC_BYTES, hash, SSH_CRYPTO_SHA256_BYTES);
   if (kern_sendto(fd, request, sizeof(request), 0, &signer_addr) !=
       (int)sizeof(request)) {
-    return -1;
+    goto done;
   }
   if (ssh_signer_recv_exact(fd, response, sizeof(response)) < 0)
-    return -1;
+    goto done;
   if (memcmp(response, SSH_SIGNER_MAGIC, SSH_SIGNER_MAGIC_BYTES) != 0)
-    return -1;
+    goto done;
 
   memcpy(signature,
          response + SSH_SIGNER_MAGIC_BYTES,
          SSH_CRYPTO_ED25519_SIGNATURE_BYTES);
-  return 0;
+  result = 0;
+
+done:
+  kern_close_socket(fd);
+  return result;
+#else
+  struct sockaddr_in signer_addr;
+  int fd;
+  int result = -1;
+
+  fd = ssh_get_signer_socket();
+  if (fd < 0)
+    return -1;
+
+  network_fill_gateway_addr(&signer_addr,
+                            (u_int16_t)admin_runtime_ssh_signer_port());
+  memcpy(request, SSH_SIGNER_MAGIC, SSH_SIGNER_MAGIC_BYTES);
+  memcpy(request + SSH_SIGNER_MAGIC_BYTES, hash, SSH_CRYPTO_SHA256_BYTES);
+  if (kern_sendto(fd, request, sizeof(request), 0, &signer_addr) !=
+      (int)sizeof(request)) {
+    goto done;
+  }
+  if (ssh_signer_recv_exact(fd, response, sizeof(response)) < 0)
+    goto done;
+  if (memcmp(response, SSH_SIGNER_MAGIC, SSH_SIGNER_MAGIC_BYTES) != 0)
+    goto done;
+
+  memcpy(signature,
+         response + SSH_SIGNER_MAGIC_BYTES,
+         SSH_CRYPTO_ED25519_SIGNATURE_BYTES);
+  result = 0;
+
+done:
+  if (result < 0)
+    ssh_close_signer_socket();
+  return result;
+#endif
 }
 
 PRIVATE int ssh_request_host_curve25519(
@@ -1789,15 +1844,17 @@ PRIVATE int ssh_request_host_curve25519(
     const u_int8_t server_secret[SSH_CRYPTO_CURVE25519_BYTES],
     const u_int8_t client_public[SSH_CRYPTO_CURVE25519_BYTES])
 {
-  struct sockaddr_in signer_addr;
   u_int8_t request[SSH_CURVE25519_REQUEST_BYTES];
   u_int8_t response[SSH_CURVE25519_RESPONSE_BYTES];
+#ifdef USERLAND_SSHD_BUILD
+  struct sockaddr_in signer_addr;
   int fd;
+  int result = -1;
 
   if (admin_runtime_ssh_signer_port() <= 0)
     return -1;
 
-  fd = ssh_get_signer_fd(&ssh_signer_fd);
+  fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (fd < 0)
     return -1;
 
@@ -1812,12 +1869,12 @@ PRIVATE int ssh_request_host_curve25519(
          SSH_CRYPTO_CURVE25519_BYTES);
   if (kern_sendto(fd, request, sizeof(request), 0, &signer_addr) !=
       (int)sizeof(request)) {
-    return -1;
+    goto done;
   }
   if (ssh_signer_recv_exact(fd, response, sizeof(response)) < 0)
-    return -1;
+    goto done;
   if (memcmp(response, SSH_CURVE25519_MAGIC, SSH_SIGNER_MAGIC_BYTES) != 0)
-    return -1;
+    goto done;
 
   memcpy(server_public,
          response + SSH_SIGNER_MAGIC_BYTES,
@@ -1825,7 +1882,51 @@ PRIVATE int ssh_request_host_curve25519(
   memcpy(shared_secret,
          response + SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES,
          SSH_CRYPTO_CURVE25519_BYTES);
-  return 0;
+  result = 0;
+
+done:
+  kern_close_socket(fd);
+  return result;
+#else
+  struct sockaddr_in signer_addr;
+  int fd;
+  int result = -1;
+
+  fd = ssh_get_signer_socket();
+  if (fd < 0)
+    return -1;
+
+  network_fill_gateway_addr(&signer_addr,
+                            (u_int16_t)admin_runtime_ssh_signer_port());
+  memcpy(request, SSH_CURVE25519_MAGIC, SSH_SIGNER_MAGIC_BYTES);
+  memcpy(request + SSH_SIGNER_MAGIC_BYTES,
+         server_secret,
+         SSH_CRYPTO_CURVE25519_BYTES);
+  memcpy(request + SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES,
+         client_public,
+         SSH_CRYPTO_CURVE25519_BYTES);
+  if (kern_sendto(fd, request, sizeof(request), 0, &signer_addr) !=
+      (int)sizeof(request)) {
+    goto done;
+  }
+  if (ssh_signer_recv_exact(fd, response, sizeof(response)) < 0)
+    goto done;
+  if (memcmp(response, SSH_CURVE25519_MAGIC, SSH_SIGNER_MAGIC_BYTES) != 0)
+    goto done;
+
+  memcpy(server_public,
+         response + SSH_SIGNER_MAGIC_BYTES,
+         SSH_CRYPTO_CURVE25519_BYTES);
+  memcpy(shared_secret,
+         response + SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES,
+         SSH_CRYPTO_CURVE25519_BYTES);
+  result = 0;
+
+done:
+  if (result < 0)
+    ssh_close_signer_socket();
+  return result;
+#endif
 }
 
 PRIVATE void ssh_audit_sign_mode(const char *mode, int signer_port)
@@ -1962,8 +2063,11 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   int hostkey_len;
   int signature_len;
   int hash_input_len;
+  int use_remote_signer;
   struct ssh_reader reader;
   struct ssh_writer writer;
+
+  use_remote_signer = (admin_runtime_ssh_signer_port() > 0) ? TRUE : FALSE;
 
   ssh_audit_sign_mode("kex_start", admin_runtime_ssh_signer_port());
   ssh_reader_init(&reader, payload + 1, payload_len - 1);
@@ -1976,7 +2080,13 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   ssh_runtime_random_reset();
   ssh_runtime_random_fill(ssh_kex_server_secret,
                           sizeof(ssh_kex_server_secret));
-  if (admin_runtime_ssh_signer_port() > 0) {
+#ifdef USERLAND_SSHD_BUILD
+  if (ssh_request_host_curve25519(ssh_kex_server_public, ssh_kex_shared_secret,
+                                  ssh_kex_server_secret, client_public) < 0) {
+    return -1;
+  }
+#else
+  if (use_remote_signer) {
     if (ssh_request_host_curve25519(ssh_kex_server_public, ssh_kex_shared_secret,
                                     ssh_kex_server_secret, client_public) < 0) {
       return -1;
@@ -1991,6 +2101,7 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
       return -1;
     }
   }
+#endif
   admin_runtime_audit_line("ssh_kex_curve_done");
 
   hostkey_len = ssh_build_hostkey_blob(ssh_kex_hostkey_blob,
@@ -2028,7 +2139,14 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
     memcpy(conn->session_id, conn->exchange_hash, sizeof(conn->session_id));
     conn->session_id_set = TRUE;
   }
-  if (admin_runtime_ssh_signer_port() > 0) {
+#ifdef USERLAND_SSHD_BUILD
+  ssh_audit_sign_mode("kernel", 0);
+  if (ssh_request_host_signature(ssh_kex_signature, conn->exchange_hash) < 0) {
+    ssh_audit_sign_mode("kernel_fail", 0);
+    return -1;
+  }
+#else
+  if (use_remote_signer) {
     ssh_audit_sign_mode("remote", admin_runtime_ssh_signer_port());
     if (ssh_request_host_signature(ssh_kex_signature, conn->exchange_hash) < 0) {
       ssh_audit_sign_mode("remote_fail", admin_runtime_ssh_signer_port());
@@ -2042,6 +2160,7 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
       return -1;
     }
   }
+#endif
   ssh_audit_sign_mode("sign_done", admin_runtime_ssh_signer_port());
 
   ssh_writer_init(&writer, ssh_kex_signature_blob, sizeof(ssh_kex_signature_blob));
@@ -2543,6 +2662,7 @@ PRIVATE int ssh_handle_payload(struct ssh_connection *conn,
     return status;
   }
   case SSH_MSG_NEWKEYS:
+    admin_runtime_audit_line("ssh_newkeys_rx");
     conn->newkeys_received = TRUE;
     conn->rx_encrypted = TRUE;
     return 0;
@@ -3023,12 +3143,12 @@ PUBLIC void ssh_server_init(void)
 {
   ssh_listener_fd = -1;
   ssh_listener_port = 0;
+  ssh_signer_fd = -1;
   ssh_runtime_loaded = FALSE;
   ssh_tick_active = FALSE;
   ssh_reset_connection(&ssh_conn);
   ssh_cleanup_tty = 0;
   ssh_cleanup_pid = -1;
-  ssh_signer_fd = -1;
 }
 
 PUBLIC void ssh_server_tick(void)
@@ -3077,6 +3197,21 @@ PRIVATE int ssh_userland_channel_fd(struct ssh_connection *conn)
   return conn->channel.tty->fd;
 }
 
+PRIVATE int ssh_userland_fd_ready(int fd, short events)
+{
+  struct pollfd pfd;
+
+  if (fd < 0)
+    return FALSE;
+
+  pfd.fd = fd;
+  pfd.events = events;
+  pfd.revents = 0;
+  if (poll(&pfd, 1, 0) < 0)
+    return FALSE;
+  return (pfd.revents & events) != 0;
+}
+
 PRIVATE void ssh_userland_refresh_runtime(void)
 {
   if (ssh_conn.in_use && ssh_conn.fd >= 0)
@@ -3085,24 +3220,20 @@ PRIVATE void ssh_userland_refresh_runtime(void)
 
 PRIVATE void ssh_userland_wait_once(void)
 {
-  struct pollfd pfd;
-  int wait_fd = -1;
-
   if (ssh_conn.in_use && ssh_conn.fd >= 0) {
-    wait_fd = ssh_conn.fd;
+    if (ssh_socket_rx_ready(ssh_conn.fd))
+      return;
+    if (ssh_conn.out_count > 0 && !ssh_socket_tx_pending(ssh_conn.fd))
+      return;
+    if (ssh_userland_fd_ready(ssh_userland_channel_fd(&ssh_conn), POLLIN | POLLHUP))
+      return;
   } else if (ssh_listener_fd >= 0) {
-    wait_fd = ssh_listener_fd;
-  }
-  if (wait_fd < 0) {
-    sleep_ticks(1);
-    return;
+    if (ssh_socket_rx_ready(ssh_listener_fd))
+      return;
   }
 
-  pfd.fd = wait_fd;
-  pfd.events = POLLIN | POLLHUP;
-  pfd.revents = 0;
-  if (poll(&pfd, 1, 1) < 0)
-    sleep_ticks(1);
+  /* userland では blocking poll の wakeup 依存を避け、1 tick ごとに再評価する。 */
+  sleep_ticks(1);
 }
 
 int main(int argc, char **argv)

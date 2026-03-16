@@ -14,7 +14,7 @@
 
 #define DEBUG
 
-INITSEG         = 0x9800
+INITSEG         = 0x9C00
 __KERNEL_CS     = 0x08
 
 MEMORY_SIZE     = 0x0       

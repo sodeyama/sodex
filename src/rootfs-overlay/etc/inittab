@@ -1,0 +1,5 @@
+# 最小 inittab
+initdefault:user
+sysinit:/etc/init.d/rcS
+respawn:user:/usr/bin/term
+respawn:rescue:/usr/bin/eshell

@@ -7,7 +7,7 @@
 #endif
 
 
-#define MAXMEMSIZE (((u_int16_t*)(0xc0098000))[0])
+#define MAXMEMSIZE (((u_int16_t*)(0xc009c000))[0])
 
 #define MAX_MHOLES 8192
 #define MAX_PMHOLES 1024

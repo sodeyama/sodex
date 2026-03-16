@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import subprocess
@@ -17,6 +18,7 @@ from run_qemu_shell_io_smoke import (
     read_dir_entries,
     read_file,
     wait_for_metric,
+    wait_for_prompt,
     wait_for_path,
 )
 
@@ -69,13 +71,15 @@ def main() -> int:
     fsboot = pathlib.Path(sys.argv[1]).resolve()
     logdir = pathlib.Path(sys.argv[2]).resolve()
     repo_root = pathlib.Path(__file__).resolve().parents[2]
+    reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
     monitor_sock = logdir / f"user_memory_monitor_{os.getpid()}.sock"
     serial_log = logdir / f"user_memory_serial_{os.getpid()}.log"
     qemu_log = logdir / f"user_memory_qemu_{os.getpid()}.log"
+    prompt_ppm = logdir / f"user_memory_prompt_{os.getpid()}.ppm"
 
-    for path in (monitor_sock, serial_log, qemu_log):
+    for path in (monitor_sock, serial_log, qemu_log, prompt_ppm):
         if path.exists():
             path.unlink()
 
@@ -111,6 +115,7 @@ def main() -> int:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
         wait_for_metric(serial_log, "full_redraw", timeout)
+        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
 
         for command, delay in commands:
             monitor.send_text(command)

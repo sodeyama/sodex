@@ -168,6 +168,17 @@ MVP は次でよい。
 `/etc/init.d/` という配置は最初から採るが、
 実行順は `rcS` の中で明示し、runlevel metadata は後段に回す。
 
+## 後続拡張
+
+2026-03-17 時点で、MVP の後段として次まで入っている。
+
+- `### BEGIN INIT INFO` の `Provides` / `Required-Start` / `Default-Start` を解釈し、`rc-order` で service 順序を決める
+- `/etc/inittab` で `initdefault`, `sysinit`, `respawn` を解釈し、`user` と `server-headless` を切り替える
+- interactive shell で `jobs`, `fg`, `bg` を使える
+
+default rootfs は `user` runlevel で `term` を起動し、
+server 用 overlay は `server-headless` に切り替えて `sshd` を起動する。
+
 ## フェーズ
 
 | # | ファイル | 概要 | 主な依存 |
@@ -219,12 +230,14 @@ MVP は次でよい。
 
 ## 完了条件
 
-- [ ] `/usr/bin/sh` で text shell script を実行できる
-- [ ] `/etc/init.d/rcS` が boot 時に動き、service script を呼べる
-- [ ] `/etc/init.d/sshd start` で `sshd` が background 起動する
-- [ ] `status` / `restart` の挙動と exit code が文書化され、smoke で固定される
-- [ ] `src/usr/init.c` の hardcode 起動を段階撤去できる
-- [ ] interactive `eshell` と non-interactive `sh` が共通 core を使う
+- [x] `/usr/bin/sh` で text shell script を実行できる
+- [x] `/etc/init.d/rcS` が boot 時に動き、service script を呼べる
+- [x] `/etc/init.d/sshd start` で `sshd` が background 起動する
+- [x] `status` / `restart` の挙動と exit code が文書化され、smoke で固定される
+- [x] `src/usr/init.c` の hardcode 起動を段階撤去できる
+- [x] interactive `eshell` と non-interactive `sh` が共通 core を使う
+- [x] LSB metadata に基づく service 順序と `server-headless` runlevel を使える
+- [x] interactive shell の最小 job control (`jobs`, `fg`, `bg`) を smoke で固定する
 
 ## 参考資料
 

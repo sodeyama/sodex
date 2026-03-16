@@ -275,36 +275,47 @@ PRIVATE struct tty *inherit_stdio_tty(struct tty *stdio_tty)
 
 PRIVATE int get_argc(char *const argv[])
 {
+  int i;
   if (argv == NULL)
     return 0;
 
-  int i;
-  for (i=0; ;i++) {
+  for (i = 0; i < ARGV_MAX_NUMS - 1; i++) {
     if (argv[i] == NULL)
-      break;
+      return i;
   }
-  return i;
+  return ARGV_MAX_NUMS - 1;
 }
 
 PRIVATE char** get_argv(char *const argv[])
 {
+  int i;
+
   if (argv == NULL)
     return NULL;
-  char **ret_argv = kalloc(ARGV_MAX_NUMS*4);
+  char **ret_argv = kalloc(ARGV_MAX_NUMS * sizeof(char *));
   if (ret_argv == NULL) {
     _kprintf("%s kalloc error\n", __func__);
     return NULL;
   }
-  int i;
-  for (i=0; ;i++) {
-    if (argv[i] == NULL) {
-      ret_argv[i] = NULL;
+  memset(ret_argv, 0, ARGV_MAX_NUMS * sizeof(char *));
+
+  for (i = 0; i < ARGV_MAX_NUMS - 1; i++) {
+    int arg_len;
+
+    if (argv[i] == NULL)
+      break;
+    ret_argv[i] = kalloc(ARGV_MAX_LEN);
+    if (ret_argv[i] == NULL) {
+      _kprintf("%s argv[%d] kalloc error\n", __func__, i);
       break;
     }
-    ret_argv[i] = kalloc(ARGV_MAX_LEN);
     memset(ret_argv[i], 0, ARGV_MAX_LEN);
-    memcpy(ret_argv[i], argv[i], strlen(argv[i]));
+    arg_len = strlen(argv[i]);
+    if (arg_len >= ARGV_MAX_LEN)
+      arg_len = ARGV_MAX_LEN - 1;
+    memcpy(ret_argv[i], argv[i], arg_len);
   }
+  ret_argv[i] = NULL;
   /*
   for (i=0;;i++) {
     if (ret_argv[i] == NULL)

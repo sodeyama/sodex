@@ -39,6 +39,7 @@ extern sighandler_t signal(int signum, sighandler_t sighandler);
 extern int kill(pid_t pid, int sig);
 
 int atoi(const char* nptr);
+int is_number(const char* nptr);
 
 
 #endif /* _STDLIB_H */

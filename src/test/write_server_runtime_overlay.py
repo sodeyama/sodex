@@ -44,6 +44,8 @@ def main() -> int:
         return 2
 
     overlay_dir = pathlib.Path(sys.argv[1]).resolve()
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    base_overlay = repo_root / "src" / "rootfs-overlay"
     etc_dir = overlay_dir / "etc"
     config_path = etc_dir / "sodex-admin.conf"
 
@@ -59,12 +61,15 @@ def main() -> int:
     ssh_hostkey_secret = os.environ.get("SODEX_SSH_HOSTKEY_ED25519_SECRET", "")
     ssh_rng_seed = os.environ.get("SODEX_SSH_RNG_SEED", "")
     config_extra = os.environ.get("SODEX_ADMIN_CONFIG_EXTRA", "")
+    initdefault_runlevel = os.environ.get("SODEX_INITDEFAULT_RUNLEVEL", "").strip()
 
     if ssh_hostkey_seed and (not ssh_hostkey_public or not ssh_hostkey_secret):
         ssh_hostkey_public, ssh_hostkey_secret = derive_ssh_hostkey(ssh_hostkey_seed)
 
     if overlay_dir.exists():
         shutil.rmtree(overlay_dir)
+    if base_overlay.exists():
+        shutil.copytree(base_overlay, overlay_dir)
     etc_dir.mkdir(parents=True, exist_ok=True)
 
     lines = [
@@ -93,6 +98,18 @@ def main() -> int:
     lines.append("")
 
     config_path.write_text("\n".join(lines), encoding="ascii")
+
+    if initdefault_runlevel:
+        inittab_path = etc_dir / "inittab"
+        inittab_lines = [
+            "# minimal inittab",
+            f"initdefault:{initdefault_runlevel}",
+            "sysinit:/etc/init.d/rcS",
+            "respawn:user:/usr/bin/term",
+            "respawn:rescue:/usr/bin/eshell",
+            "",
+        ]
+        inittab_path.write_text("\n".join(inittab_lines), encoding="ascii")
 
     return 0
 

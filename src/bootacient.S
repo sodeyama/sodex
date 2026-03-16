@@ -11,9 +11,9 @@
  */
 
 BOOTSEG         = 0x07C0
-INITSEG         = 0x9000
+INITSEG         = 0x9C00
 KERNEL_SEG       = 0x0100       
-KERNEL_STACK_SEG = 0x8000
+KERNEL_STACK_SEG = 0x9000
 
 # We won't have to increase the BOOT_SECTS to more 18
 ACIENT_SECTS    = 1
@@ -82,7 +82,7 @@ next:
         ecount: .byte 5
 
 read_middleboot:                        
-        movw    $0x200, %bx     # "es" is already set at 0x9000
+        movw    $0x400, %bx     # "es" is already set at INITSEG
 
         movb    $0x2, %ah           # AH is BIOS COMMAND, The no.2 indicates
                                     # reading disk sectors
@@ -120,7 +120,7 @@ read0:
 
         call    reset_fd
 		
-        ljmp    $0x9000, $0x0200
+        ljmp    $INITSEG, $0x0400
 
 
 /* Read FD's kernel data
@@ -290,4 +290,3 @@ fd_over64k_error_mes:
 
         .org 510
         .word 0xAA55
-

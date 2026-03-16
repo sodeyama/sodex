@@ -70,7 +70,7 @@ ASMOBJS = $(addprefix $(OBJDIR)/,$(ASMSRC:.S=.o))
 EXTRA_CFLAGS ?=
 SODEX_QEMU_MEM_MB ?= 512
 SODEX_RAM_CAP_MB ?= 0
-SODEX_ROOTFS_OVERLAY ?=
+SODEX_ROOTFS_OVERLAY ?= ${SRCDIR}/rootfs-overlay
 SODEX_ADMIN_STATUS_TOKEN ?= status-secret
 SODEX_ADMIN_CONTROL_TOKEN ?= control-secret
 SODEX_ADMIN_ALLOW_IP ?= 10.0.2.2
@@ -85,6 +85,7 @@ SODEX_SSH_HOSTKEY_ED25519_SEED ?= 00112233445566778899aabbccddeeff00112233445566
 SODEX_SSH_RNG_SEED ?= ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100
 MEMORY_SCALE_CFLAGS =
 ROOTFS_OVERLAY_ARG = $(if $(strip $(SODEX_ROOTFS_OVERLAY)),$(SODEX_ROOTFS_OVERLAY))
+BOOT_KERNEL_MAX_SECTS = 1240
 
 ifneq ($(strip $(SODEX_RAM_CAP_MB)),0)
 MEMORY_SCALE_CFLAGS += -DSODEX_RAM_CAP_MB=$(SODEX_RAM_CAP_MB)
@@ -171,6 +172,11 @@ ${KERNEL} : kernel-subdirs ${FONT_HEADERS} ${OBJS} ${ASMOBJS} ${BUILDDIR}/boot.l
 
 KSIZE=`${GETSIZE} ${KERNEL}`
 ${ACIENT} : ${FIRST_BOOT_FILE} ${KERNEL} ${GETSIZE}
+	@ksize=`${GETSIZE} ${KERNEL}`; \
+	if [ "$$ksize" -gt "${BOOT_KERNEL_MAX_SECTS}" ]; then \
+		echo "kernel.bin is too large for the current boot loader ($$ksize > ${BOOT_KERNEL_MAX_SECTS} sectors)"; \
+		exit 1; \
+	fi
 	echo ${KSIZE}
 	${AS} ${ASFLAGS} --defsym KERNEL_SECTS=${KSIZE} ${FIRST_BOOT_FILE} -o $(OBJDIR)/boota.o -a > ${LIST}/boota.lst
 	${LD} ${BOOTA_LFLAGS} $(OBJDIR)/boota.o -o $@
@@ -224,7 +230,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-service test-qemu-jobs ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -279,10 +285,31 @@ test-qemu-debug-shell:
 
 test-qemu-ssh:
 	@$(MAKE) clean
-	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_SIGNER_PORT=$(SODEX_SSH_SIGNER_PORT) SODEX_SSH_HOSTKEY_ED25519_SEED=$(SODEX_SSH_HOSTKEY_ED25519_SEED) SODEX_SSH_RNG_SEED=$(SODEX_SSH_RNG_SEED) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/ssh-rootfs-overlay
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_INITDEFAULT_RUNLEVEL=server-headless SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_SIGNER_PORT=$(SODEX_SSH_SIGNER_PORT) SODEX_SSH_HOSTKEY_ED25519_SEED=$(SODEX_SSH_HOSTKEY_ED25519_SEED) SODEX_SSH_RNG_SEED=$(SODEX_SSH_RNG_SEED) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/ssh-rootfs-overlay
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/ssh-rootfs-overlay all
 	@echo "=== Running SSH smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_HOST_SSH_PORT=$(SODEX_HOST_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_SIGNER_PORT=$(SODEX_SSH_SIGNER_PORT) python3 $(BASEDIR)/src/test/run_qemu_ssh_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-init-rc:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_INITDEFAULT_RUNLEVEL=server-headless SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_SIGNER_PORT=$(SODEX_SSH_SIGNER_PORT) SODEX_SSH_HOSTKEY_ED25519_SEED=$(SODEX_SSH_HOSTKEY_ED25519_SEED) SODEX_SSH_RNG_SEED=$(SODEX_SSH_RNG_SEED) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/init-rc-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/init-rc-rootfs-overlay all
+	@echo "=== Running init rc smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) python3 $(BASEDIR)/src/test/run_qemu_init_rc_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-service:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_INITDEFAULT_RUNLEVEL=server-headless SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_SIGNER_PORT=$(SODEX_SSH_SIGNER_PORT) SODEX_SSH_HOSTKEY_ED25519_SEED=$(SODEX_SSH_HOSTKEY_ED25519_SEED) SODEX_SSH_RNG_SEED=$(SODEX_SSH_RNG_SEED) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/service-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/service-rootfs-overlay all
+	@echo "=== Running service smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_HOST_SSH_PORT=$(SODEX_HOST_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) python3 $(BASEDIR)/src/test/run_qemu_service_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-jobs:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_INITDEFAULT_RUNLEVEL=server-headless SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_SIGNER_PORT=$(SODEX_SSH_SIGNER_PORT) SODEX_SSH_HOSTKEY_ED25519_SEED=$(SODEX_SSH_HOSTKEY_ED25519_SEED) SODEX_SSH_RNG_SEED=$(SODEX_SSH_RNG_SEED) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/jobs-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/jobs-rootfs-overlay all
+	@echo "=== Running job control smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_HOST_SSH_PORT=$(SODEX_HOST_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) python3 $(BASEDIR)/src/test/run_qemu_job_control_smoke.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

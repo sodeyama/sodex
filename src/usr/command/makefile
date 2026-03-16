@@ -19,6 +19,7 @@ SSHD_EXTRA_OBJS = \
 SSHD_CFLAGS = $(filter-out -O0,$(CFLAGS)) -O2 -march=i486 -msoft-float -mno-mmx -mno-sse -mno-sse2
 
 ESHELL  = ${USRDIR}/bin/eshell
+SH      = ${USRDIR}/bin/sh
 LS      = ${USRDIR}/bin/ls
 CAT     = ${USRDIR}/bin/cat
 PS      = ${USRDIR}/bin/ps
@@ -33,11 +34,15 @@ SEND    = ${USRDIR}/bin/send
 PING    = ${USRDIR}/bin/ping
 TERM    = ${USRDIR}/bin/term
 SSHD    = ${USRDIR}/bin/sshd
+SERVICE = ${USRDIR}/bin/service
+SSD     = ${USRDIR}/bin/start-stop-daemon
+RCORDER = ${USRDIR}/bin/rc-order
 TOUCH   = ${USRDIR}/bin/touch
 MKDIR   = ${USRDIR}/bin/mkdir
 RM      = ${USRDIR}/bin/rm
 RMDIR   = ${USRDIR}/bin/rmdir
 MV      = ${USRDIR}/bin/mv
+SLEEP   = ${USRDIR}/bin/sleep
 VI      = ${USRDIR}/bin/vi
 UTF8DEMO = ${USRDIR}/bin/utf8demo
 MEMGROW = ${USRDIR}/bin/memgrow
@@ -45,6 +50,7 @@ FSLARGE = ${USRDIR}/bin/fslarge
 
 all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/sh.o -o ${SH} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ls.o -o ${LS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/cat.o -o ${CAT} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ps.o -o ${PS} ${STATIC_LIBS}
@@ -59,11 +65,15 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ping.o -o ${PING} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/term.o -o ${TERM} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/sshd.o ${SSHD_EXTRA_OBJS} -o ${SSHD} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/service.o -o ${SERVICE} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/start-stop-daemon.o -o ${SSD} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/rc-order.o -o ${RCORDER} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/touch.o -o ${TOUCH} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/mkdir.o -o ${MKDIR} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/rm.o -o ${RM} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/rmdir.o -o ${RMDIR} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/mv.o -o ${MV} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/sleep.o -o ${SLEEP} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/vi.o -o ${VI} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/utf8demo.o -o ${UTF8DEMO} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/memgrow.o -o ${MEMGROW} ${STATIC_LIBS}

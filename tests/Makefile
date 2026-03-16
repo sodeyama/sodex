@@ -9,7 +9,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -382,6 +382,30 @@ test_eshell_parser: test_eshell_parser.c test_eshell_parser_parser.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_eshell_parser.c test_eshell_parser_parser.o
 
 test_eshell_parser_parser.o: $(SRC)/usr/lib/libc/eshell_parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# shell core tests
+test_shell_core: test_shell_core.c test_shell_core_parser.o test_shell_core_vars.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_shell_core.c test_shell_core_parser.o test_shell_core_vars.o
+
+test_shell_core_parser.o: $(SRC)/usr/lib/libc/shell_parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_shell_core_vars.o: $(SRC)/usr/lib/libc/shell_vars.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# userland stdlib tests
+test_usr_stdlib: test_usr_stdlib.c test_usr_stdlib_stdlib.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_usr_stdlib.c test_usr_stdlib_stdlib.o
+
+test_usr_stdlib_stdlib.o: $(SRC)/usr/lib/libc/stdlib.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# init policy tests
+test_init_policy: test_init_policy.c test_init_policy_policy.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_init_policy.c test_init_policy_policy.o
+
+test_init_policy_policy.o: $(SRC)/usr/lib/libc/init_policy.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:

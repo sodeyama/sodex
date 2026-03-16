@@ -32,6 +32,7 @@ EXTERN volatile u_int32_t kernel_tick;
 PUBLIC volatile int process_in_timer_interrupt = FALSE;
 
 PRIVATE TSS tss;
+PRIVATE struct task_struct *g_init_task;
 
 PRIVATE void set_prev_context(struct task_struct* prev, u_int16_t cs,
                               u_int16_t ds, u_int32_t eip,
@@ -41,10 +42,14 @@ PRIVATE void set_prev_context(struct task_struct* prev, u_int16_t cs,
                               int is_usermode);
 PRIVATE void _exit();
 PRIVATE int maxsignal(u_int32_t signal);
+PRIVATE void reparent_children(struct task_struct *task);
+PRIVATE pid_t reap_child(struct task_struct *task, int *status);
+PRIVATE int child_is_live(const struct task_struct *task);
 
 PUBLIC void init_process()
 {
   current = (struct task_struct *)0;
+  g_init_task = (struct task_struct *)0;
 
   u_int16_t sel = allocSel();
   u_int16_t type_tss = 0x89;
@@ -61,6 +66,7 @@ PUBLIC void init_process()
     _kputs(" PROCESS: execve failed\n");
     return;
   }
+  g_init_task = current;
   struct task_struct* next = dlist_entry(current->run_list.next,
                                          struct task_struct, run_list);
   tss.esp0 = next->esp0;
@@ -261,7 +267,7 @@ PUBLIC void schedule()
 
 PUBLIC void sys_exit(int status)
 {
-  (void)status; /* unused for now */
+  current->exit_status = status;
   current->state = TASK_ZOMBIE;
   for(;;);
 }
@@ -270,7 +276,9 @@ PRIVATE void _exit()
 {
   struct task_struct* next = dlist_entry(current->run_list.next,
                                          struct task_struct, run_list);
+  reparent_children(current);
   files_close_all(current->files);
+  dlist_remove(&(current->sibling));
   dlist_remove(&(current->run_list));
   current = next;
   schedule();
@@ -278,28 +286,52 @@ PRIVATE void _exit()
 
 PUBLIC int sys_waitpid(pid_t pid, int *status, int options)
 {
+  if ((options & (~WNOHANG)) != 0)
+    return ERROR_WAITPID;
+
   while (TRUE) {
     struct dlist_set* plist = &(current->children);
     struct dlist_set* pos;
-    // The child does't exist
+    struct task_struct *matched = NULL;
+    struct task_struct *zombie = NULL;
+
     if (plist->next == plist)
       return ERROR_WAITPID;
 
-    struct task_struct* p = NULL;
-    int existflag = 0;
     dlist_for_each(pos, plist) {
-      p = dlist_entry(pos, struct task_struct, sibling);
-      if (p->pid == pid) {
-        existflag = 1;
-        break;
+      struct task_struct *child = dlist_entry(pos, struct task_struct, sibling);
+
+      if (pid == -1) {
+        matched = child;
+        if (child->state == TASK_ZOMBIE) {
+          zombie = child;
+          break;
+        }
+        continue;
       }
+
+      if (child->pid != pid)
+        continue;
+
+      matched = child;
+      if (child->state == TASK_ZOMBIE)
+        zombie = child;
+      break;
     }
-    if (existflag == 0)
+
+    if (matched == NULL)
       return ERROR_WAITPID;
 
-    if (p->state == TASK_ZOMBIE) {
-      p->state = TASK_STOPPED;
-      return p->pid;
+    if (zombie != NULL)
+      return reap_child(zombie, status);
+
+    if ((options & WNOHANG) != 0)
+      return 0;
+
+    enableInterrupt();
+    while (matched != NULL && matched->state != TASK_ZOMBIE) {
+      if (pid == -1)
+        break;
     }
   }
 }
@@ -416,7 +448,10 @@ PUBLIC void wakeup(struct wait_queue **wq)
 
 PUBLIC int process_has_pid(pid_t pid)
 {
-  return process_find_pid(pid) != 0;
+  struct task_struct *task = process_find_pid(pid);
+  if (task == 0)
+    return 0;
+  return child_is_live(task);
 }
 
 PUBLIC struct task_struct *process_find_pid(pid_t pid)
@@ -424,7 +459,7 @@ PUBLIC struct task_struct *process_find_pid(pid_t pid)
   struct dlist_set *plist;
   struct dlist_set *pos;
 
-  if (pid <= 0 || current == (struct task_struct *)0)
+  if (pid < 0 || current == (struct task_struct *)0)
     return 0;
 
   if (current->pid == pid)
@@ -437,4 +472,53 @@ PUBLIC struct task_struct *process_find_pid(pid_t pid)
       return proc;
   }
   return 0;
+}
+
+PUBLIC struct task_struct *process_init_task(void)
+{
+  return g_init_task;
+}
+
+PRIVATE void reparent_children(struct task_struct *task)
+{
+  struct task_struct *init_task = g_init_task;
+  struct dlist_set *pos;
+  struct dlist_set *next;
+
+  if (task == NULL || init_task == NULL || task == init_task)
+    return;
+
+  pos = task->children.next;
+  while (pos != &(task->children)) {
+    struct task_struct *child = dlist_entry(pos, struct task_struct, sibling);
+    next = pos->next;
+    dlist_remove(&(child->sibling));
+    child->parent = init_task;
+    dlist_insert_after(&(child->sibling), &(init_task->children));
+    pos = next;
+  }
+}
+
+PRIVATE pid_t reap_child(struct task_struct *task, int *status)
+{
+  pid_t pid;
+
+  if (task == NULL)
+    return ERROR_WAITPID;
+
+  pid = task->pid;
+  if (status != NULL)
+    *status = task->exit_status;
+  files_close_all(task->files);
+  dlist_remove(&(task->sibling));
+  dlist_remove(&(task->run_list));
+  task->state = TASK_STOPPED;
+  return pid;
+}
+
+PRIVATE int child_is_live(const struct task_struct *task)
+{
+  if (task == NULL)
+    return FALSE;
+  return task->state != TASK_ZOMBIE && task->state != TASK_STOPPED;
 }

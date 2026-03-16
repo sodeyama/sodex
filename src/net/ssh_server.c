@@ -8,6 +8,8 @@
 #elif defined(USERLAND_SSHD_BUILD)
 #include <sodex/const.h>
 #include <admin_server.h>
+#include <server_audit.h>
+#include <server_runtime_config.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -251,7 +253,7 @@ PRIVATE int ssh_userland_load_config(void)
     return 0;
 
   ssh_userland_reset_config();
-  if (get_admin_ssh_config(&ssh_userland_runtime) < 0)
+  if (get_server_ssh_config(&ssh_userland_runtime) < 0)
     return -1;
 
   ssh_userland_config_loaded = TRUE;
@@ -265,7 +267,7 @@ PRIVATE int ssh_userland_has_hostkey(void)
          ssh_userland_runtime.ssh_hostkey_ed25519_seed[0] != '\0';
 }
 
-PUBLIC int admin_runtime_ssh_enabled(void)
+PUBLIC int server_runtime_ssh_enabled(void)
 {
   ssh_userland_load_config();
   return ssh_userland_runtime.ssh_port != 0 &&
@@ -274,49 +276,49 @@ PUBLIC int admin_runtime_ssh_enabled(void)
          ssh_userland_runtime.ssh_rng_seed[0] != '\0';
 }
 
-PUBLIC int admin_runtime_ssh_port(void)
+PUBLIC int server_runtime_ssh_port(void)
 {
   ssh_userland_load_config();
   return (int)ssh_userland_runtime.ssh_port;
 }
 
-PUBLIC const char *admin_runtime_ssh_password(void)
+PUBLIC const char *server_runtime_ssh_password(void)
 {
   ssh_userland_load_config();
   return ssh_userland_runtime.ssh_password;
 }
 
-PUBLIC int admin_runtime_ssh_signer_port(void)
+PUBLIC int server_runtime_ssh_signer_port(void)
 {
   ssh_userland_load_config();
   return (int)ssh_userland_runtime.ssh_signer_port;
 }
 
-PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_seed(void)
+PUBLIC const char *server_runtime_ssh_hostkey_ed25519_seed(void)
 {
   ssh_userland_load_config();
   return ssh_userland_runtime.ssh_hostkey_ed25519_seed;
 }
 
-PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_public(void)
+PUBLIC const char *server_runtime_ssh_hostkey_ed25519_public(void)
 {
   ssh_userland_load_config();
   return ssh_userland_runtime.ssh_hostkey_ed25519_public;
 }
 
-PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_secret(void)
+PUBLIC const char *server_runtime_ssh_hostkey_ed25519_secret(void)
 {
   ssh_userland_load_config();
   return ssh_userland_runtime.ssh_hostkey_ed25519_secret;
 }
 
-PUBLIC const char *admin_runtime_ssh_rng_seed(void)
+PUBLIC const char *server_runtime_ssh_rng_seed(void)
 {
   ssh_userland_load_config();
   return ssh_userland_runtime.ssh_rng_seed;
 }
 
-PUBLIC void admin_runtime_audit_line(const char *line)
+PUBLIC void server_audit_line(const char *line)
 {
   if (line == 0 || line[0] == '\0')
     return;
@@ -326,7 +328,7 @@ PUBLIC void admin_runtime_audit_line(const char *line)
   debug_write("\n", 1);
 }
 
-PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
+PUBLIC void server_audit_note_listener_ready(int listener_kind)
 {
   char message[SSH_USERLAND_AUDIT_LINE_SIZE];
   int pos = 0;
@@ -337,21 +339,21 @@ PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
   ssh_userland_listener_ready = TRUE;
   ssh_userland_copy_string(message, sizeof(message), "listener_ready kind=ssh port=");
   pos = (int)strlen(message);
-  if (admin_runtime_ssh_port() >= 10000) {
-    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 10000) % 10);
+  if (server_runtime_ssh_port() >= 10000) {
+    message[pos++] = (char)('0' + (server_runtime_ssh_port() / 10000) % 10);
   }
-  if (admin_runtime_ssh_port() >= 1000) {
-    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 1000) % 10);
+  if (server_runtime_ssh_port() >= 1000) {
+    message[pos++] = (char)('0' + (server_runtime_ssh_port() / 1000) % 10);
   }
-  if (admin_runtime_ssh_port() >= 100) {
-    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 100) % 10);
+  if (server_runtime_ssh_port() >= 100) {
+    message[pos++] = (char)('0' + (server_runtime_ssh_port() / 100) % 10);
   }
-  if (admin_runtime_ssh_port() >= 10) {
-    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 10) % 10);
+  if (server_runtime_ssh_port() >= 10) {
+    message[pos++] = (char)('0' + (server_runtime_ssh_port() / 10) % 10);
   }
-  message[pos++] = (char)('0' + (admin_runtime_ssh_port() % 10));
+  message[pos++] = (char)('0' + (server_runtime_ssh_port() % 10));
   message[pos] = '\0';
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PUBLIC int admin_authorize_peer(u_int32_t peer_addr, u_int32_t *retry_after_ticks)
@@ -425,7 +427,7 @@ PUBLIC int socket_try_accept(int sockfd, struct sockaddr_in *addr)
   if (child_fd < 0) {
     return child_fd;
   }
-  admin_runtime_audit_line("ssh_accept_nowait_ok");
+  server_audit_line("ssh_accept_nowait_ok");
   if (child_fd >= 0 && child_fd < MAX_SOCKETS) {
     memset(&socket_table[child_fd], 0, sizeof(socket_table[child_fd]));
     socket_table[child_fd].state = SOCK_STATE_CONNECTED;
@@ -475,6 +477,11 @@ PUBLIC int kern_recv(int sockfd, void *buf, int len, int flags)
 {
   int ret = recv_msg(sockfd, buf, len, flags);
 
+  if (ret == 0 && sockfd >= 0 && sockfd < MAX_SOCKETS &&
+      socket_table[sockfd].state != SOCK_STATE_UNUSED) {
+    socket_table[sockfd].state = SOCK_STATE_CLOSED;
+    socket_table[sockfd].tx_pending = 0;
+  }
   ssh_userland_refresh_socket(sockfd);
   return ret;
 }
@@ -491,6 +498,11 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
 {
   int ret = recvfrom(sockfd, buf, len, flags, (struct sockaddr *)addr, 0);
 
+  if (ret == 0 && sockfd >= 0 && sockfd < MAX_SOCKETS &&
+      socket_table[sockfd].state != SOCK_STATE_UNUSED) {
+    socket_table[sockfd].state = SOCK_STATE_CLOSED;
+    socket_table[sockfd].tx_pending = 0;
+  }
   ssh_userland_refresh_socket(sockfd);
   return ret;
 }
@@ -668,6 +680,7 @@ PUBLIC int sys_kill(pid_t pid, int sig)
 
 #include <ssh_server.h>
 #include <ssh_crypto.h>
+#include <ssh_runtime_policy.h>
 
 #ifndef TEST_BUILD
 
@@ -789,6 +802,7 @@ struct ssh_connection {
   int tx_encrypted;
   int rx_encrypted;
   int auth_done;
+  int auth_failures;
   int userauth_service_ready;
   char username[32];
   char banner_buf[SSH_BANNER_MAX];
@@ -1012,7 +1026,7 @@ PRIVATE void ssh_audit_peer(const char *prefix, u_int32_t peer_addr)
   ssh_copy_string(message + strlen(message),
                   (int)sizeof(message) - (int)strlen(message),
                   ipbuf);
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE void ssh_audit_start(u_int32_t peer_addr, pid_t pid)
@@ -1053,7 +1067,7 @@ PRIVATE void ssh_audit_start(u_int32_t peer_addr, pid_t pid)
   ssh_copy_string(message + strlen(message),
                   (int)sizeof(message) - (int)strlen(message),
                   pidbuf);
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE void ssh_audit_close(u_int32_t peer_addr, const char *reason)
@@ -1075,7 +1089,7 @@ PRIVATE void ssh_audit_close(u_int32_t peer_addr, const char *reason)
                     (int)sizeof(message) - (int)strlen(message),
                     reason);
   }
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE void ssh_audit_state(const char *prefix, int value)
@@ -1121,7 +1135,7 @@ PRIVATE void ssh_audit_state(const char *prefix, int value)
                     (int)sizeof(message) - (int)strlen(message),
                     digit_text);
   }
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE int ssh_socket_tx_pending(int sockfd)
@@ -1141,7 +1155,7 @@ PRIVATE int ssh_socket_tx_pending(int sockfd)
   pfd.events = POLLOUT | POLLHUP;
   pfd.revents = 0;
   if (poll(&pfd, 1, 0) < 0) {
-    admin_runtime_audit_line("ssh_tx_poll_error");
+    server_audit_line("ssh_tx_poll_error");
     return socket_table[sockfd].tx_pending != 0;
   }
   if ((pfd.revents & POLLHUP) != 0) {
@@ -1396,22 +1410,22 @@ PRIVATE int ssh_load_runtime_config(void)
 {
   u_int8_t seed[SSH_CRYPTO_SEED_BYTES];
 
-  if (admin_runtime_ssh_hostkey_ed25519_public()[0] != '\0' &&
-      admin_runtime_ssh_hostkey_ed25519_secret()[0] != '\0') {
-    if (ssh_crypto_hex_to_bytes(admin_runtime_ssh_hostkey_ed25519_public(),
+  if (server_runtime_ssh_hostkey_ed25519_public()[0] != '\0' &&
+      server_runtime_ssh_hostkey_ed25519_secret()[0] != '\0') {
+    if (ssh_crypto_hex_to_bytes(server_runtime_ssh_hostkey_ed25519_public(),
                                 ssh_hostkey_public,
                                 sizeof(ssh_hostkey_public)) < 0) {
       ssh_runtime_loaded = FALSE;
       return -1;
     }
-    if (ssh_crypto_hex_to_bytes(admin_runtime_ssh_hostkey_ed25519_secret(),
+    if (ssh_crypto_hex_to_bytes(server_runtime_ssh_hostkey_ed25519_secret(),
                                 ssh_hostkey_secret,
                                 sizeof(ssh_hostkey_secret)) < 0) {
       ssh_runtime_loaded = FALSE;
       return -1;
     }
   } else {
-    if (ssh_crypto_hex_to_bytes(admin_runtime_ssh_hostkey_ed25519_seed(),
+    if (ssh_crypto_hex_to_bytes(server_runtime_ssh_hostkey_ed25519_seed(),
                                 seed, sizeof(seed)) < 0) {
       ssh_runtime_loaded = FALSE;
       return -1;
@@ -1422,7 +1436,7 @@ PRIVATE int ssh_load_runtime_config(void)
       return -1;
     }
   }
-  if (ssh_crypto_hex_to_bytes(admin_runtime_ssh_rng_seed(),
+  if (ssh_crypto_hex_to_bytes(server_runtime_ssh_rng_seed(),
                               ssh_runtime_rng_seed,
                               sizeof(ssh_runtime_rng_seed)) < 0) {
     ssh_runtime_loaded = FALSE;
@@ -1452,7 +1466,7 @@ PRIVATE int ssh_create_listener(int port)
     return -1;
   }
 
-  admin_runtime_note_listener_ready(ADMIN_LISTENER_SSH);
+  server_audit_note_listener_ready(ADMIN_LISTENER_SSH);
   return fd;
 }
 
@@ -1466,12 +1480,12 @@ PRIVATE int ssh_send_banner(struct ssh_connection *conn)
   }
   ssh_audit_state("ssh_send_banner_fd", conn->fd);
   if (kern_send(conn->fd, (void *)SSH_BANNER, (int)strlen(SSH_BANNER), 0) < 0) {
-    admin_runtime_audit_line("ssh_send_banner_failed");
+    server_audit_line("ssh_send_banner_failed");
     return -1;
   }
   conn->banner_sent = TRUE;
   conn->last_activity_tick = kernel_tick;
-  admin_runtime_audit_line("ssh_send_banner_ok");
+  server_audit_line("ssh_send_banner_ok");
   return 0;
 }
 
@@ -1595,11 +1609,11 @@ PRIVATE int ssh_build_kexinit_payload(struct ssh_connection *conn)
   struct ssh_writer writer;
   u_int8_t cookie[16];
 
-  admin_runtime_audit_line("ssh_kexinit_build_enter");
+  server_audit_line("ssh_kexinit_build_enter");
   ssh_writer_init(&writer, conn->server_kexinit, sizeof(conn->server_kexinit));
   ssh_writer_put_byte(&writer, SSH_MSG_KEXINIT);
   ssh_runtime_random_fill(cookie, sizeof(cookie));
-  admin_runtime_audit_line("ssh_kexinit_cookie_done");
+  server_audit_line("ssh_kexinit_cookie_done");
   ssh_writer_put_data(&writer, cookie, sizeof(cookie));
   ssh_writer_put_cstring(&writer, "curve25519-sha256,curve25519-sha256@libssh.org");
   ssh_writer_put_cstring(&writer, "ssh-ed25519");
@@ -1616,7 +1630,7 @@ PRIVATE int ssh_build_kexinit_payload(struct ssh_connection *conn)
   if (writer.error)
     return -1;
   conn->server_kexinit_len = writer.len;
-  admin_runtime_audit_line("ssh_kexinit_build_done");
+  server_audit_line("ssh_kexinit_build_done");
   return 0;
 }
 
@@ -1624,14 +1638,14 @@ PRIVATE int ssh_queue_kexinit(struct ssh_connection *conn)
 {
   if (conn->kexinit_sent)
     return 0;
-  admin_runtime_audit_line("ssh_kexinit_queue_enter");
+  server_audit_line("ssh_kexinit_queue_enter");
   if (ssh_build_kexinit_payload(conn) < 0)
     return -1;
   if (ssh_queue_payload(conn, conn->server_kexinit,
                         conn->server_kexinit_len, FALSE) < 0) {
     return -1;
   }
-  admin_runtime_audit_line("ssh_kexinit_queue_done");
+  server_audit_line("ssh_kexinit_queue_done");
   ssh_audit_state("ssh_kexinit_out_count", conn->out_count);
   conn->kexinit_sent = TRUE;
   ssh_audit_state("ssh_kexinit_len", conn->server_kexinit_len);
@@ -1754,7 +1768,7 @@ PRIVATE void ssh_close_signer_socket(void)
 
 PRIVATE int ssh_get_signer_socket(void)
 {
-  if (admin_runtime_ssh_signer_port() <= 0) {
+  if (server_runtime_ssh_signer_port() <= 0) {
     ssh_close_signer_socket();
     return -1;
   }
@@ -1774,7 +1788,7 @@ PRIVATE int ssh_request_host_signature(
 #ifdef USERLAND_SSHD_BUILD
   memcpy(request, SSH_SIGNER_MAGIC, SSH_SIGNER_MAGIC_BYTES);
   memcpy(request + SSH_SIGNER_MAGIC_BYTES, hash, SSH_CRYPTO_SHA256_BYTES);
-  if (ssh_signer_roundtrip(admin_runtime_ssh_signer_port(),
+  if (ssh_signer_roundtrip(server_runtime_ssh_signer_port(),
                            request, sizeof(request),
                            response, sizeof(response)) < 0)
     return -1;
@@ -1795,7 +1809,7 @@ PRIVATE int ssh_request_host_signature(
     return -1;
 
   network_fill_gateway_addr(&signer_addr,
-                            (u_int16_t)admin_runtime_ssh_signer_port());
+                            (u_int16_t)server_runtime_ssh_signer_port());
   memcpy(request, SSH_SIGNER_MAGIC, SSH_SIGNER_MAGIC_BYTES);
   memcpy(request + SSH_SIGNER_MAGIC_BYTES, hash, SSH_CRYPTO_SHA256_BYTES);
   if (kern_sendto(fd, request, sizeof(request), 0, &signer_addr) !=
@@ -1835,7 +1849,7 @@ PRIVATE int ssh_request_host_curve25519(
   memcpy(request + SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES,
          client_public,
          SSH_CRYPTO_CURVE25519_BYTES);
-  if (ssh_signer_roundtrip(admin_runtime_ssh_signer_port(),
+  if (ssh_signer_roundtrip(server_runtime_ssh_signer_port(),
                            request, sizeof(request),
                            response, sizeof(response)) < 0)
     return -1;
@@ -1859,7 +1873,7 @@ PRIVATE int ssh_request_host_curve25519(
     return -1;
 
   network_fill_gateway_addr(&signer_addr,
-                            (u_int16_t)admin_runtime_ssh_signer_port());
+                            (u_int16_t)server_runtime_ssh_signer_port());
   memcpy(request, SSH_CURVE25519_MAGIC, SSH_SIGNER_MAGIC_BYTES);
   memcpy(request + SSH_SIGNER_MAGIC_BYTES,
          server_secret,
@@ -1928,7 +1942,7 @@ PRIVATE void ssh_audit_sign_mode(const char *mode, int signer_port)
                     (int)sizeof(message) - (int)strlen(message),
                     portbuf);
   }
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE const char *ssh_protocol_close_reason(const u_int8_t *payload,
@@ -2047,14 +2061,14 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   struct ssh_reader reader;
   struct ssh_writer writer;
 
-  use_remote_signer = (admin_runtime_ssh_signer_port() > 0) ? TRUE : FALSE;
+  use_remote_signer = (server_runtime_ssh_signer_port() > 0) ? TRUE : FALSE;
 
-  ssh_audit_sign_mode("kex_start", admin_runtime_ssh_signer_port());
+  ssh_audit_sign_mode("kex_start", server_runtime_ssh_signer_port());
   ssh_reader_init(&reader, payload + 1, payload_len - 1);
   ssh_reader_get_string(&reader, &client_public, &client_public_len);
   if (reader.error || client_public_len != SSH_CRYPTO_CURVE25519_BYTES)
     return -1;
-  admin_runtime_audit_line("ssh_kex_client_public_ok");
+  server_audit_line("ssh_kex_client_public_ok");
 
   ssh_crypto_random_seed(ssh_runtime_rng_seed);
   ssh_runtime_random_reset();
@@ -2063,7 +2077,7 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   if (use_remote_signer) {
     if (ssh_request_host_curve25519(ssh_kex_server_public, ssh_kex_shared_secret,
                                     ssh_kex_server_secret, client_public) < 0) {
-      admin_runtime_audit_line("ssh_kex_curve_remote_failed");
+      server_audit_line("ssh_kex_curve_remote_failed");
       return -1;
     }
   } else {
@@ -2073,17 +2087,17 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
     if (ssh_crypto_curve25519_shared(ssh_kex_shared_secret,
                                      ssh_kex_server_secret,
                                      client_public) < 0) {
-      admin_runtime_audit_line("ssh_kex_curve_local_failed");
+      server_audit_line("ssh_kex_curve_local_failed");
       return -1;
     }
   }
-  admin_runtime_audit_line("ssh_kex_curve_done");
+  server_audit_line("ssh_kex_curve_done");
 
   hostkey_len = ssh_build_hostkey_blob(ssh_kex_hostkey_blob,
                                        sizeof(ssh_kex_hostkey_blob));
   if (hostkey_len < 0)
     return -1;
-  admin_runtime_audit_line("ssh_kex_hostkey_blob_done");
+  server_audit_line("ssh_kex_hostkey_blob_done");
 
   ssh_writer_init(&writer, ssh_kex_hash_input, sizeof(ssh_kex_hash_input));
   ssh_writer_put_string(&writer,
@@ -2109,15 +2123,15 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   ssh_crypto_sha256(conn->exchange_hash,
                     ssh_kex_hash_input,
                     (size_t)hash_input_len);
-  admin_runtime_audit_line("ssh_kex_hash_done");
+  server_audit_line("ssh_kex_hash_done");
   if (!conn->session_id_set) {
     memcpy(conn->session_id, conn->exchange_hash, sizeof(conn->session_id));
     conn->session_id_set = TRUE;
   }
   if (use_remote_signer) {
-    ssh_audit_sign_mode("remote", admin_runtime_ssh_signer_port());
+    ssh_audit_sign_mode("remote", server_runtime_ssh_signer_port());
     if (ssh_request_host_signature(ssh_kex_signature, conn->exchange_hash) < 0) {
-      ssh_audit_sign_mode("remote_fail", admin_runtime_ssh_signer_port());
+      ssh_audit_sign_mode("remote_fail", server_runtime_ssh_signer_port());
       return -1;
     }
   } else {
@@ -2129,7 +2143,7 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
       return -1;
     }
   }
-  ssh_audit_sign_mode("sign_done", admin_runtime_ssh_signer_port());
+  ssh_audit_sign_mode("sign_done", server_runtime_ssh_signer_port());
 
   ssh_writer_init(&writer, ssh_kex_signature_blob, sizeof(ssh_kex_signature_blob));
   ssh_writer_put_cstring(&writer, "ssh-ed25519");
@@ -2139,12 +2153,12 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   if (writer.error)
     return -1;
   signature_len = writer.len;
-  ssh_audit_sign_mode("sig_blob_done", admin_runtime_ssh_signer_port());
+  ssh_audit_sign_mode("sig_blob_done", server_runtime_ssh_signer_port());
 
   ssh_derive_key_material(conn,
                           ssh_kex_shared_secret,
                           sizeof(ssh_kex_shared_secret));
-  ssh_audit_sign_mode("derive_done", admin_runtime_ssh_signer_port());
+  ssh_audit_sign_mode("derive_done", server_runtime_ssh_signer_port());
 
   ssh_writer_init(&writer, ssh_kex_reply, sizeof(ssh_kex_reply));
   ssh_writer_put_byte(&writer, SSH_MSG_KEX_ECDH_REPLY);
@@ -2158,15 +2172,15 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   if (ssh_queue_payload(conn, ssh_kex_reply, writer.len, FALSE) < 0)
     return -1;
   ssh_audit_state("ssh_reply_payload_len", writer.len);
-  ssh_audit_sign_mode("reply_done", admin_runtime_ssh_signer_port());
+  ssh_audit_sign_mode("reply_done", server_runtime_ssh_signer_port());
 
   ssh_kex_reply[0] = SSH_MSG_NEWKEYS;
   if (ssh_queue_payload(conn, ssh_kex_reply, 1, TRUE) < 0)
     return -1;
   ssh_audit_state("ssh_newkeys_payload_len", 1);
-  ssh_audit_sign_mode("newkeys_done", admin_runtime_ssh_signer_port());
+  ssh_audit_sign_mode("newkeys_done", server_runtime_ssh_signer_port());
   conn->newkeys_sent = TRUE;
-  admin_runtime_audit_line("ssh_kex_return");
+  server_audit_line("ssh_kex_return");
   return 0;
 }
 
@@ -2204,6 +2218,20 @@ PRIVATE int ssh_queue_userauth_failure(struct ssh_connection *conn)
   if (writer.error)
     return -1;
   return ssh_queue_payload(conn, payload, writer.len, FALSE);
+}
+
+PRIVATE int ssh_handle_auth_failure(struct ssh_connection *conn)
+{
+  conn->auth_failures++;
+  ssh_audit_peer("ssh_auth_failure", conn->peer_addr);
+  ssh_audit_state("ssh_auth_fail_count", conn->auth_failures);
+
+  if (!ssh_auth_failure_should_close(conn->auth_failures))
+    return ssh_queue_userauth_failure(conn);
+
+  ssh_audit_peer("ssh_auth_retry_limit", conn->peer_addr);
+  ssh_queue_close(conn, "auth_retry_limit");
+  return 0;
 }
 
 PRIVATE int ssh_queue_channel_open_confirmation(struct ssh_connection *conn)
@@ -2276,7 +2304,7 @@ PRIVATE int ssh_start_pending_shell(struct ssh_connection *conn)
     return 1;
   }
 
-  admin_runtime_audit_line("ssh_spawn_begin");
+  server_audit_line("ssh_spawn_begin");
   tty = tty_alloc_pty();
   if (tty == 0) {
     conn->channel.shell_start_pending = FALSE;
@@ -2312,7 +2340,7 @@ PRIVATE int ssh_start_pending_shell(struct ssh_connection *conn)
   conn->channel.shell_start_tick = 0;
   conn->channel.shell_started_tick = kernel_tick;
   conn->channel.prompt_kick_pending = TRUE;
-  admin_runtime_audit_line("ssh_spawn_ok");
+  server_audit_line("ssh_spawn_ok");
   ssh_audit_start(conn->peer_addr, pid);
   if (conn->channel.shell_reply_pending) {
     conn->channel.shell_reply_pending = FALSE;
@@ -2444,7 +2472,7 @@ PRIVATE int ssh_handle_userauth_request(struct ssh_connection *conn,
   int method_len = 0;
   int password_len = 0;
   int change_request;
-  const char *expected_password = admin_runtime_ssh_password();
+  const char *expected_password = server_runtime_ssh_password();
 
   if (!conn->userauth_service_ready)
     return -1;
@@ -2457,7 +2485,7 @@ PRIVATE int ssh_handle_userauth_request(struct ssh_connection *conn,
     return -1;
 
   if (!ssh_bytes_equal(method, method_len, "password")) {
-    return ssh_queue_userauth_failure(conn);
+    return ssh_handle_auth_failure(conn);
   }
 
   change_request = ssh_reader_get_bool(&reader);
@@ -2476,8 +2504,7 @@ PRIVATE int ssh_handle_userauth_request(struct ssh_connection *conn,
     return ssh_queue_userauth_success(conn);
   }
 
-  ssh_audit_peer("ssh_auth_failure", conn->peer_addr);
-  return ssh_queue_userauth_failure(conn);
+  return ssh_handle_auth_failure(conn);
 }
 
 PRIVATE int ssh_handle_channel_open(struct ssh_connection *conn,
@@ -2512,7 +2539,7 @@ PRIVATE int ssh_handle_channel_open(struct ssh_connection *conn,
   conn->channel.local_id = 0;
   conn->channel.cols = SSH_DEFAULT_COLS;
   conn->channel.rows = SSH_DEFAULT_ROWS;
-  admin_runtime_audit_line("ssh_channel_open_ok");
+  server_audit_line("ssh_channel_open_ok");
   return ssh_queue_channel_open_confirmation(conn);
 }
 
@@ -2535,7 +2562,7 @@ PRIVATE int ssh_handle_channel_request(struct ssh_connection *conn,
     return -1;
 
   if (ssh_bytes_equal(request, request_len, "pty-req")) {
-    admin_runtime_audit_line("ssh_pty_req");
+    server_audit_line("ssh_pty_req");
     ssh_reader_get_string(&reader, &ignored, &ignored_len);
     conn->channel.cols = (u_int16_t)ssh_reader_get_u32(&reader);
     conn->channel.rows = (u_int16_t)ssh_reader_get_u32(&reader);
@@ -2551,7 +2578,7 @@ PRIVATE int ssh_handle_channel_request(struct ssh_connection *conn,
   }
 
   if (ssh_bytes_equal(request, request_len, "window-change")) {
-    admin_runtime_audit_line("ssh_window_change");
+    server_audit_line("ssh_window_change");
     conn->channel.cols = (u_int16_t)ssh_reader_get_u32(&reader);
     conn->channel.rows = (u_int16_t)ssh_reader_get_u32(&reader);
     ssh_reader_get_u32(&reader);
@@ -2564,7 +2591,7 @@ PRIVATE int ssh_handle_channel_request(struct ssh_connection *conn,
   }
 
   if (ssh_bytes_equal(request, request_len, "shell")) {
-    admin_runtime_audit_line("ssh_shell_req");
+    server_audit_line("ssh_shell_req");
     if (ssh_spawn_shell(conn) < 0)
       return want_reply ? ssh_queue_channel_status(conn, FALSE) : -1;
     conn->channel.shell_reply_pending = want_reply ? TRUE : FALSE;
@@ -2630,7 +2657,7 @@ PRIVATE int ssh_handle_payload(struct ssh_connection *conn,
     return status;
   }
   case SSH_MSG_NEWKEYS:
-    admin_runtime_audit_line("ssh_newkeys_rx");
+    server_audit_line("ssh_newkeys_rx");
     conn->newkeys_received = TRUE;
     conn->rx_encrypted = TRUE;
     return 0;
@@ -2802,7 +2829,7 @@ PRIVATE int ssh_pump_banner(struct ssh_connection *conn)
       if (strncmp(conn->banner_buf, "SSH-2.0-", 8) != 0)
         return -1;
       conn->banner_received = TRUE;
-      admin_runtime_audit_line("ssh_banner_rx_ok");
+      server_audit_line("ssh_banner_rx_ok");
       if (i + 1 < read_len) {
         if (ssh_append_rx(conn, chunk + i + 1, read_len - i - 1) < 0)
           return -1;
@@ -3005,7 +3032,7 @@ PRIVATE void ssh_accept_pending_connections(void)
   }
 
   ssh_reset_connection(&ssh_conn);
-  admin_runtime_audit_line("ssh_accept_reset_done");
+  server_audit_line("ssh_accept_reset_done");
   ssh_conn.in_use = TRUE;
   ssh_conn.fd = child_fd;
   ssh_conn.peer_addr = peer.sin_addr;
@@ -3013,7 +3040,7 @@ PRIVATE void ssh_accept_pending_connections(void)
   ssh_conn.last_activity_tick = kernel_tick;
   ssh_crypto_random_seed(ssh_runtime_rng_seed);
   ssh_runtime_random_reset();
-  admin_runtime_audit_line("ssh_accept_seed_done");
+  server_audit_line("ssh_accept_seed_done");
   ssh_audit_peer("accept_ssh", peer.sin_addr);
   ssh_audit_state("ssh_accept_fd", child_fd);
 }
@@ -3038,7 +3065,9 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
                                   : SSH_AUTH_TIMEOUT_TICKS;
   if (!conn->closing &&
       (int)(kernel_tick - conn->last_activity_tick) > (int)timeout_ticks) {
-    ssh_queue_close(conn, "timeout");
+    ssh_audit_state(ssh_timeout_audit_label(conn->auth_done),
+                    (int)(kernel_tick - conn->last_activity_tick));
+    ssh_queue_close(conn, ssh_timeout_close_reason(conn->auth_done));
   }
 
   if (ssh_send_banner(conn) < 0) {
@@ -3053,7 +3082,7 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
     if (ssh_pump_banner(conn) < 0)
       ssh_queue_close(conn, "banner_invalid");
     else if (conn->banner_received)
-      admin_runtime_audit_line("ssh_banner_pump_done");
+      server_audit_line("ssh_banner_pump_done");
   }
 
   if (!conn->closing && conn->banner_received) {
@@ -3100,11 +3129,9 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
 
   if (conn->closing &&
       conn->out_count == 0 &&
-      !ssh_socket_tx_pending(conn->fd) &&
-      !conn->close_initiated &&
-      (int)(kernel_tick - conn->close_started_tick) >= SSH_CLOSE_DRAIN_TICKS) {
-    socket_begin_close(conn->fd);
-    conn->close_initiated = TRUE;
+      !ssh_socket_tx_pending(conn->fd)) {
+    ssh_release_connection(conn);
+    return;
   }
 }
 
@@ -3124,18 +3151,18 @@ PUBLIC void ssh_server_tick(void)
 {
   int port;
 
-  if (!admin_runtime_ssh_enabled())
+  if (!server_runtime_ssh_enabled())
     return;
   if (ssh_tick_active)
     return;
   ssh_tick_active = TRUE;
 
   if (!ssh_runtime_loaded && ssh_load_runtime_config() < 0) {
-    admin_runtime_audit_line("ssh_load_failed");
+    server_audit_line("ssh_load_failed");
     goto done;
   }
 
-  port = admin_runtime_ssh_port();
+  port = server_runtime_ssh_port();
   if (port <= 0)
     goto done;
 
@@ -3146,7 +3173,7 @@ PUBLIC void ssh_server_tick(void)
     ssh_listener_port = (ssh_listener_fd >= 0) ? port : 0;
     ssh_audit_state("ssh_listener_fd", ssh_listener_fd);
     if (ssh_listener_fd < 0) {
-      admin_runtime_audit_line("ssh_listener_create_failed");
+      server_audit_line("ssh_listener_create_failed");
       goto done;
     }
   }
@@ -3211,12 +3238,12 @@ int main(int argc, char **argv)
   (void)argv;
 
   ssh_server_init();
-  admin_runtime_audit_line("sshd_main_enter");
+  server_audit_line("sshd_main_enter");
   for (;;) {
     kernel_tick = get_kernel_tick();
     ssh_userland_load_config();
-    if (!admin_runtime_ssh_enabled()) {
-      admin_runtime_audit_line("sshd_wait_config");
+    if (!server_runtime_ssh_enabled()) {
+      server_audit_line("sshd_wait_config");
       sleep_ticks(1);
       continue;
     }
@@ -3225,7 +3252,7 @@ int main(int argc, char **argv)
 
   kernel_tick = get_kernel_tick();
   ssh_server_tick();
-  admin_runtime_audit_line("sshd_bootstrap_done");
+  server_audit_line("sshd_bootstrap_done");
 
   for (;;) {
     ssh_userland_wait_once();

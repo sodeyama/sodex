@@ -20,6 +20,8 @@ EXTERN volatile u_int32_t kernel_tick;
 #endif
 
 #include <debug_shell_server.h>
+#include <server_audit.h>
+#include <server_runtime_config.h>
 
 #define DEBUG_SHELL_PREFACE_MAX ADMIN_TEXT_REQUEST_MAX
 #define DEBUG_SHELL_AUDIT_LINE_SIZE 96
@@ -170,7 +172,7 @@ PRIVATE void debug_shell_audit_peer(const char *prefix, u_int32_t peer_addr)
   debug_shell_copy_string(message + strlen(message),
                           (int)sizeof(message) - (int)strlen(message),
                           ipbuf);
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE void debug_shell_audit_start(u_int32_t peer_addr, pid_t pid)
@@ -210,7 +212,7 @@ PRIVATE void debug_shell_audit_start(u_int32_t peer_addr, pid_t pid)
   debug_shell_copy_string(message + strlen(message),
                           (int)sizeof(message) - (int)strlen(message),
                           pidbuf);
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE void debug_shell_audit_close(u_int32_t peer_addr, const char *reason)
@@ -232,7 +234,7 @@ PRIVATE void debug_shell_audit_close(u_int32_t peer_addr, const char *reason)
                             (int)sizeof(message) - (int)strlen(message),
                             reason);
   }
-  admin_runtime_audit_line(message);
+  server_audit_line(message);
 }
 
 PRIVATE void debug_shell_fill_bind_addr(struct sockaddr_in *addr, u_int16_t port)
@@ -264,8 +266,6 @@ PRIVATE int debug_shell_create_listener(int port)
 {
   struct sockaddr_in addr;
   int fd = kern_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  char message[DEBUG_SHELL_AUDIT_LINE_SIZE];
-
   if (fd < 0)
     return -1;
 
@@ -279,35 +279,7 @@ PRIVATE int debug_shell_create_listener(int port)
     return -1;
   }
 
-  message[0] = '\0';
-  debug_shell_copy_string(message, sizeof(message),
-                          "listener_ready kind=debug_shell port=");
-  {
-    char portbuf[8];
-    int value = port;
-    int len = 0;
-
-    if (value == 0) {
-      portbuf[len++] = '0';
-    } else {
-      char digits[8];
-      while (value > 0 && len < (int)sizeof(digits)) {
-        digits[len++] = (char)('0' + (value % 10));
-        value /= 10;
-      }
-      {
-        int i;
-        for (i = 0; i < len; i++) {
-          portbuf[i] = digits[len - i - 1];
-        }
-      }
-    }
-    portbuf[len] = '\0';
-    debug_shell_copy_string(message + strlen(message),
-                            (int)sizeof(message) - (int)strlen(message),
-                            portbuf);
-  }
-  admin_runtime_audit_line(message);
+  server_audit_note_listener_ready(ADMIN_LISTENER_DEBUG_SHELL);
   return fd;
 }
 
@@ -621,10 +593,10 @@ PUBLIC void debug_shell_server_tick(void)
 {
   int port;
 
-  if (!admin_runtime_debug_shell_enabled())
+  if (!server_runtime_debug_shell_enabled())
     return;
 
-  port = admin_runtime_debug_shell_port();
+  port = server_runtime_debug_shell_port();
   if (port <= 0)
     return;
 

@@ -35,6 +35,19 @@ void uip_appcall(void) {
   int sockfd = uip_conn->appstate;
 
   if (uip_connected()) {
+    if (sockfd >= 0 && sockfd < MAX_SOCKETS &&
+        socket_table[sockfd].tcp_conn == uip_conn &&
+        (socket_table[sockfd].state == SOCK_STATE_CLOSED ||
+         socket_table[sockfd].close_pending)) {
+      /* close 待ちの child を新しい inbound へ使い回さない。 */
+      socket_table[sockfd].tcp_conn = 0;
+      socket_table[sockfd].close_pending = 0;
+      socket_table[sockfd].tx_pending = 0;
+      socket_table[sockfd].state = SOCK_STATE_CLOSED;
+      uip_conn->appstate = -1;
+      sockfd = -1;
+      poll_notify_all();
+    }
     if (sockfd < 0 || sockfd >= MAX_SOCKETS ||
         socket_table[sockfd].tcp_conn != uip_conn) {
       sockfd = socket_bind_inbound_tcp(uip_conn);

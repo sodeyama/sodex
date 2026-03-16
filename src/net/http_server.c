@@ -28,6 +28,7 @@ EXTERN volatile u_int32_t kernel_tick;
 #endif
 
 #include <admin_server.h>
+#include <server_audit.h>
 
 #define HTTP_MAX_CONNECTIONS 2
 #define HTTP_IDLE_TIMEOUT_TICKS 500
@@ -396,7 +397,7 @@ PRIVATE int http_create_listener(void)
     _kprintf("http listener ready fd=%d\n", fd);
     http_listener_state_log = 4;
   }
-  admin_runtime_note_listener_ready(ADMIN_LISTENER_HTTP);
+  server_audit_note_listener_ready(ADMIN_LISTENER_HTTP);
   return fd;
 }
 

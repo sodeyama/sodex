@@ -13,6 +13,9 @@
 - `USERLAND_SSHD_BUILD` でも `ssh_signer_port=0` が既定で通り、`test-qemu-ssh` は signer-less 既定で green に戻った
 - `curve25519` shared secret の all-zero check を追加し、KEX failure は `protocol_error` 一括ではなく `kexinit_invalid` / `kex_failed` / `newkeys_invalid` へ分けた
 - `src/makefile` と `bin/restart.sh` の `ssh_signer_port` 既定値は `0` に揃え、`bin/restart.sh server-headless --ssh` と README 記載の host 側 `ssh` 手順で login / exit を再確認した
+- userland `sshd` で password auth failure を 1 接続 3 回までに制限し、close reason を `auth_retry_limit`、timeout reason を `auth_timeout` / `idle_timeout` に分けた
+- 外部調査の結論として `/etc/sodex-admin.conf` は当面維持しつつ、`server_runtime_config` / `server_audit` を shared entrypoint にして `ssh` / `debug shell` / `http` の `admin_server` 直参照を減らした
+- `test-qemu-ssh` の reconnect 回帰は、userland `recv==0` の close 検出と `uip_conn->appstate` の stale child 切り離しで解消した
 
 ## 優先順
 
@@ -52,9 +55,9 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | USS-10 | `ssh_*` config を `admin_server` 依存からさらに分離するか判断する | USS-07 | `/etc/sodex-admin.conf` 継続か、専用 config file へ分離するかを決める |
-| [ ] | USS-11 | audit sink を userland server 共通で使える形に整理する | USS-07 | `debug shell` や将来の daemon と共通の監査出力方針を持てる |
-| [ ] | USS-12 | 単一接続制限を維持したまま、timeout と auth retry 制限を見直す | USS-08 | userland 化後も現在の制限と hardening を落とさない |
+| [x] | USS-10 | `ssh_*` config を `admin_server` 依存からさらに分離するか判断する | USS-07 | 外部調査の結果、`/etc/sodex-admin.conf` は当面維持し、shared `server_runtime_config` API を挟む方針で固定した |
+| [x] | USS-11 | audit sink を userland server 共通で使える形に整理する | USS-07 | `server_audit` を shared entrypoint とし、`ssh` / `debug shell` / `http` が同じ sink を使う形へ整理した |
+| [~] | USS-12 | 単一接続制限を維持したまま、timeout と auth retry 制限を見直す | USS-08 | 1 接続 3 回失敗で切断と timeout reason の分離は実装済み。retry/backoff や閾値の再調整は残る |
 
 ## M4: signer-less 復旧と完走条件の再固定
 

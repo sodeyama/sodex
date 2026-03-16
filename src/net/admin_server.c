@@ -606,6 +606,14 @@ PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
   } else if (listener_kind == ADMIN_LISTENER_HTTP) {
     listener_bit = ADMIN_LISTENER_HTTP;
     admin_audit_line("listener_ready kind=http port=8080");
+  } else if (listener_kind == ADMIN_LISTENER_DEBUG_SHELL) {
+    listener_bit = ADMIN_LISTENER_DEBUG_SHELL;
+    pos = admin_append_text(message, sizeof(message), pos,
+                            "listener_ready kind=debug_shell port=");
+    pos = admin_append_int(message, sizeof(message), pos,
+                           admin_runtime_debug_shell_port());
+    message[pos] = '\0';
+    admin_audit_line(message);
   } else if (listener_kind == ADMIN_LISTENER_SSH) {
     listener_bit = ADMIN_LISTENER_SSH;
     pos = admin_append_text(message, sizeof(message), pos,

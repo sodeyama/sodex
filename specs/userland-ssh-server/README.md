@@ -77,6 +77,11 @@ kernel
 つまり `/etc/sodex-admin.conf` の `ssh_*` 設定をそのまま読み、
 起動導線も `server` / `server-headless` を維持したまま実装を差し替える。
 
+2026-03-16 の追加整理では、この判断を維持したまま
+`server_runtime_config` / `server_audit` を shared entrypoint にした。
+つまり config file 自体は据え置きつつ、`ssh` / `debug shell` / `http`
+の依存先は `admin_server` 直結ではなく shared module に寄せる。
+
 ## 設計原則
 
 - timer interrupt 内で protocol を進めない

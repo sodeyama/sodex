@@ -1,27 +1,9 @@
 #ifndef _ADMIN_SERVER_H
 #define _ADMIN_SERVER_H
 
-#ifdef TEST_BUILD
-#include <stdint.h>
-typedef uint16_t u_int16_t;
-typedef uint32_t u_int32_t;
-#ifndef PUBLIC
-#define PUBLIC
-#endif
-#else
-#include <sodex/const.h>
-#include <sys/types.h>
-#endif
+#include <server_runtime_config.h>
+#include <server_audit.h>
 
-#define SODEX_ADMIN_PORT 10023
-#define SODEX_HTTP_PORT 8080
-#define SODEX_ADMIN_CONFIG_PATH "/etc/sodex-admin.conf"
-
-#define ADMIN_TOKEN_MAX 64
-#define ADMIN_SECRET_MAX 192
-#define ADMIN_HEX_SEED_MAX 65
-#define ADMIN_HEX_PUBLICKEY_MAX 65
-#define ADMIN_HEX_SECRETKEY_MAX 129
 #define ADMIN_TEXT_REQUEST_MAX 192
 #define ADMIN_HTTP_REQUEST_MAX 384
 #define ADMIN_RESPONSE_MAX 512
@@ -49,12 +31,6 @@ enum admin_auth_result {
   ADMIN_AUTH_THROTTLED = 2
 };
 
-enum admin_listener_kind {
-  ADMIN_LISTENER_ADMIN = 1,
-  ADMIN_LISTENER_HTTP = 2,
-  ADMIN_LISTENER_SSH = 4
-};
-
 struct admin_request {
   int action;
   int required_role;
@@ -66,17 +42,6 @@ struct http_request {
   char method[8];
   char path[64];
   char token[ADMIN_TOKEN_MAX];
-};
-
-struct admin_ssh_config {
-  u_int32_t allow_ip;
-  u_int16_t ssh_port;
-  u_int16_t ssh_signer_port;
-  char ssh_password[ADMIN_SECRET_MAX];
-  char ssh_hostkey_ed25519_seed[ADMIN_HEX_SEED_MAX];
-  char ssh_hostkey_ed25519_public[ADMIN_HEX_PUBLICKEY_MAX];
-  char ssh_hostkey_ed25519_secret[ADMIN_HEX_SECRETKEY_MAX];
-  char ssh_rng_seed[ADMIN_HEX_SEED_MAX];
 };
 
 PUBLIC void admin_server_init(void);

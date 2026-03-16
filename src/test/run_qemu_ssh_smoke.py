@@ -17,6 +17,7 @@ DEFAULT_TIMEOUT = 45
 DEFAULT_EXPECT_TIMEOUT = 120
 GUEST_SSH_PORT = int(os.environ.get("SODEX_SSH_PORT", "10022"))
 SSH_PASSWORD = os.environ.get("SODEX_SSH_PASSWORD", "root-secret")
+SSH_SIGNER_PORT = int(os.environ.get("SODEX_SSH_SIGNER_PORT", "0"))
 SSH_EXPECT_TIMEOUT = int(
     os.environ.get("SODEX_SSH_EXPECT_TIMEOUT", str(DEFAULT_EXPECT_TIMEOUT))
 )
@@ -55,6 +56,32 @@ def reserve_host_port() -> tuple[int, socket.socket | None]:
     sock.bind(("127.0.0.1", 0))
     sock.listen(1)
     return int(sock.getsockname()[1]), sock
+
+
+def read_overlay_secret(logdir: pathlib.Path) -> str:
+    config_path = logdir / "ssh-rootfs-overlay" / "etc" / "sodex-admin.conf"
+
+    if not config_path.exists():
+        return ""
+
+    for line in config_path.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("ssh_hostkey_ed25519_secret="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def ensure_ssh_signer(repo_root: pathlib.Path) -> pathlib.Path:
+    signer_path = repo_root / "tests" / "ssh_signer"
+
+    if signer_path.exists():
+        return signer_path
+
+    subprocess.run(
+        ["make", "-C", str(repo_root / "tests"), "ssh_signer"],
+        check=True,
+    )
+    return signer_path
 
 
 def query_monitor(sock_path: pathlib.Path) -> str:
@@ -117,6 +144,23 @@ def wait_until_ready(deadline: float, serial_log: pathlib.Path,
             return
         time.sleep(0.5)
     raise AssertionError("ssh server did not become ready in time")
+
+
+def wait_for_ssh_banner(deadline: float, host_ssh_port: int) -> None:
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", host_ssh_port), timeout=1.0) as sock:
+                sock.settimeout(1.0)
+                data = sock.recv(128)
+        except OSError:
+            time.sleep(0.5)
+            continue
+
+        if data.startswith(b"SSH-2.0-"):
+            return
+        time.sleep(0.5)
+
+    raise AssertionError("ssh banner did not become reachable in time")
 
 
 def run_expect(script: str, timeout: int = 20) -> str:
@@ -186,6 +230,7 @@ def main() -> int:
 
     fsboot = pathlib.Path(sys.argv[1]).resolve()
     logdir = pathlib.Path(sys.argv[2]).resolve()
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
     logdir.mkdir(parents=True, exist_ok=True)
 
     serial_log = logdir / "ssh_serial.log"
@@ -193,8 +238,18 @@ def main() -> int:
     monitor_log = logdir / "ssh_monitor.log"
     monitor_sock = logdir / "ssh_monitor.sock"
     qemu_stderr_log = logdir / "ssh_qemu_stderr.log"
+    signer_stdout_log = logdir / "ssh_signer_stdout.log"
+    signer_stderr_log = logdir / "ssh_signer_stderr.log"
 
-    for path in (serial_log, qemu_log, monitor_log, monitor_sock, qemu_stderr_log):
+    for path in (
+        serial_log,
+        qemu_log,
+        monitor_log,
+        monitor_sock,
+        qemu_stderr_log,
+        signer_stdout_log,
+        signer_stderr_log,
+    ):
         if path.exists():
             path.unlink()
 
@@ -226,9 +281,31 @@ def main() -> int:
     qemu_cmd = ["script", "-q", "/dev/null", qemu_bin] + qemu_args[1:]
 
     qemu_proc = None
+    signer_proc = None
     qemu_stderr_fp: TextIO | None = None
+    signer_stdout_fp: TextIO | None = None
+    signer_stderr_fp: TextIO | None = None
 
     try:
+        if SSH_SIGNER_PORT > 0:
+            signer_secret = read_overlay_secret(logdir)
+            if not signer_secret:
+                raise AssertionError("ssh signer secret is missing in overlay config")
+            signer_path = ensure_ssh_signer(repo_root)
+            signer_stdout_fp = signer_stdout_log.open("w", encoding="utf-8")
+            signer_stderr_fp = signer_stderr_log.open("w", encoding="utf-8")
+            signer_proc = subprocess.Popen(
+                [str(signer_path), str(SSH_SIGNER_PORT), signer_secret],
+                stdout=signer_stdout_fp,
+                stderr=signer_stderr_fp,
+                text=True,
+            )
+            time.sleep(0.3)
+            if signer_proc.poll() is not None:
+                raise AssertionError(
+                    f"ssh signer exited early with code {signer_proc.returncode}"
+                )
+
         qemu_stderr_fp = qemu_stderr_log.open("w", encoding="utf-8")
         if reserved_sock is not None:
             reserved_sock.close()
@@ -240,7 +317,6 @@ def main() -> int:
         )
         deadline = time.time() + timeout
         wait_until_ready(deadline, serial_log, qemu_log, qemu_proc, qemu_stderr_log)
-
         output = ssh_success_session(host_ssh_port, SSH_PASSWORD)
         assert_contains(output, "SSH_SESSION_OK", "ssh success")
         output = ssh_wrong_password(host_ssh_port)
@@ -270,6 +346,8 @@ def main() -> int:
         dump_file(serial_log)
         dump_file(qemu_log)
         dump_file(qemu_stderr_log)
+        dump_file(signer_stdout_log)
+        dump_file(signer_stderr_log)
         raise
     finally:
         if reserved_sock is not None:
@@ -283,6 +361,17 @@ def main() -> int:
                 qemu_proc.wait()
         if qemu_stderr_fp is not None:
             qemu_stderr_fp.close()
+        if signer_proc is not None:
+            signer_proc.terminate()
+            try:
+                signer_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                signer_proc.kill()
+                signer_proc.wait()
+        if signer_stdout_fp is not None:
+            signer_stdout_fp.close()
+        if signer_stderr_fp is not None:
+            signer_stderr_fp.close()
 
 
 if __name__ == "__main__":

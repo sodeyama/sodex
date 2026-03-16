@@ -39,15 +39,18 @@ PRIVATE int ssh_crypto_hex_value(char c)
 
 PRIVATE void ssh_crypto_random_block(uint8_t out[SSH_RANDOM_BLOCK_BYTES])
 {
-  uint8_t input[SSH_CRYPTO_SEED_BYTES + 4];
+  struct ssh_aes_ctr_ctx ctx;
+  uint8_t iv[16];
 
-  memcpy(input, ssh_random_state.seed, SSH_CRYPTO_SEED_BYTES);
-  input[32] = (uint8_t)(ssh_random_state.counter >> 24);
-  input[33] = (uint8_t)(ssh_random_state.counter >> 16);
-  input[34] = (uint8_t)(ssh_random_state.counter >> 8);
-  input[35] = (uint8_t)ssh_random_state.counter;
+  memset(out, 0, SSH_RANDOM_BLOCK_BYTES);
+  memcpy(iv, ssh_random_state.seed + 16, sizeof(iv));
+  iv[12] ^= (uint8_t)(ssh_random_state.counter >> 24);
+  iv[13] ^= (uint8_t)(ssh_random_state.counter >> 16);
+  iv[14] ^= (uint8_t)(ssh_random_state.counter >> 8);
+  iv[15] ^= (uint8_t)ssh_random_state.counter;
+  ssh_crypto_aes128_ctr_init(&ctx, ssh_random_state.seed, iv);
+  ssh_crypto_aes128_ctr_xcrypt(&ctx, out, SSH_RANDOM_BLOCK_BYTES);
   ssh_random_state.counter++;
-  ssh_crypto_sha256(out, input, sizeof(input));
 }
 
 PRIVATE void ssh_crypto_random_seed_literal(

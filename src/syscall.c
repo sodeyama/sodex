@@ -234,6 +234,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
     ret = sys_get_admin_ssh_config((struct admin_ssh_config *)p1);
     break;
 
+  case SYS_CALL_GET_KERNEL_TICK:
+    ret = (int)kernel_tick;
+    break;
+
   case SYS_CALL_BRK:
     ret = sys_brk(p1);
     break;
@@ -320,6 +324,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_CLOSE_SOCK:
     ret = kern_close_socket(p1);
+    break;
+
+  case SYS_CALL_ACCEPT_NOWAIT:
+    ret = socket_try_accept(p1, (struct sockaddr_in *)p2);
     break;
   }
 

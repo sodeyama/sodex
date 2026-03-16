@@ -12,6 +12,7 @@ SSHD_EXTRA_OBJS = \
 	$(SUB_OBJDIR)/sshd_tweetnacl.o \
 	$(SUB_OBJDIR)/sshd_sha256.o \
 	$(SUB_OBJDIR)/sshd_aes.o
+SSHD_CFLAGS = $(filter-out -O0,$(CFLAGS)) -O2 -march=i486 -msoft-float -mno-mmx -mno-sse -mno-sse2
 
 ESHELL  = ${USRDIR}/bin/eshell
 LS      = ${USRDIR}/bin/ls
@@ -71,19 +72,19 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/fslarge.o -o ${FSLARGE} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/sshd.o: sshd.c ../../net/ssh_server.c ../../include/ssh_crypto.h ../../include/admin_server.h
-	${CC} -c ${CFLAGS} -I ${INCLUDE} -idirafter ${USR_INCLUDE} -I . -o $@ $<
+	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -idirafter ${USR_INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/sshd_ssh_crypto.o: ../../lib/ssh_crypto.c
-	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/sshd_tweetnacl.o: ../../lib/tweetnacl.c
-	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/sshd_sha256.o: ../../lib/sha256.c
-	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/sshd_aes.o: ../../lib/aes.c
-	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

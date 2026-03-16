@@ -66,6 +66,19 @@ connect:
         popl    %ebp
         ret
 
+.global accept_nowait
+accept_nowait:
+        pushl   %ebp
+        movl    %esp, %ebp
+        pushl   %ebx
+        movl    $SYS_CALL_ACCEPT_NOWAIT, %eax
+        movl    0x8(%ebp), %ebx
+        movl    0xc(%ebp), %ecx
+        int     $0x80
+        popl    %ebx
+        popl    %ebp
+        ret
+
 .global send_msg
 send_msg:
         pushl   %ebp

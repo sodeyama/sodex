@@ -2,7 +2,10 @@
 memcpy: 
         pushl   %ebp
         movl    %esp, %ebp
-        movl    0x8(%ebp), %edi
+        pushl   %esi
+        pushl   %edi
+        movl    0x8(%ebp), %eax
+        movl    %eax, %edi
         movl    0xC(%ebp), %esi
         movl    0x10(%ebp), %ecx
         
@@ -10,6 +13,7 @@ memcpy:
         rep
         movsb
         
+        popl    %edi
+        popl    %esi
         popl    %ebp
         ret
-

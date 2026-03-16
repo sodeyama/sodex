@@ -24,6 +24,122 @@ PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 
 PRIVATE u_int8_t icmp_sendbuf[1500];
 
+PRIVATE u_int16_t socket_debug_host_port(u_int16_t port)
+{
+  return (u_int16_t)(((port & 0x00ffU) << 8) |
+                     ((port & 0xff00U) >> 8));
+}
+
+PRIVATE void socket_dbg_putc(char c)
+{
+  while (!(in8(0x3F8 + 5) & 0x20))
+    ;
+  out8(0x3F8, c);
+}
+
+PRIVATE void socket_dbg_puts(const char *s)
+{
+  while (*s) {
+    if (*s == '\n')
+      socket_dbg_putc('\r');
+    socket_dbg_putc(*s++);
+  }
+}
+
+PRIVATE void socket_dbg_dec(int value)
+{
+  char buf[12];
+  int len = 0;
+
+  if (value < 0) {
+    socket_dbg_putc('-');
+    value = -value;
+  }
+  if (value == 0) {
+    socket_dbg_putc('0');
+    return;
+  }
+  while (value > 0 && len < (int)sizeof(buf)) {
+    buf[len++] = (char)('0' + (value % 10));
+    value /= 10;
+  }
+  while (len > 0)
+    socket_dbg_putc(buf[--len]);
+}
+
+PRIVATE void socket_dbg_hex16(u_int16_t value)
+{
+  int shift;
+
+  for (shift = 12; shift >= 0; shift -= 4) {
+    int digit = (value >> shift) & 0x0f;
+
+    if (digit < 10)
+      socket_dbg_putc((char)('0' + digit));
+    else
+      socket_dbg_putc((char)('A' + digit - 10));
+  }
+}
+
+PRIVATE void socket_dbg_listen_event(const char *label, int sockfd,
+                                     u_int16_t port)
+{
+  socket_dbg_puts("TCP: ");
+  socket_dbg_puts(label);
+  socket_dbg_puts(" sockfd=");
+  socket_dbg_dec(sockfd);
+  socket_dbg_puts(" port=");
+  socket_dbg_dec((int)socket_debug_host_port(port));
+  socket_dbg_puts(" raw=0x");
+  socket_dbg_hex16(port);
+  socket_dbg_puts("\n");
+}
+
+PRIVATE void socket_dbg_listener_miss(u_int16_t port)
+{
+  socket_dbg_puts("TCP: LISTENER MISS port=");
+  socket_dbg_dec((int)socket_debug_host_port(port));
+  socket_dbg_puts(" raw=0x");
+  socket_dbg_hex16(port);
+  socket_dbg_puts("\n");
+}
+
+PRIVATE void socket_dbg_accept_event(const char *label, int listener_fd,
+                                     int child_fd, int backlog_count)
+{
+  socket_dbg_puts("TCP: ");
+  socket_dbg_puts(label);
+  socket_dbg_puts(" listener=");
+  socket_dbg_dec(listener_fd);
+  socket_dbg_puts(" child=");
+  socket_dbg_dec(child_fd);
+  socket_dbg_puts(" backlog=");
+  socket_dbg_dec(backlog_count);
+  socket_dbg_puts("\n");
+}
+
+PRIVATE int socket_dbg_is_signer_port(u_int16_t port)
+{
+  return socket_debug_host_port(port) == 10026;
+}
+
+PRIVATE void socket_dbg_udp_event(const char *label, int sockfd,
+                                  u_int16_t lport, u_int16_t rport,
+                                  u_int16_t len)
+{
+  socket_dbg_puts("UDP: ");
+  socket_dbg_puts(label);
+  socket_dbg_puts(" sockfd=");
+  socket_dbg_dec(sockfd);
+  socket_dbg_puts(" lport=");
+  socket_dbg_dec((int)socket_debug_host_port(lport));
+  socket_dbg_puts(" rport=");
+  socket_dbg_dec((int)socket_debug_host_port(rport));
+  socket_dbg_puts(" len=");
+  socket_dbg_dec((int)len);
+  socket_dbg_puts("\n");
+}
+
 PRIVATE void rxbuf_init(struct kern_socket *sk)
 {
   sk->rx_head = 0;
@@ -270,6 +386,7 @@ PUBLIC int kern_listen(int sockfd, int backlog)
     }
   }
   uip_listen(sk->local_addr.sin_port);
+  socket_dbg_listen_event("LISTEN", sockfd, sk->local_addr.sin_port);
   return 0;
 }
 
@@ -282,6 +399,11 @@ PUBLIC int socket_try_accept(int sockfd, struct sockaddr_in *addr)
   if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
   listener = &socket_table[sockfd];
   if (listener->state != SOCK_STATE_LISTENING) return -1;
+  if (listener->backlog_count > 0) {
+    socket_dbg_accept_event("ACCEPT TRY", sockfd,
+                            listener->backlog_fds[0],
+                            listener->backlog_count);
+  }
 
   for (;;) {
     child_fd = socket_backlog_dequeue(listener);
@@ -289,6 +411,8 @@ PUBLIC int socket_try_accept(int sockfd, struct sockaddr_in *addr)
 
     child = &socket_table[child_fd];
     if (child->state == SOCK_STATE_CLOSED) {
+      socket_dbg_accept_event("ACCEPT DROP", sockfd, child_fd,
+                              listener->backlog_count);
       child->pending_accept = 0;
       child->parent_fd = -1;
       kern_close_socket(child_fd);
@@ -299,6 +423,8 @@ PUBLIC int socket_try_accept(int sockfd, struct sockaddr_in *addr)
     if (addr) {
       *addr = child->remote_addr;
     }
+    socket_dbg_accept_event("ACCEPT DEQUEUE", sockfd, child_fd,
+                            listener->backlog_count);
     wakeup(&listener->accept_wq);
     return child_fd;
   }
@@ -322,9 +448,11 @@ PUBLIC int kern_accept(int sockfd, struct sockaddr_in *addr)
     if (child_fd >= 0)
       return child_fd;
 
+    socket_dbg_puts("TCP: ACCEPT POLL\n");
     disableInterrupt();
     network_poll();
     enableInterrupt();
+    socket_dbg_puts("TCP: ACCEPT POLL DONE\n");
 
     if ((int)(kernel_tick - deadline) >= 0)
       return -1;
@@ -341,7 +469,10 @@ PUBLIC int socket_bind_inbound_tcp(struct uip_conn *conn)
   if (conn == 0) return -1;
 
   listener_fd = socket_find_listener_by_port(conn->lport);
-  if (listener_fd < 0) return -1;
+  if (listener_fd < 0) {
+    socket_dbg_listener_miss(conn->lport);
+    return -1;
+  }
 
   listener = &socket_table[listener_fd];
   if (listener->backlog_count >= listener->backlog_limit)
@@ -367,6 +498,8 @@ PUBLIC int socket_bind_inbound_tcp(struct uip_conn *conn)
     return -1;
   }
 
+  socket_dbg_accept_event("ACCEPT ENQUEUE", listener_fd, child_fd,
+                          listener->backlog_count);
   conn->appstate = child_fd;
   wakeup(&listener->accept_wq);
   poll_notify_all();
@@ -555,6 +688,9 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
       if (sk->local_addr.sin_port)
         uip_udp_bind(sk->udp_conn, sk->local_addr.sin_port);
     }
+    if (socket_dbg_is_signer_port(sk->udp_conn->rport))
+      socket_dbg_udp_event("SEND", sockfd, sk->udp_conn->lport,
+                           sk->udp_conn->rport, (u_int16_t)len);
     /* Copy data to uip_appdata and trigger send */
     disableInterrupt();
     if (len > UIP_APPDATA_SIZE) len = UIP_APPDATA_SIZE;
@@ -668,6 +804,7 @@ PUBLIC int kern_close_socket(int sockfd)
     for (i = 0; i < SOCK_ACCEPT_BACKLOG_SIZE; i++) {
       sk->backlog_fds[i] = -1;
     }
+    socket_dbg_listen_event("UNLISTEN", sockfd, sk->local_addr.sin_port);
     uip_unlisten(sk->local_addr.sin_port);
     for (i = 0; i < pending_count; i++) {
       int child_fd = pending[i];
@@ -811,12 +948,16 @@ PUBLIC void socket_udp_input(struct uip_udp_conn *udp_conn,
       from.sin_port = ((u_int16_t)uip_buf[UIP_LLH_LEN + 20] << 8) |
                        uip_buf[UIP_LLH_LEN + 21]; /* UDP src port (network order) */
       memcpy(&from.sin_addr, &uip_buf[UIP_LLH_LEN + 12], 4); /* IP src addr */
+      if (socket_dbg_is_signer_port(udp_conn->rport))
+        socket_dbg_udp_event("RECV", i, udp_conn->lport, udp_conn->rport, len);
       rxbuf_write(sk, data, len, &from);
       wakeup(&sk->recv_wq);
       poll_notify_all();
       return;
     }
   }
+  if (udp_conn != 0 && socket_dbg_is_signer_port(udp_conn->rport))
+    socket_dbg_udp_event("DROP", -1, udp_conn->lport, udp_conn->rport, len);
 }
 
 /* Called from uip_appcall when TCP data is received */

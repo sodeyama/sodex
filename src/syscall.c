@@ -29,8 +29,10 @@
 #include <tty.h>
 #include <fb.h>
 #include <pipe.h>
+#include <poll.h>
 #include <termios.h>
 #include <rs232c.h>
+#include <admin_server.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_creat(const char* pathname, mode_t mode);
@@ -66,6 +68,8 @@ PRIVATE int sys_tcsetattr(int fd, int optional_actions,
                           const struct termios *termios);
 PRIVATE int sys_sleep_ticks(u_int32_t ticks);
 PRIVATE int sys_set_foreground_pid(int fd, pid_t pid);
+PRIVATE int sys_get_foreground_pid(int fd);
+PRIVATE int sys_get_admin_ssh_config(struct admin_ssh_config *out);
 PRIVATE void sys_memdump(u_int32_t addr, size_t size);
 PRIVATE int sys_send(char* buf);
 
@@ -216,6 +220,18 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_SET_FOREGROUND_PID:
     ret = sys_set_foreground_pid((int)p1, (pid_t)p2);
+    break;
+
+  case SYS_CALL_POLL:
+    ret = sys_poll((struct pollfd *)p1, (int)p2, (int)p3);
+    break;
+
+  case SYS_CALL_GET_FOREGROUND_PID:
+    ret = sys_get_foreground_pid((int)p1);
+    break;
+
+  case SYS_CALL_GET_ADMIN_SSH_CONFIG:
+    ret = sys_get_admin_ssh_config((struct admin_ssh_config *)p1);
     break;
 
   case SYS_CALL_BRK:
@@ -585,6 +601,18 @@ PRIVATE int sys_set_foreground_pid(int fd, pid_t pid)
   struct tty *tty = tty_lookup_file(current->files, fd);
 
   return tty_set_foreground_pid(tty, pid);
+}
+
+PRIVATE int sys_get_foreground_pid(int fd)
+{
+  struct tty *tty = tty_lookup_file(current->files, fd);
+
+  return (int)tty_get_foreground_pid(tty);
+}
+
+PRIVATE int sys_get_admin_ssh_config(struct admin_ssh_config *out)
+{
+  return admin_runtime_copy_ssh_config(out);
 }
 
 PRIVATE int sys_debug_write(const char *buf, size_t len)

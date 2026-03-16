@@ -8,6 +8,7 @@
 #include <string.h>
 #include <io.h>
 #include <vga.h>
+#include <poll.h>
 #include <process.h>
 #include <socket.h>
 #include <uip.h>
@@ -138,6 +139,7 @@ PRIVATE int socket_backlog_enqueue(struct kern_socket *listener, int child_fd)
   if (listener->backlog_count >= SOCK_ACCEPT_BACKLOG_SIZE) return -1;
 
   listener->backlog_fds[listener->backlog_count++] = child_fd;
+  poll_notify_all();
   return 0;
 }
 
@@ -367,6 +369,7 @@ PUBLIC int socket_bind_inbound_tcp(struct uip_conn *conn)
 
   conn->appstate = child_fd;
   wakeup(&listener->accept_wq);
+  poll_notify_all();
   return child_fd;
 }
 
@@ -637,6 +640,7 @@ PUBLIC int socket_begin_close(int sockfd)
   wakeup(&sk->recv_wq);
   wakeup(&sk->accept_wq);
   wakeup(&sk->connect_wq);
+  poll_notify_all();
   return 0;
 }
 
@@ -716,6 +720,7 @@ PUBLIC int kern_close_socket(int sockfd)
   wakeup(&sk->recv_wq);
   wakeup(&sk->accept_wq);
   wakeup(&sk->connect_wq);
+  poll_notify_all();
 
   socket_release_entry(sockfd);
   return 0;
@@ -783,6 +788,7 @@ PUBLIC void socket_icmp_input(u_int8_t *pkt, u_int16_t len)
         sk->protocol == IPPROTO_ICMP) {
       rxbuf_write(sk, icmp_hdr, icmp_len, &from);
       wakeup(&sk->recv_wq);
+      poll_notify_all();
     }
   }
 }
@@ -807,6 +813,7 @@ PUBLIC void socket_udp_input(struct uip_udp_conn *udp_conn,
       memcpy(&from.sin_addr, &uip_buf[UIP_LLH_LEN + 12], 4); /* IP src addr */
       rxbuf_write(sk, data, len, &from);
       wakeup(&sk->recv_wq);
+      poll_notify_all();
       return;
     }
   }
@@ -826,4 +833,5 @@ PUBLIC void socket_tcp_input(int sockfd, u_int8_t *data, u_int16_t len)
 
   rxbuf_write(sk, data, len, &from);
   wakeup(&sk->recv_wq);
+  poll_notify_all();
 }

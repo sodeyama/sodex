@@ -6,6 +6,7 @@
 #include <ext3fs.h>
 #include <process.h>
 #include <signal.h>
+#include <admin_server.h>
 
 #define CEIL(a, b) ((a&(~(b-1)))+b)
 
@@ -30,6 +31,8 @@ extern int _brk(void* end_data_segment);
 extern pid_t waitpid(pid_t pid, int *status, int options);
 extern pid_t fork(void);
 extern int set_foreground_pid(int fd, pid_t pid);
+extern pid_t get_foreground_pid(int fd);
+extern int get_admin_ssh_config(struct admin_ssh_config *out);
 extern sighandler_t signal(int signum, sighandler_t sighandler);
 extern int kill(pid_t pid, int sig);
 

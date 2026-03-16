@@ -7,6 +7,11 @@ $(shell mkdir -p $(SUB_OBJDIR))
 CSRCS = $(wildcard *.c)
 COBJS = $(addprefix $(SUB_OBJDIR)/,$(subst .c,.o,$(CSRCS)))
 OBJS  = ${COBJS}
+SSHD_EXTRA_OBJS = \
+	$(SUB_OBJDIR)/sshd_ssh_crypto.o \
+	$(SUB_OBJDIR)/sshd_tweetnacl.o \
+	$(SUB_OBJDIR)/sshd_sha256.o \
+	$(SUB_OBJDIR)/sshd_aes.o
 
 ESHELL  = ${USRDIR}/bin/eshell
 LS      = ${USRDIR}/bin/ls
@@ -22,6 +27,7 @@ REGEX   = ${USRDIR}/bin/regex
 SEND    = ${USRDIR}/bin/send
 PING    = ${USRDIR}/bin/ping
 TERM    = ${USRDIR}/bin/term
+SSHD    = ${USRDIR}/bin/sshd
 TOUCH   = ${USRDIR}/bin/touch
 MKDIR   = ${USRDIR}/bin/mkdir
 RM      = ${USRDIR}/bin/rm
@@ -32,7 +38,7 @@ UTF8DEMO = ${USRDIR}/bin/utf8demo
 MEMGROW = ${USRDIR}/bin/memgrow
 FSLARGE = ${USRDIR}/bin/fslarge
 
-all: ${OBJS} ${STATIC_LIBS}
+all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ls.o -o ${LS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/cat.o -o ${CAT} ${STATIC_LIBS}
@@ -47,6 +53,13 @@ all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/send.o -o ${SEND} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ping.o -o ${PING} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/term.o -o ${TERM} ${STATIC_LIBS}
+	${LD} ${LFLAGS} \
+		$(SUB_OBJDIR)/sshd.o \
+		$(SUB_OBJDIR)/sshd_ssh_crypto.o \
+		$(SUB_OBJDIR)/sshd_tweetnacl.o \
+		$(SUB_OBJDIR)/sshd_sha256.o \
+		$(SUB_OBJDIR)/sshd_aes.o \
+		-o ${SSHD} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/touch.o -o ${TOUCH} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/mkdir.o -o ${MKDIR} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/rm.o -o ${RM} ${STATIC_LIBS}
@@ -56,6 +69,21 @@ all: ${OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/utf8demo.o -o ${UTF8DEMO} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/memgrow.o -o ${MEMGROW} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/fslarge.o -o ${FSLARGE} ${STATIC_LIBS}
+
+$(SUB_OBJDIR)/sshd.o: sshd.c ../../net/ssh_server.c ../../include/ssh_crypto.h ../../include/admin_server.h
+	${CC} -c ${CFLAGS} -I ${INCLUDE} -idirafter ${USR_INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_ssh_crypto.o: ../../lib/ssh_crypto.c
+	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_tweetnacl.o: ../../lib/tweetnacl.c
+	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_sha256.o: ../../lib/sha256.c
+	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_aes.o: ../../lib/aes.c
+	${CC} -c ${CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

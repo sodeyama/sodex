@@ -30,6 +30,7 @@ struct tty {
   int active;
   int has_master;
   int refcount;
+  int slave_refs;
   u_int8_t flags;
   u_int16_t cols;
   u_int16_t rows;

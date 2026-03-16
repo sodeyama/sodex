@@ -4,6 +4,7 @@
 
 #ifndef TEST_BUILD
 #include <memory.h>
+#include <poll.h>
 #include <process.h>
 #include <vga.h>
 #else
@@ -43,6 +44,10 @@ PUBLIC void sleep_on(struct wait_queue **wq)
 PUBLIC void wakeup(struct wait_queue **wq)
 {
   (void)wq;
+}
+
+PUBLIC void poll_notify_all(void)
+{
 }
 
 #define kalloc _tty_test_kalloc
@@ -396,7 +401,16 @@ PRIVATE ssize_t tty_slave_file_write(struct file *file, const void *buf,
 
 PRIVATE int tty_slave_file_close(struct file *file)
 {
-  tty_release((struct tty *)file->private_data);
+  struct tty *tty = (struct tty *)file->private_data;
+
+  if (tty != NULL && tty->slave_refs > 0) {
+    tty->slave_refs--;
+    if (tty->slave_refs == 0) {
+      wakeup(&tty->master_wait);
+      poll_notify_all();
+    }
+  }
+  tty_release(tty);
   (void)file;
   return TRUE;
 }
@@ -417,6 +431,9 @@ PRIVATE int tty_master_file_close(struct file *file)
   struct tty *tty = (struct tty *)file->private_data;
   if (tty != NULL) {
     tty->has_master = FALSE;
+    wakeup(&tty->slave_wait);
+    wakeup(&tty->master_wait);
+    poll_notify_all();
     tty_release(tty);
   }
   return TRUE;
@@ -537,6 +554,7 @@ PRIVATE void tty_emit_output(struct tty *tty, char c)
   if (tty->has_master == TRUE) {
     tty_ring_push(&tty->master_rx, c);
     wakeup(&tty->master_wait);
+    poll_notify_all();
   } else {
     _kputc(c);
   }
@@ -572,6 +590,7 @@ PRIVATE void tty_push_slave_byte(struct tty *tty, char c)
 {
   tty_ring_push(&tty->slave_rx, c);
   wakeup(&tty->slave_wait);
+  poll_notify_all();
 }
 
 PRIVATE void tty_receive_char(struct tty *tty, char c)
@@ -640,6 +659,8 @@ PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,
   file->f_ops = ops;
   file->private_data = tty;
   file->f_refcount = 1;
+  if (stdioflag == FLAG_TTY_SLAVE)
+    tty->slave_refs++;
   tty_retain(tty);
   return file;
 }

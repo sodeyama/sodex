@@ -1147,6 +1147,31 @@ PUBLIC const char *admin_runtime_ssh_rng_seed(void)
   return admin_runtime.ssh_rng_seed;
 }
 
+PUBLIC int admin_runtime_copy_ssh_config(struct admin_ssh_config *out)
+{
+  if (out == 0)
+    return -1;
+
+  memset(out, 0, sizeof(*out));
+  out->allow_ip = admin_runtime.allow_ip;
+  out->ssh_port = admin_runtime.ssh_port;
+  out->ssh_signer_port = admin_runtime.ssh_signer_port;
+  admin_copy_string(out->ssh_password, sizeof(out->ssh_password),
+                    admin_runtime.ssh_password);
+  admin_copy_string(out->ssh_hostkey_ed25519_seed,
+                    sizeof(out->ssh_hostkey_ed25519_seed),
+                    admin_runtime.ssh_hostkey_ed25519_seed);
+  admin_copy_string(out->ssh_hostkey_ed25519_public,
+                    sizeof(out->ssh_hostkey_ed25519_public),
+                    admin_runtime.ssh_hostkey_ed25519_public);
+  admin_copy_string(out->ssh_hostkey_ed25519_secret,
+                    sizeof(out->ssh_hostkey_ed25519_secret),
+                    admin_runtime.ssh_hostkey_ed25519_secret);
+  admin_copy_string(out->ssh_rng_seed, sizeof(out->ssh_rng_seed),
+                    admin_runtime.ssh_rng_seed);
+  return 0;
+}
+
 PUBLIC void admin_runtime_audit_line(const char *line)
 {
   admin_audit_line(line);

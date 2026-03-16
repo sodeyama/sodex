@@ -5,6 +5,660 @@
 #ifndef PRIVATE
 #define PRIVATE static
 #endif
+#elif defined(USERLAND_SSHD_BUILD)
+#include <sodex/const.h>
+#include <admin_server.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <process.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include "../usr/include/tty.h"
+#include "../usr/include/winsize.h"
+#include "../usr/include/poll.h"
+#include <debug.h>
+#include <sleep.h>
+#include "../usr/include/termios.h"
+
+#define MAX_SOCKETS 16
+#define SOCK_STATE_UNUSED     0
+#define SOCK_STATE_CREATED    1
+#define SOCK_STATE_BOUND      2
+#define SOCK_STATE_LISTENING  3
+#define SOCK_STATE_CONNECTED  4
+#define SOCK_STATE_CLOSED     5
+#define SOCK_ACCEPT_BACKLOG_SIZE 4
+#define TASK_ZOMBIE 3
+#define SSH_USERLAND_AUDIT_LINE_SIZE 96
+
+struct sockaddr_in {
+  u_int16_t sin_family;
+  u_int16_t sin_port;
+  u_int32_t sin_addr;
+};
+
+struct kern_socket {
+  int state;
+  int type;
+  int protocol;
+  u_int8_t tx_pending;
+};
+
+struct tty {
+  int active;
+  int fd;
+};
+
+volatile u_int32_t kernel_tick = 0;
+PRIVATE struct kern_socket socket_table[MAX_SOCKETS];
+PRIVATE struct tty ssh_userland_ttys[2];
+PRIVATE struct admin_ssh_config ssh_userland_runtime;
+PRIVATE int ssh_userland_config_loaded = FALSE;
+PRIVATE int ssh_userland_listener_ready = FALSE;
+extern struct task_struct *getpstat(void);
+
+PRIVATE void disableInterrupt(void) {}
+PRIVATE void enableInterrupt(void) {}
+PRIVATE void network_poll(void) {}
+
+PRIVATE u_int16_t htons(u_int16_t hostshort)
+{
+  return (u_int16_t)(((hostshort & 0x00ffU) << 8) |
+                     ((hostshort & 0xff00U) >> 8));
+}
+
+#define memcmp ssh_userland_memcmp
+#define network_fill_gateway_addr ssh_userland_network_fill_gateway_addr
+
+PRIVATE int ssh_userland_memcmp(const void *lhs, const void *rhs, size_t len)
+{
+  const u_int8_t *a = (const u_int8_t *)lhs;
+  const u_int8_t *b = (const u_int8_t *)rhs;
+  size_t i;
+
+  for (i = 0; i < len; i++) {
+    if (a[i] != b[i])
+      return (int)a[i] - (int)b[i];
+  }
+  return 0;
+}
+
+PRIVATE void ssh_userland_copy_string(char *dest, int cap, const char *src)
+{
+  int i = 0;
+
+  if (dest == 0 || cap <= 0)
+    return;
+  if (src == 0) {
+    dest[0] = '\0';
+    return;
+  }
+
+  while (src[i] != '\0' && i < cap - 1) {
+    dest[i] = src[i];
+    i++;
+  }
+  dest[i] = '\0';
+}
+
+PRIVATE void ssh_userland_reset_config(void)
+{
+  memset(&ssh_userland_runtime, 0, sizeof(ssh_userland_runtime));
+  ssh_userland_listener_ready = FALSE;
+}
+
+PRIVATE void ssh_userland_trim_line(const char *line, int len,
+                                    char *out, int out_cap)
+{
+  int start = 0;
+  int end = len;
+  int pos = 0;
+
+  if (out == 0 || out_cap <= 0) {
+    return;
+  }
+
+  while (start < end &&
+         (line[start] == ' ' || line[start] == '\t' ||
+          line[start] == '\r' || line[start] == '\n')) {
+    start++;
+  }
+  while (end > start &&
+         (line[end - 1] == ' ' || line[end - 1] == '\t' ||
+          line[end - 1] == '\r' || line[end - 1] == '\n')) {
+    end--;
+  }
+
+  while (start < end && pos < out_cap - 1) {
+    out[pos++] = line[start++];
+  }
+  out[pos] = '\0';
+}
+
+PRIVATE int ssh_userland_parse_ip(const char *text, u_int32_t *out)
+{
+  u_int8_t parts[4];
+  int index = 0;
+  int value = 0;
+  int have_digit = FALSE;
+
+  if (text == 0 || out == 0)
+    return -1;
+
+  memset(parts, 0, sizeof(parts));
+  while (*text != '\0') {
+    if (*text >= '0' && *text <= '9') {
+      value = value * 10 + (*text - '0');
+      if (value > 255)
+        return -1;
+      have_digit = TRUE;
+    } else if (*text == '.') {
+      if (!have_digit || index >= 3)
+        return -1;
+      parts[index++] = (u_int8_t)value;
+      value = 0;
+      have_digit = FALSE;
+    } else {
+      return -1;
+    }
+    text++;
+  }
+
+  if (!have_digit || index != 3)
+    return -1;
+
+  parts[index] = (u_int8_t)value;
+  *out = ((u_int32_t)parts[0]) |
+         ((u_int32_t)parts[1] << 8) |
+         ((u_int32_t)parts[2] << 16) |
+         ((u_int32_t)parts[3] << 24);
+  return 0;
+}
+
+PRIVATE void ssh_userland_apply_config_line(const char *line)
+{
+  char trimmed[256];
+  char key[64];
+  char value[192];
+  char *sep;
+  int key_len;
+
+  ssh_userland_trim_line(line, (int)strlen(line), trimmed, sizeof(trimmed));
+  if (trimmed[0] == '\0' || trimmed[0] == '#')
+    return;
+
+  sep = strchr(trimmed, '=');
+  if (sep == 0)
+    return;
+
+  key_len = (int)(sep - trimmed);
+  if (key_len <= 0 || key_len >= (int)sizeof(key))
+    return;
+  memcpy(key, trimmed, (size_t)key_len);
+  key[key_len] = '\0';
+  ssh_userland_trim_line(sep + 1, (int)strlen(sep + 1), value, sizeof(value));
+
+  if (strcmp(key, "allow_ip") == 0) {
+    u_int32_t allow_ip;
+
+    if (ssh_userland_parse_ip(value, &allow_ip) == 0)
+      ssh_userland_runtime.allow_ip = allow_ip;
+    return;
+  }
+  if (strcmp(key, "ssh_port") == 0) {
+    ssh_userland_runtime.ssh_port = (u_int16_t)atoi(value);
+    return;
+  }
+  if (strcmp(key, "ssh_password") == 0) {
+    ssh_userland_copy_string(ssh_userland_runtime.ssh_password,
+                             sizeof(ssh_userland_runtime.ssh_password), value);
+    return;
+  }
+  if (strcmp(key, "ssh_signer_port") == 0) {
+    ssh_userland_runtime.ssh_signer_port = (u_int16_t)atoi(value);
+    return;
+  }
+  if (strcmp(key, "ssh_hostkey_ed25519_seed") == 0) {
+    ssh_userland_copy_string(ssh_userland_runtime.ssh_hostkey_ed25519_seed,
+                             sizeof(ssh_userland_runtime.ssh_hostkey_ed25519_seed),
+                             value);
+    return;
+  }
+  if (strcmp(key, "ssh_hostkey_ed25519_public") == 0) {
+    ssh_userland_copy_string(ssh_userland_runtime.ssh_hostkey_ed25519_public,
+                             sizeof(ssh_userland_runtime.ssh_hostkey_ed25519_public),
+                             value);
+    return;
+  }
+  if (strcmp(key, "ssh_hostkey_ed25519_secret") == 0) {
+    ssh_userland_copy_string(ssh_userland_runtime.ssh_hostkey_ed25519_secret,
+                             sizeof(ssh_userland_runtime.ssh_hostkey_ed25519_secret),
+                             value);
+    return;
+  }
+  if (strcmp(key, "ssh_rng_seed") == 0) {
+    ssh_userland_copy_string(ssh_userland_runtime.ssh_rng_seed,
+                             sizeof(ssh_userland_runtime.ssh_rng_seed), value);
+  }
+}
+
+PRIVATE int ssh_userland_load_config(void)
+{
+  if (ssh_userland_config_loaded)
+    return 0;
+
+  ssh_userland_reset_config();
+  if (get_admin_ssh_config(&ssh_userland_runtime) < 0)
+    return -1;
+
+  ssh_userland_config_loaded = TRUE;
+  return 0;
+}
+
+PRIVATE int ssh_userland_has_hostkey(void)
+{
+  return (ssh_userland_runtime.ssh_hostkey_ed25519_public[0] != '\0' &&
+          ssh_userland_runtime.ssh_hostkey_ed25519_secret[0] != '\0') ||
+         ssh_userland_runtime.ssh_hostkey_ed25519_seed[0] != '\0';
+}
+
+PUBLIC int admin_runtime_ssh_enabled(void)
+{
+  ssh_userland_load_config();
+  return ssh_userland_runtime.ssh_port != 0 &&
+         ssh_userland_runtime.ssh_password[0] != '\0' &&
+         ssh_userland_has_hostkey() &&
+         ssh_userland_runtime.ssh_rng_seed[0] != '\0';
+}
+
+PUBLIC int admin_runtime_ssh_port(void)
+{
+  ssh_userland_load_config();
+  return (int)ssh_userland_runtime.ssh_port;
+}
+
+PUBLIC const char *admin_runtime_ssh_password(void)
+{
+  ssh_userland_load_config();
+  return ssh_userland_runtime.ssh_password;
+}
+
+PUBLIC int admin_runtime_ssh_signer_port(void)
+{
+  ssh_userland_load_config();
+  return (int)ssh_userland_runtime.ssh_signer_port;
+}
+
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_seed(void)
+{
+  ssh_userland_load_config();
+  return ssh_userland_runtime.ssh_hostkey_ed25519_seed;
+}
+
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_public(void)
+{
+  ssh_userland_load_config();
+  return ssh_userland_runtime.ssh_hostkey_ed25519_public;
+}
+
+PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_secret(void)
+{
+  ssh_userland_load_config();
+  return ssh_userland_runtime.ssh_hostkey_ed25519_secret;
+}
+
+PUBLIC const char *admin_runtime_ssh_rng_seed(void)
+{
+  ssh_userland_load_config();
+  return ssh_userland_runtime.ssh_rng_seed;
+}
+
+PUBLIC void admin_runtime_audit_line(const char *line)
+{
+  if (line == 0 || line[0] == '\0')
+    return;
+
+  debug_write("AUDIT ", 6);
+  debug_write(line, strlen(line));
+  debug_write("\n", 1);
+}
+
+PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
+{
+  char message[SSH_USERLAND_AUDIT_LINE_SIZE];
+  int pos = 0;
+
+  if (listener_kind != ADMIN_LISTENER_SSH || ssh_userland_listener_ready)
+    return;
+
+  ssh_userland_listener_ready = TRUE;
+  ssh_userland_copy_string(message, sizeof(message), "listener_ready kind=ssh port=");
+  pos = (int)strlen(message);
+  if (admin_runtime_ssh_port() >= 10000) {
+    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 10000) % 10);
+  }
+  if (admin_runtime_ssh_port() >= 1000) {
+    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 1000) % 10);
+  }
+  if (admin_runtime_ssh_port() >= 100) {
+    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 100) % 10);
+  }
+  if (admin_runtime_ssh_port() >= 10) {
+    message[pos++] = (char)('0' + (admin_runtime_ssh_port() / 10) % 10);
+  }
+  message[pos++] = (char)('0' + (admin_runtime_ssh_port() % 10));
+  message[pos] = '\0';
+  admin_runtime_audit_line(message);
+}
+
+PUBLIC int admin_authorize_peer(u_int32_t peer_addr, u_int32_t *retry_after_ticks)
+{
+  ssh_userland_load_config();
+  if (retry_after_ticks != 0)
+    *retry_after_ticks = 0;
+  if (ssh_userland_runtime.allow_ip != 0 &&
+      peer_addr != ssh_userland_runtime.allow_ip) {
+    return ADMIN_AUTH_DENY;
+  }
+  return ADMIN_AUTH_ALLOW;
+}
+
+PUBLIC int kern_socket(int domain, int type, int protocol)
+{
+  int fd = socket(domain, type, protocol);
+
+  if (fd >= 0 && fd < MAX_SOCKETS) {
+    memset(&socket_table[fd], 0, sizeof(socket_table[fd]));
+    socket_table[fd].state = SOCK_STATE_CREATED;
+    socket_table[fd].type = type;
+    socket_table[fd].protocol = protocol;
+  }
+  return fd;
+}
+
+PUBLIC int kern_bind(int sockfd, struct sockaddr_in *addr)
+{
+  int ret = bind(sockfd, (const struct sockaddr *)addr, sizeof(*addr));
+
+  if (ret == 0 && sockfd >= 0 && sockfd < MAX_SOCKETS)
+    socket_table[sockfd].state = SOCK_STATE_BOUND;
+  return ret;
+}
+
+PUBLIC int kern_listen(int sockfd, int backlog)
+{
+  int ret = listen(sockfd, backlog);
+
+  if (ret == 0 && sockfd >= 0 && sockfd < MAX_SOCKETS)
+    socket_table[sockfd].state = SOCK_STATE_LISTENING;
+  return ret;
+}
+
+PRIVATE void ssh_userland_refresh_socket(int sockfd)
+{
+  struct pollfd pfd;
+
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS)
+    return;
+  if (socket_table[sockfd].state == SOCK_STATE_UNUSED)
+    return;
+
+  pfd.fd = sockfd;
+  pfd.events = POLLIN | POLLOUT | POLLHUP;
+  pfd.revents = 0;
+  if (poll(&pfd, 1, 0) < 0)
+    return;
+  if ((pfd.revents & POLLOUT) != 0)
+    socket_table[sockfd].tx_pending = 0;
+  if ((pfd.revents & POLLHUP) != 0)
+    socket_table[sockfd].state = SOCK_STATE_CLOSED;
+}
+
+PUBLIC int socket_try_accept(int sockfd, struct sockaddr_in *addr)
+{
+  struct pollfd pfd;
+  int child_fd;
+
+  pfd.fd = sockfd;
+  pfd.events = POLLIN | POLLHUP;
+  pfd.revents = 0;
+  if (poll(&pfd, 1, 0) <= 0 || (pfd.revents & POLLIN) == 0)
+    return -1;
+
+  child_fd = accept(sockfd, (struct sockaddr *)addr, 0);
+  if (child_fd < 0) {
+    admin_runtime_audit_line("ssh_accept_sys_failed");
+    return child_fd;
+  }
+  if (child_fd >= 0 && child_fd < MAX_SOCKETS) {
+    memset(&socket_table[child_fd], 0, sizeof(socket_table[child_fd]));
+    socket_table[child_fd].state = SOCK_STATE_CONNECTED;
+    socket_table[child_fd].type = SOCK_STREAM;
+    socket_table[child_fd].protocol = IPPROTO_TCP;
+  }
+  return child_fd;
+}
+
+PUBLIC int kern_accept(int sockfd, struct sockaddr_in *addr)
+{
+  return socket_try_accept(sockfd, addr);
+}
+
+PUBLIC int kern_connect(int sockfd, struct sockaddr_in *addr)
+{
+  int ret = connect(sockfd, (const struct sockaddr *)addr, sizeof(*addr));
+
+  if (ret == 0 && sockfd >= 0 && sockfd < MAX_SOCKETS)
+    socket_table[sockfd].state = SOCK_STATE_CONNECTED;
+  return ret;
+}
+
+PUBLIC int kern_send(int sockfd, void *buf, int len, int flags)
+{
+  int ret = send_msg(sockfd, buf, len, flags);
+
+  if (ret >= 0 && sockfd >= 0 && sockfd < MAX_SOCKETS &&
+      socket_table[sockfd].type == SOCK_STREAM) {
+    socket_table[sockfd].tx_pending = 1;
+  }
+  return ret;
+}
+
+PUBLIC int kern_recv(int sockfd, void *buf, int len, int flags)
+{
+  int ret = recv_msg(sockfd, buf, len, flags);
+
+  ssh_userland_refresh_socket(sockfd);
+  return ret;
+}
+
+PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
+                       struct sockaddr_in *addr)
+{
+  return sendto(sockfd, buf, len, flags, (const struct sockaddr *)addr,
+                sizeof(*addr));
+}
+
+PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
+                         struct sockaddr_in *addr)
+{
+  int ret = recvfrom(sockfd, buf, len, flags, (struct sockaddr *)addr, 0);
+
+  ssh_userland_refresh_socket(sockfd);
+  return ret;
+}
+
+PUBLIC int rxbuf_read_direct(int sockfd, u_int8_t *buf, u_int16_t maxlen,
+                             struct sockaddr_in *from)
+{
+  struct pollfd pfd;
+  int ret;
+
+  pfd.fd = sockfd;
+  pfd.events = POLLIN | POLLHUP;
+  pfd.revents = 0;
+  if (poll(&pfd, 1, 0) <= 0 || (pfd.revents & POLLIN) == 0) {
+    ssh_userland_refresh_socket(sockfd);
+    return 0;
+  }
+
+  if (socket_table[sockfd].type == SOCK_STREAM) {
+    ret = recv_msg(sockfd, buf, (int)maxlen, 0);
+  } else {
+    ret = recvfrom(sockfd, buf, (int)maxlen, 0, (struct sockaddr *)from, 0);
+  }
+  ssh_userland_refresh_socket(sockfd);
+  return ret;
+}
+
+PUBLIC int socket_begin_close(int sockfd)
+{
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS)
+    return -1;
+
+  closesocket(sockfd);
+  socket_table[sockfd].state = SOCK_STATE_CLOSED;
+  socket_table[sockfd].tx_pending = 0;
+  return 0;
+}
+
+PUBLIC int kern_close_socket(int sockfd)
+{
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS)
+    return -1;
+  if (socket_table[sockfd].state == SOCK_STATE_UNUSED)
+    return 0;
+
+  closesocket(sockfd);
+  memset(&socket_table[sockfd], 0, sizeof(socket_table[sockfd]));
+  socket_table[sockfd].state = SOCK_STATE_UNUSED;
+  return 0;
+}
+
+PUBLIC void ssh_userland_network_fill_gateway_addr(struct sockaddr_in *addr,
+                                                   u_int16_t port)
+{
+  if (addr == 0)
+    return;
+
+  memset(addr, 0, sizeof(*addr));
+  addr->sin_family = AF_INET;
+  addr->sin_port = htons(port);
+  if (ssh_userland_runtime.allow_ip != 0) {
+    addr->sin_addr = ssh_userland_runtime.allow_ip;
+  } else {
+    addr->sin_addr = ((u_int32_t)10) |
+                     ((u_int32_t)0 << 8) |
+                     ((u_int32_t)2 << 16) |
+                     ((u_int32_t)2 << 24);
+  }
+}
+
+PUBLIC struct tty *tty_alloc_pty(void)
+{
+  int i;
+
+  for (i = 0; i < (int)(sizeof(ssh_userland_ttys) / sizeof(ssh_userland_ttys[0])); i++) {
+    int fd;
+
+    if (ssh_userland_ttys[i].active)
+      continue;
+    fd = openpty();
+    if (fd < 0)
+      return 0;
+    ssh_userland_ttys[i].active = TRUE;
+    ssh_userland_ttys[i].fd = fd;
+    return &ssh_userland_ttys[i];
+  }
+  return 0;
+}
+
+PUBLIC void tty_release(struct tty *tty)
+{
+  if (tty == 0 || !tty->active)
+    return;
+  close(tty->fd);
+  tty->fd = -1;
+  tty->active = FALSE;
+}
+
+PUBLIC int tty_set_winsize(struct tty *tty, u_int16_t cols, u_int16_t rows)
+{
+  struct winsize winsize;
+
+  if (tty == 0 || !tty->active)
+    return -1;
+
+  winsize.cols = cols;
+  winsize.rows = rows;
+  return set_winsize(tty->fd, &winsize);
+}
+
+PUBLIC pid_t tty_get_foreground_pid(struct tty *tty)
+{
+  if (tty == 0 || !tty->active)
+    return 0;
+  return get_foreground_pid(tty->fd);
+}
+
+PUBLIC ssize_t tty_master_read(struct tty *tty, void *buf, size_t count)
+{
+  if (tty == 0 || !tty->active)
+    return 0;
+  return read(tty->fd, buf, count);
+}
+
+PUBLIC ssize_t tty_master_write(struct tty *tty, const void *buf, size_t count)
+{
+  if (tty == 0 || !tty->active)
+    return 0;
+  return write(tty->fd, buf, count);
+}
+
+PUBLIC pid_t kernel_execve_tty(const char *filename, char *const argv[],
+                               struct tty *tty)
+{
+  if (tty == 0 || !tty->active)
+    return -1;
+  return execve_pty(filename, argv, tty->fd);
+}
+
+PUBLIC int process_has_pid(pid_t pid)
+{
+  struct task_struct *proc;
+  struct dlist_set *list;
+
+  if (pid < 0)
+    return FALSE;
+
+  proc = (struct task_struct *)getpstat();
+  if (proc == 0)
+    return FALSE;
+
+  list = &proc->run_list;
+  while (TRUE) {
+    struct task_struct *task =
+        dlist_entry(list, struct task_struct, run_list);
+
+    if (task->pid == pid) {
+      if (task->state == TASK_ZOMBIE) {
+        waitpid(pid, 0, 0);
+        return FALSE;
+      }
+      return TRUE;
+    }
+    list = list->next;
+    if (list == &proc->run_list)
+      break;
+  }
+  return FALSE;
+}
+
+PUBLIC int sys_kill(pid_t pid, int sig)
+{
+  return kill(pid, sig);
+}
 #else
 #include <sys/types.h>
 #include <string.h>
@@ -396,6 +1050,45 @@ PRIVATE void ssh_audit_state(const char *prefix, int value)
   admin_runtime_audit_line(message);
 }
 
+PRIVATE int ssh_socket_tx_pending(int sockfd)
+{
+#ifdef USERLAND_SSHD_BUILD
+  struct pollfd pfd;
+
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS)
+    return FALSE;
+  if (socket_table[sockfd].state == SOCK_STATE_UNUSED ||
+      socket_table[sockfd].state == SOCK_STATE_CLOSED) {
+    socket_table[sockfd].tx_pending = 0;
+    return FALSE;
+  }
+
+  pfd.fd = sockfd;
+  pfd.events = POLLOUT | POLLHUP;
+  pfd.revents = 0;
+  if (poll(&pfd, 1, 0) < 0) {
+    admin_runtime_audit_line("ssh_tx_poll_error");
+    return socket_table[sockfd].tx_pending != 0;
+  }
+  if ((pfd.revents & POLLHUP) != 0) {
+    socket_table[sockfd].state = SOCK_STATE_CLOSED;
+    socket_table[sockfd].tx_pending = 0;
+    return FALSE;
+  }
+  if ((pfd.revents & POLLOUT) != 0) {
+    socket_table[sockfd].tx_pending = 0;
+    return FALSE;
+  }
+
+  socket_table[sockfd].tx_pending = 1;
+  return TRUE;
+#else
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS)
+    return FALSE;
+  return socket_table[sockfd].tx_pending != 0;
+#endif
+}
+
 PRIVATE void ssh_fill_bind_addr(struct sockaddr_in *addr, u_int16_t port)
 {
   memset(addr, 0, sizeof(struct sockaddr_in));
@@ -662,7 +1355,7 @@ PRIVATE int ssh_send_banner(struct ssh_connection *conn)
 {
   if (conn->banner_sent)
     return 0;
-  if (socket_table[conn->fd].tx_pending != 0) {
+  if (ssh_socket_tx_pending(conn->fd)) {
     ssh_audit_state("ssh_banner_tx_pending", socket_table[conn->fd].tx_pending);
     return 0;
   }
@@ -829,6 +1522,7 @@ PRIVATE int ssh_queue_kexinit(struct ssh_connection *conn)
     return -1;
   }
   conn->kexinit_sent = TRUE;
+  ssh_audit_state("ssh_kexinit_len", conn->server_kexinit_len);
   return 0;
 }
 
@@ -1145,6 +1839,7 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   ssh_reader_get_string(&reader, &client_public, &client_public_len);
   if (reader.error || client_public_len != SSH_CRYPTO_CURVE25519_BYTES)
     return -1;
+  admin_runtime_audit_line("ssh_kex_client_public_ok");
 
   ssh_crypto_random_seed(ssh_runtime_rng_seed);
   ssh_crypto_random_fill(ssh_kex_server_secret, sizeof(ssh_kex_server_secret));
@@ -1163,11 +1858,13 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
       return -1;
     }
   }
+  admin_runtime_audit_line("ssh_kex_curve_done");
 
   hostkey_len = ssh_build_hostkey_blob(ssh_kex_hostkey_blob,
                                        sizeof(ssh_kex_hostkey_blob));
   if (hostkey_len < 0)
     return -1;
+  admin_runtime_audit_line("ssh_kex_hostkey_blob_done");
 
   ssh_writer_init(&writer, ssh_kex_hash_input, sizeof(ssh_kex_hash_input));
   ssh_writer_put_string(&writer,
@@ -1193,6 +1890,7 @@ PRIVATE int ssh_handle_kex_init(struct ssh_connection *conn,
   ssh_crypto_sha256(conn->exchange_hash,
                     ssh_kex_hash_input,
                     (size_t)hash_input_len);
+  admin_runtime_audit_line("ssh_kex_hash_done");
   if (!conn->session_id_set) {
     memcpy(conn->session_id, conn->exchange_hash, sizeof(conn->session_id));
     conn->session_id_set = TRUE;
@@ -1885,6 +2583,7 @@ PRIVATE int ssh_pump_banner(struct ssh_connection *conn)
           if (strncmp(conn->banner_buf, "SSH-2.0-", 8) != 0)
             return -1;
           conn->banner_received = TRUE;
+          admin_runtime_audit_line("ssh_banner_rx_ok");
           if (i + 1 < read_len) {
             if (ssh_append_rx(conn, chunk + i + 1, read_len - i - 1) < 0)
               return -1;
@@ -1923,10 +2622,13 @@ PRIVATE void ssh_flush_outbox(struct ssh_connection *conn)
 
   if (conn->out_count <= 0)
     return;
-  if (socket_table[conn->fd].tx_pending != 0)
+  if (ssh_socket_tx_pending(conn->fd)) {
+    ssh_audit_state("ssh_flush_blocked", socket_table[conn->fd].tx_pending);
     return;
+  }
 
   packet = &conn->outbox[conn->out_tail];
+  ssh_audit_state("ssh_flush_len", packet->len);
   if (kern_send(conn->fd, packet->data, packet->len, 0) < 0) {
     ssh_queue_close(conn, "send_failed");
     return;
@@ -1995,7 +2697,7 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
   if (conn->channel.peer_window == 0)
     return;
   if (conn->channel.prompt_kick_pending) {
-    if (socket_table[conn->fd].tx_pending != 0)
+    if (ssh_socket_tx_pending(conn->fd))
       return;
     if (conn->out_count != 0)
       return;
@@ -2075,11 +2777,13 @@ PRIVATE void ssh_accept_pending_connections(void)
 
     auth_result = admin_authorize_peer(peer.sin_addr, 0);
     if (auth_result != ADMIN_AUTH_ALLOW) {
+      ssh_audit_peer("ssh_deny", peer.sin_addr);
       kern_close_socket(child_fd);
       continue;
     }
 
     if (ssh_conn.in_use) {
+      admin_runtime_audit_line("ssh_busy");
       kern_close_socket(child_fd);
       continue;
     }
@@ -2131,6 +2835,8 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
   if (!conn->closing && conn->banner_received) {
     if (ssh_pump_rx(conn) < 0)
       ssh_queue_close(conn, "rx_overflow");
+    else if (conn->rx_len > 0)
+      ssh_audit_state("ssh_rx_len", conn->rx_len);
   }
 
   while (!conn->closing && conn->banner_received && iterations < 8) {
@@ -2160,11 +2866,13 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
     ssh_poll_shell(conn);
   }
 
+  if (conn->out_count > 0)
+    ssh_audit_state("ssh_out_count", conn->out_count);
   ssh_flush_outbox(conn);
 
   if (conn->closing &&
       conn->out_count == 0 &&
-      socket_table[conn->fd].tx_pending == 0 &&
+      !ssh_socket_tx_pending(conn->fd) &&
       !conn->close_initiated &&
       (int)(kernel_tick - conn->close_started_tick) >= SSH_CLOSE_DRAIN_TICKS) {
     socket_begin_close(conn->fd);
@@ -2222,6 +2930,50 @@ PUBLIC void ssh_server_tick(void)
 done:
   ssh_tick_active = FALSE;
 }
+#ifdef USERLAND_SSHD_BUILD
+PRIVATE int ssh_userland_channel_fd(struct ssh_connection *conn)
+{
+  if (conn == 0 || conn->channel.tty == 0 || !conn->channel.tty->active)
+    return -1;
+  return conn->channel.tty->fd;
+}
+
+PRIVATE void ssh_userland_refresh_runtime(void)
+{
+  if (ssh_listener_fd >= 0)
+    ssh_userland_refresh_socket(ssh_listener_fd);
+  if (ssh_conn.in_use && ssh_conn.fd >= 0)
+    ssh_userland_refresh_socket(ssh_conn.fd);
+}
+
+int main(int argc, char **argv)
+{
+  (void)argc;
+  (void)argv;
+
+  ssh_server_init();
+  admin_runtime_audit_line("sshd_main_enter");
+  for (;;) {
+    ssh_userland_load_config();
+    if (admin_runtime_ssh_enabled())
+      break;
+    admin_runtime_audit_line("sshd_wait_config");
+    sleep_ticks(1);
+    kernel_tick++;
+  }
+  ssh_server_tick();
+  admin_runtime_audit_line("sshd_bootstrap_done");
+
+  for (;;) {
+    sleep_ticks(1);
+    kernel_tick++;
+    ssh_userland_refresh_runtime();
+    ssh_server_tick();
+  }
+
+  return 0;
+}
+#endif
 #else
 PUBLIC void ssh_server_init(void) {}
 PUBLIC void ssh_server_tick(void) {}

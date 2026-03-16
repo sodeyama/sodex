@@ -1,0 +1,7 @@
+. /etc/init.d/rc.common
+echo AUDIT rcS_begin
+/usr/bin/rc-order "$1" start
+status=$?
+echo AUDIT rcS_status=$status
+echo AUDIT rcS_done
+exit $status

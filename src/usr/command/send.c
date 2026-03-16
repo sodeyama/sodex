@@ -8,9 +8,12 @@
 int main(int argc, char **argv)
 {
   char buf[BUF_SIZE];
+  int ret;
+
+  (void)argc;
+  (void)argv;
   memset(buf, 0, BUF_SIZE);
-  int ret = send(buf);
-  exit(1);
+  ret = send(buf);
+  exit(ret == 0 ? 0 : 1);
   return 0;
 }
-

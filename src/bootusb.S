@@ -11,10 +11,10 @@
  */
         
 BOOTSEG          = 0x07C0
-INITSEG          = 0x9800
+INITSEG          = 0x9C00
 KERNEL_SEG       = 0x0100       
 KERNEL_STACK_SEG = 0x9000
-KERNEL_STACK_PTR = 0x8000
+KERNEL_STACK_PTR = 0xF000
 
 READ_MAX_SECTS   = 0x40
 

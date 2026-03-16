@@ -18,12 +18,15 @@ PUBLIC int sys_kill(pid_t pid, int signum)
 {
   struct task_struct* proc;
 
-  if (pid <= 0)
+  if (pid < 0)
     return -1;
 
   proc = process_find_pid(pid);
   if (proc == NULL)
     return -1;
+
+  if (signum == 0)
+    return process_has_pid(pid) ? 0 : -1;
 
   proc->signal |= (1<<(signum-1));
   proc->state = TASK_RUNNING;
@@ -46,6 +49,6 @@ PUBLIC void core_dump(int signum)
 
 PUBLIC void task_exit(int signum)
 {
-  (void)signum;
+  current->exit_status = 128 + signum;
   current->state = TASK_ZOMBIE;
 }

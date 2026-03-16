@@ -1,4 +1,5 @@
 #include <pipe.h>
+#include <io.h>
 #include <memory.h>
 #include <process.h>
 
@@ -40,8 +41,11 @@ PRIVATE ssize_t pipe_read(struct file *file, void *buf, size_t count)
   pipe = (struct pipe_info *)file->private_data;
   if (pipe == NULL)
     return -1;
-  if (pipe->data_size == 0)
-    return pipe->write_open == 0 ? 0 : 0;
+  while (pipe->data_size == 0) {
+    if (pipe->write_open == 0)
+      return 0;
+    enableInterrupt();
+  }
 
   total = count;
   if (total > pipe->data_size)

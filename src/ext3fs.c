@@ -47,14 +47,9 @@ PRIVATE void __read_dentry(ext3_inode* inode, ext3_dentry* parent);
 PRIVATE ext3_dentry* __read_rootdir(u_int32_t ino);
 PRIVATE ext3_dentry* __create_file(const char* pathname,
                                    int flags, mode_t mode);
-PRIVATE void __change_parentdir(ext3_dentry* parent, ext3_dentry* child);
 PRIVATE ext3_dentry* __get_dentry(const char* dirname, ext3_dentry* dentry);
 PRIVATE ext3_dentry* __dir_walk(const char* pathname,
                                 ext3_dentry* search_dentry);
-PRIVATE int __does_exist(ext3_inode* inode, int lblock, char** iblock_buf,
-                         int* real_block);
-PRIVATE int __insert_dir_data(char* datablock, int fileino, u_int8_t file_type,
-                              char *name, int last);
 PRIVATE void ext3_trim_trailing_slash(char *path);
 PRIVATE ext3_dentry* ext3_resolve_path(char *pathbuf);
 PRIVATE ext3_dentry* ext3_resolve_parent(char *pathbuf, char **name_out);
@@ -948,35 +943,6 @@ PRIVATE ext3_dentry* __create_file(const char* pathname,
   return dentry;
 }
 
-PRIVATE void __change_parentdir(ext3_dentry* parent, ext3_dentry* child)
-{
-  char* p = parent->d_dirblock;
-  char* prev = p, *firstp = p;
-  u_int16_t len, sumlen;
-  len = sumlen = 0;
-
-  while (sumlen < BLOCK_SIZE) {
-    prev = p;
-    len = ((u_int16_t*)(p+4))[0];
-    p += len;
-    sumlen += len;
-  }
-  u_int16_t prev_reclen = 8 + prev[6]; // 8 + namelen
-  memcpy(prev+4, &prev_reclen, 2);
-
-  char* newdirp = prev + prev_reclen;
-  int namelen = child->d_namelen;
-  if (namelen%4 != 0)
-    namelen += 4 - namelen%4;
-  int reclen = BLOCK_SIZE - (newdirp - firstp);
-
-  memcpy(newdirp, &(child->d_inonum), 4);
-  memcpy(newdirp+4, &reclen, 2);
-  memcpy(newdirp+6, &(child->d_namelen), 1);
-  memcpy(newdirp+7, &(child->d_filetype), 1);
-  memcpy(newdirp+8, child->d_name, namelen);
-}
-
 PRIVATE ext3_dentry* __get_dentry(const char* filename, ext3_dentry* dentry)
 {
   ext3_dentry* pdentry;
@@ -1089,46 +1055,6 @@ PUBLIC int ext3_open(const char* pathname, int flags, mode_t mode)
   return fd;
 }
 
-PRIVATE void ext3_read_1block(ext3_dentry* dentry, void* buf, int lblock,
-                              off_t first_pos, off_t end_pos)
-{
-  ext3_inode* inode = dentry->d_inode;
-
-  int real_block;
-  if (lblock <= BLOCK_ZERO_STAGE) {
-    real_block = inode->i_block[lblock];
-  } else if (lblock <= BLOCK_FIRST_STAGE) {
-    int first_stage = inode->i_block[BLOCK_ZERO_STAGE+1];
-    u_int32_t* temp = kalloc(BLOCK_SIZE);
-    if (temp == NULL) {
-      _kprintf("%s kalloc error\n", __func__);
-      return;
-    }
-    rawdev.raw_read(first_stage*BLOCK_SIZE/FDC_SECTOR_SIZE,
-             BLOCK_SIZE/FDC_SECTOR_SIZE, temp);
-    real_block = temp[lblock - BLOCK_ZERO_STAGE - 1];
-    int err = kfree(temp);
-    if (err)
-      _kprintf("%s:kfree error:%x\n", __func__, err);
-  } else if (lblock <= BLOCK_SECOND_STAGE) {
-    _kputs("We don't implement the second stage of i_blocks");
-  } else if (lblock <= BLOCK_THIRD_STAGE) {
-    _kputs("We don't implement the third stage of i_blocks");
-  } else {
-    _kputs("The size of data is too large blocks.");
-  }
-
-  char* readbuf = kalloc(BLOCK_SIZE);
-  if (readbuf == NULL) {
-    _kprintf("%s readbuf kalloc error\n", __func__);
-    return;
-  }
-  rawdev.raw_read(real_block*BLOCK_SIZE/FDC_SECTOR_SIZE,
-           BLOCK_SIZE/FDC_SECTOR_SIZE, readbuf);
-  memcpy(buf, readbuf, end_pos - first_pos + 1);
-  kfree(readbuf);
-}
-
 PUBLIC ssize_t ext3_read(int fd, void* buf, size_t count)
 {
   ext3_dentry* dentry = FD_TODENTRY(fd, current);
@@ -1176,139 +1102,6 @@ PUBLIC ssize_t ext3_read(int fd, void* buf, size_t count)
 
   file->f_pos += total;
   return (ssize_t)total;
-}
-
-PRIVATE int __does_exist(ext3_inode* inode, int lblock, char** iblock_buf,
-                         int* real_block)
-{
-  if (lblock <= BLOCK_ZERO_STAGE) {
-    *real_block = inode->i_block[lblock];
-    if (*real_block == 0)
-      return FALSE;
-    else
-      return TRUE;
-  } else if (lblock <= BLOCK_FIRST_STAGE) {
-    int first_stage = inode->i_block[BLOCK_ZERO_STAGE+1];
-    rawdev.raw_read(first_stage*BLOCK_SIZE/FDC_SECTOR_SIZE,
-             BLOCK_SIZE/FDC_SECTOR_SIZE, *iblock_buf);
-    *real_block = (*iblock_buf)[lblock - BLOCK_ZERO_STAGE - 1];
-    if (*real_block == 0)
-      return FALSE;
-    else
-      return TRUE;
-  } else if (lblock <= BLOCK_SECOND_STAGE) {
-    _kputs("We don't implement the second stage of i_blocks");
-  } else if (lblock <= BLOCK_THIRD_STAGE) {
-    _kputs("We don't implement the third stage of i_blocks");
-  } else {
-    _kputs("The size of data is too large blocks.");
-  }
-  return FALSE;
-}
-
-PRIVATE void ext3_write_1block(ext3_dentry* dentry, const void* buf, int lblock,
-                               off_t first_pos, off_t end_pos)
-{
-  ext3_inode* inode = dentry->d_inode;
-  char* readbuf = kalloc(BLOCK_SIZE);
-  if (readbuf == NULL) {
-    _kprintf("%s kalloc error\n", __func__);
-    return;
-  }
-  memset(readbuf, 0, BLOCK_SIZE);
-  int realblock;
-
-  int exist = __does_exist(inode, lblock, &readbuf, &realblock);
-  if (exist == TRUE) {
-    char* block_buf = kalloc(BLOCK_SIZE);
-    if (block_buf == NULL) {
-      _kprintf("%s kalloc error\n", __func__);
-      return;
-    }
-    rawdev.raw_read(realblock*BLOCK_SIZE/FDC_SECTOR_SIZE,
-             BLOCK_SIZE/FDC_SECTOR_SIZE, block_buf);
-    memcpy(block_buf + first_pos, buf, end_pos - first_pos + 1);
-
-#ifdef DIRTY
-    // dirty set
-    ext3_block_dirty* bdirty = kalloc(sizeof(ext3_block_dirty));
-    if (bdirty == NULL) {
-      _kprintf("%s kalloc error\n", __func__);
-      return;
-    }
-    memset((char*)bdirty, 0, sizeof(ext3_block_dirty));
-    bdirty->iblock = realblock;
-    bdirty->pblock = block_buf;
-    dlist_insert_after(&(bdirty->list), &(rootdirty->d_blkdirty.list));
-#endif
-  } else {
-    int newblock = __alloc_block();
-    char* block_buf = kalloc(BLOCK_SIZE);
-    if (block_buf == NULL) {
-      _kprintf("%s kalloc error\n", __func__);
-      return;
-    }
-    memset(block_buf, 0, BLOCK_SIZE);
-    memcpy(block_buf + first_pos, buf, end_pos - first_pos);
-#ifdef DIRTY
-    // dirty set
-    ext3_block_dirty* bdirty = kalloc(sizeof(ext3_block_dirty));
-    if (bdirty == NULL) {
-      _kprintf("%s kalloc error\n", __func__);
-      return;
-    }
-    memset((char*)bdirty, 0, sizeof(ext3_block_dirty));
-    bdirty->iblock = newblock;
-    bdirty->pblock = block_buf;
-    dlist_insert_after(&(bdirty->list), &(rootdirty->d_blkdirty.list));
-#endif
-
-    if (lblock <= BLOCK_ZERO_STAGE) {
-      inode->i_block[lblock] = newblock;
-#ifdef DIRTY
-      // dirty set
-      ext3_inode_dirty* idirty = kalloc(sizeof(ext3_inode_dirty));
-      if (idirty == NULL) {
-        _kprintf("%s kalloc error\n", __func__);
-        return;
-      }
-      memset((char*)idirty, 0, sizeof(ext3_inode_dirty));
-      idirty->ino = dentry->d_inonum;
-      idirty->inode = dentry->d_inode;
-      dlist_insert_after(&(idirty->list), &(rootdirty->d_inodirty.list));
-#endif
-    } else if (lblock <= BLOCK_FIRST_STAGE) {
-      readbuf[lblock - BLOCK_ZERO_STAGE - 1] = newblock;
-
-#ifdef DIRTY
-      // dirty set
-      ext3_block_dirty* in_bdirty = kalloc(sizeof(ext3_block_dirty));
-      if (in_bdirty == NULL) {
-        _kprintf("%s kalloc error\n", __func__);
-        return;
-      }
-      memset((char*)in_bdirty, 0, sizeof(ext3_block_dirty));
-      in_bdirty->iblock = inode->i_block[BLOCK_ZERO_STAGE+1];
-      in_bdirty->pblock = readbuf;
-      dlist_insert_after(&(in_bdirty->list), &(rootdirty->d_blkdirty.list));
-#endif
-    } else if (lblock <= BLOCK_SECOND_STAGE) {
-      _kputs("We don't implement the second stage of i_blocks");
-    } else if (lblock <= BLOCK_THIRD_STAGE) {
-      _kputs("We don't implement the third stage of i_blocks");
-    } else {
-      _kputs("The size of data is too large blocks.");
-    }
-
-    super_block.s_free_blocks_count--;
-    group_descs[0].bg_free_blocks_count--;
-#ifdef DIRTY
-    // dirty set
-    rootdirty->d_super = TRUE;
-    rootdirty->d_group = TRUE;
-    rootdirty->d_inobmp = TRUE;
-#endif
-  }
 }
 
 PUBLIC ssize_t ext3_write(int fd, const void* buf, size_t count)
@@ -1364,55 +1157,6 @@ PUBLIC ssize_t ext3_write(int fd, const void* buf, size_t count)
   file->f_pos = base_pos + (off_t)total;
   ext3_flush();
   return (ssize_t)total;
-}
-
-PRIVATE int __insert_dir_data(char* datablock, int fileino, u_int8_t file_type,
-                              char *name, int last)
-{
-  u_int16_t rec_len;
-  u_int8_t  pure_name_len, name_len;
-
-  name_len = strlen(name);
-  pure_name_len = name_len;
-  if (name_len%4 != 0)
-    name_len += 4 - name_len%4;
-  
-  char* name_buf = kalloc(name_len);
-  if (name_buf == NULL) {
-    _kprintf("%s kalloc error\n", __func__);
-    return 0;
-  }
-  memset(name_buf, 0, name_len);
-  memcpy(name_buf, name, strlen(name));
-  rec_len = 8 + name_len;
-
-  // rec_len check and search null point
-  u_int16_t len, sum_len = 0;
-  char *p = datablock;
-  while (TRUE) {
-    if (p[4] == 0 && p[5] == 0)
-      break;
-    else {
-      len = ((u_int16_t*)(p+4))[0];
-      p += len;
-      sum_len += len;
-    }
-  }
-
-  if (last)
-    rec_len = BLOCK_SIZE - sum_len;
-
-  memcpy(p, &fileino, 4);
-  memcpy(p+4, &rec_len, 2);
-  memcpy(p+6, &pure_name_len, 1);
-  memcpy(p+7, &file_type, 1);
-  memcpy(p+8, name_buf, name_len);
-
-  int err = kfree(name_buf);
-  if (err)
-    _kprintf("%s:kfree error:%s\n", __func__, err);
-
-  return rec_len;
 }
 
 PUBLIC int ext3_mkdir(const char* pathname, mode_t mode)

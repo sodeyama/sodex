@@ -27,6 +27,17 @@
 - stop 時の signal 送出
 - status の exit code
 
+## 実装メモ
+
+2026-03-17 の hardening で、`sshd` service の契約と failure-path を固定した。
+
+- `/etc/init.d/sshd` は `--require /usr/bin/sshd` と
+  `--require /etc/sodex-admin.conf` を通して前提を明示確認する
+- `status`, `restart` に加えて `stop`, `force-reload`,
+  invalid pidfile, prerequisite failure の結果を smoke で固定した
+- `run_qemu_service_smoke.py` で再起動後の再接続を確認し、
+  `run_qemu_service_contract_smoke.py` で exit status 契約を固定した
+
 ## `term` との関係
 
 初回 cutover では `sshd` だけを service script 化してよい。

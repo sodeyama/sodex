@@ -32,6 +32,7 @@ struct tty;
 #define TASK_STOPPED            4
 
 #define ERROR_WAITPID       -1
+#define WNOHANG             1
 
 struct wait_queue {
     struct task_struct *task;
@@ -93,8 +94,10 @@ struct task_struct {
   u_int32_t         stime;
   u_int32_t         state;
   int               auto_reap;
+  int               exit_status;
   u_int32_t         signal;
   sighandler_t      sigactions[MAX_SIGNALS];
+  struct wait_queue *child_wait;
 };
 
 struct hard_context {
@@ -157,6 +160,7 @@ PUBLIC void sleep_on_timeout(struct wait_queue **wq, u_int32_t ticks);
 PUBLIC void wakeup(struct wait_queue **wq);
 PUBLIC struct task_struct *process_find_pid(pid_t pid);
 PUBLIC int process_has_pid(pid_t pid);
+PUBLIC struct task_struct *process_init_task(void);
 
 PUBLIC volatile u_int32_t kernel_tick;
 PUBLIC volatile int process_in_timer_interrupt;

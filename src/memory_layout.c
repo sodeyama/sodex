@@ -9,7 +9,7 @@
 #define SODEX_RAM_CAP_MB 0
 #endif
 
-#define MEMORY_BOOT_INFO_VADDR (__PAGE_OFFSET + 0x00098000)
+#define MEMORY_BOOT_INFO_VADDR (__PAGE_OFFSET + 0x0009c000)
 
 PRIVATE memory_info_t g_memory_info;
 PRIVATE memory_layout_policy_t g_memory_layout;

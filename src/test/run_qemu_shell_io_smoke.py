@@ -287,7 +287,7 @@ def main() -> int:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
         wait_for_metric(serial_log, "full_redraw", timeout)
-        monitor.command(f"screendump {prompt_ppm}", pause=0.3)
+        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
 
         for command in commands:
             monitor.send_text(command)

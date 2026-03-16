@@ -41,20 +41,6 @@ PUBLIC int sys_chdir(char* path)
     return FALSE;
   } else {
     current->dentry = new_dentry;
-
-    /* We set the all process to new_dentry at once.
-     *  Afterwords, we will modify setting related process
-     *  to  new dentry.
-     */
-    struct dlist_set* plist = &(current->run_list);
-    while (TRUE) {
-      struct task_struct* proc =
-        dlist_entry(plist, struct task_struct, run_list);
-      proc->dentry = new_dentry;
-      plist = plist->next;
-      if (plist == &(current->run_list))
-        break;
-    }
     return TRUE;
   }
 }
@@ -92,4 +78,3 @@ PRIVATE int __path_walk(char* abs_path, ext3_dentry* dentry)
     return NOTROOT;
   }
 }
-

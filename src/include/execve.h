@@ -5,8 +5,8 @@
 
 struct tty;
 
-#define ARGV_MAX_NUMS 4
-#define ARGV_MAX_LEN 16
+#define ARGV_MAX_NUMS 32
+#define ARGV_MAX_LEN 128
 
 PUBLIC void kernel_execve(const char *filename, char *const argv[],
                           char *const envp[]);

@@ -17,10 +17,10 @@ char* strchr(const char* s, int c)
 
 char* strrchr(const char* s, int c)
 {
-  char* p = NULL;
+  const char* p = NULL;
   for (; *s; s++)
-	if (*s == (char)c) p = s;
-  return p;
+    if (*s == (char)c) p = s;
+  return (char*)p;
 }
 
 int strcmp(const char* s1, const char* s2)
@@ -53,9 +53,11 @@ char* strcpy(char* dest, const char* src)
 
 char* strncpy(char* dest, const char* src, size_t n)
 {
-  size_t i;
-  for (;i < n; i++)
-    *(dest+i) = *(src+i);
+  size_t i = 0;
+
+  for (; i < n && src[i] != '\0'; i++)
+    dest[i] = src[i];
+  for (; i < n; i++)
+    dest[i] = '\0';
   return dest;
 }
-

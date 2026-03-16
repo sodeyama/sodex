@@ -16,9 +16,10 @@
 #define PROC_STACK_SIZE 0x2000
 
 #define PROC_LEN_FILENAME 32
+#define WNOHANG 1
 
-#define ARGV_MAX_NUMS 4
-#define ARGV_MAX_LEN 16
+#define ARGV_MAX_NUMS 32
+#define ARGV_MAX_LEN 128
 
 
 struct task_struct {

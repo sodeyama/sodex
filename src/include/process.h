@@ -97,6 +97,7 @@ struct task_struct {
   int               exit_status;
   u_int32_t         signal;
   sighandler_t      sigactions[MAX_SIGNALS];
+  struct wait_queue *child_wait;
 };
 
 struct hard_context {

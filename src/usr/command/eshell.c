@@ -4,6 +4,7 @@
 #include <malloc.h>
 #include <fs.h>
 #include <eshell.h>
+#include <debug.h>
 #include <winsize.h>
 #include <shell.h>
 
@@ -34,6 +35,7 @@ int main(int argc, char **argv)
   if (buf == NULL)
     return 1;
   memset(buf, 0, (size_t)input_buf_size);
+  debug_write("AUDIT eshell_ready\n", 19);
 
   while (1) {
     int read_len;

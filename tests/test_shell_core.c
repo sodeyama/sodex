@@ -31,6 +31,20 @@ TEST(parse_pipeline_with_redirection) {
     ASSERT_STR_EQ(program.pipelines[0].commands[1].output_path, "out.txt");
 }
 
+TEST(parse_long_command_arguments) {
+    struct shell_program program;
+    const char *text =
+        "start-stop-daemon --service sshd --action start --exec /usr/bin/sshd "
+        "--pidfile /var/run/sshd.pid --stdout /var/log/sshd.log "
+        "--stderr /var/log/sshd.log --require /usr/bin/sshd "
+        "--require /etc/sodex-admin.conf\n";
+
+    ASSERT_EQ(shell_parse_program(text, (int)strlen(text), &program), 1);
+    ASSERT_EQ(program.pipelines[0].commands[0].argc, 17);
+    ASSERT_STR_EQ(program.pipelines[0].commands[0].argv[16],
+                  "/etc/sodex-admin.conf");
+}
+
 TEST(shell_vars_and_params) {
     struct shell_state state;
     char *params[] = {"start", "now"};
@@ -51,6 +65,7 @@ int main(void)
 
     RUN_TEST(parse_lists_and_background);
     RUN_TEST(parse_pipeline_with_redirection);
+    RUN_TEST(parse_long_command_arguments);
     RUN_TEST(shell_vars_and_params);
 
     TEST_REPORT();

@@ -62,6 +62,25 @@ LSB 風に、少なくとも次を揃える。
 
 pidfile を採るなら stale pidfile の扱いも決める。
 
+## 実装メモ
+
+2026-03-17 の hardening で、service helper の failure-path まで固定した。
+
+- `start-stop-daemon` は stdin を EOF pipe に差し替え、
+  TTY foreground pid を外して daemon の入力依存を切る
+- `stdout` / `stderr` redirect に加えて、
+  `SIGTERM` -> timeout -> `SIGKILL` fallback を実装した
+- `force-reload` を追加し、
+  running / not-running / invalid pidfile の exit status を整理した
+- `--require` で binary / config 前提を共通チェックし、
+  stale pidfile は `status=3` 側で掃除する
+- `run_qemu_service_contract_smoke.py` で
+  `stop`, `force-reload`, stale pidfile, prerequisite failure を固定した
+
+`sodex` にはまだ `setsid()` 相当の session API は無いので、
+この phase では TTY foreground 切り離しと stdio redirect を
+detach 契約として採用する。
+
 ## 変更対象
 
 - 既存

@@ -45,6 +45,7 @@ PRIVATE int maxsignal(u_int32_t signal);
 PRIVATE void reparent_children(struct task_struct *task);
 PRIVATE pid_t reap_child(struct task_struct *task, int *status);
 PRIVATE int child_is_live(const struct task_struct *task);
+PRIVATE void wakeup_parent_waiters(struct task_struct *task);
 
 PUBLIC void init_process()
 {
@@ -159,6 +160,7 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
     // delete the current
     _exit();
   } else if (state == TASK_ZOMBIE) {
+    wakeup_parent_waiters(current);
     if (current->auto_reap) {
       process_in_timer_interrupt = FALSE;
       _exit();
@@ -328,11 +330,7 @@ PUBLIC int sys_waitpid(pid_t pid, int *status, int options)
     if ((options & WNOHANG) != 0)
       return 0;
 
-    enableInterrupt();
-    while (matched != NULL && matched->state != TASK_ZOMBIE) {
-      if (pid == -1)
-        break;
-    }
+    sleep_on(&(current->child_wait));
   }
 }
 
@@ -495,6 +493,8 @@ PRIVATE void reparent_children(struct task_struct *task)
     dlist_remove(&(child->sibling));
     child->parent = init_task;
     dlist_insert_after(&(child->sibling), &(init_task->children));
+    if (child->state == TASK_ZOMBIE)
+      wakeup(&(init_task->child_wait));
     pos = next;
   }
 }
@@ -521,4 +521,11 @@ PRIVATE int child_is_live(const struct task_struct *task)
   if (task == NULL)
     return FALSE;
   return task->state != TASK_ZOMBIE && task->state != TASK_STOPPED;
+}
+
+PRIVATE void wakeup_parent_waiters(struct task_struct *task)
+{
+  if (task == NULL || task->parent == NULL || task->parent == task)
+    return;
+  wakeup(&(task->parent->child_wait));
 }

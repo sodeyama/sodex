@@ -6,6 +6,8 @@
 
 - 2026-03-16: plans 01-06 を実装し、host test / QEMU smoke (`test-qemu-init-rc`, `test-qemu-service`) を通過
 - 2026-03-17: M5 を実装し、LSB metadata / `inittab` runlevel / `jobs` `fg` `bg` を追加した
+- 2026-03-17: 追加調査で、`waitpid(-1)` の busy-loop、daemon detach の不足、`rcS` failure path、`sshd` service の前提チェック不足を後続 hardening 項目として洗い出した
+- 2026-03-17: M6 を実装し、`waitpid(-1)` の sleep/wakeup 化、`start-stop-daemon` の graceful stop / `force-reload` / prerequisite check、`rcS` failure rescue、failure-path smoke を追加した
 - default rootfs は `user` runlevel の `term` を維持し、server overlay は `server-headless` で `sshd` を起動する
 - `init` は `/etc/init.d/rcS` を起動し、`sshd` は service script 経由で起動する
 - `sh` / `eshell` は共通 shell core を使い、service helper と smoke で回帰を固定した
@@ -35,7 +37,7 @@
 | [x] | SIS-09 | shell の background 実行と known pid table を実装する | SIS-02, SIS-04, SIS-07 | `cmd &` の pid を shell が保持し `wait` できる |
 | [x] | SIS-10 | service 向け helper を追加する | SIS-02, SIS-07, SIS-09 | `start/stop/status` を script から共通化できる |
 | [x] | SIS-11 | pidfile / `kill -0` / status exit code を整備する | SIS-10 | LSB 風の `status` 契約を返せる |
-| [x] | SIS-12 | daemon detach の最小基盤を入れる | SIS-01, SIS-10 | 新 process group / session、stdio redirect、TTY 切り離しができる |
+| [x] | SIS-12 | daemon detach の最小基盤を入れる | SIS-01, SIS-10 | stdio redirect と TTY 切り離しで daemon を対話端末から分離できる |
 
 ## M3: boot init と `/etc/init.d`
 
@@ -61,3 +63,13 @@
 | [x] | SIS-20 | LSB comment block と依存順 metadata を解釈する | SIS-14 | `### BEGIN INIT INFO` を読んで順序付けできる |
 | [x] | SIS-21 | `/etc/inittab` または runlevel 相当を導入する | SIS-13, SIS-20 | `rcS` 1 本より細かい policy を持てる |
 | [x] | SIS-22 | `fg` / `bg` / `jobs` などの job control を検討する | SIS-09, SIS-12 | interactive shell の background job をより Unix 風に扱える |
+
+## M6: hardening と failure-path
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SIS-23 | `waitpid(-1)` を sleep/wakeup 化して PID1 reaper の busy-loop を止める | SIS-02, SIS-13 | child が残っていても zombie が無い間は `init` が CPU を無駄に回さない |
+| [x] | SIS-24 | `start-stop-daemon` に stdin / TTY 切り離しと `SIGTERM` + timeout を入れる | SIS-10, SIS-12 | daemon stop が graceful になり、TTY 依存を引きずらない |
+| [x] | SIS-25 | service action / exit status 契約を補完する | SIS-10, SIS-11, SIS-24 | `force-reload` と stale pidfile / `status=3|4` の境界が文書・実装でそろう |
+| [x] | SIS-26 | `rcS` 失敗時ポリシーと `sshd` 前提チェックを固定する | SIS-13, SIS-15 | boot failure の挙動と `/etc/sodex-admin.conf` 前提が script / smoke で一致する |
+| [x] | SIS-27 | failure-path の host/QEMU test を追加する | SIS-23, SIS-24, SIS-25, SIS-26 | `stop`, not running, stale pidfile, `rcS` failure が回帰で固定される |

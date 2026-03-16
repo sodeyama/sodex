@@ -5,4 +5,4 @@
 ### END INIT INFO
 . /etc/init.d/rc.common
 echo AUDIT sshd_service $1
-/usr/bin/start-stop-daemon --service sshd --action "$1" --exec /usr/bin/sshd --pidfile /var/run/sshd.pid --stdout /var/log/sshd.log --stderr /var/log/sshd.log
+/usr/bin/start-stop-daemon --service sshd --action "$1" --exec /usr/bin/sshd --pidfile /var/run/sshd.pid --stdout /var/log/sshd.log --stderr /var/log/sshd.log --require /usr/bin/sshd --require /etc/sodex-admin.conf

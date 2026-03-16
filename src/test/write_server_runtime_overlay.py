@@ -62,6 +62,7 @@ def main() -> int:
     ssh_rng_seed = os.environ.get("SODEX_SSH_RNG_SEED", "")
     config_extra = os.environ.get("SODEX_ADMIN_CONFIG_EXTRA", "")
     initdefault_runlevel = os.environ.get("SODEX_INITDEFAULT_RUNLEVEL", "").strip()
+    init_sysinit = os.environ.get("SODEX_INIT_SYSINIT", "").strip()
 
     if ssh_hostkey_seed and (not ssh_hostkey_public or not ssh_hostkey_secret):
         ssh_hostkey_public, ssh_hostkey_secret = derive_ssh_hostkey(ssh_hostkey_seed)
@@ -99,12 +100,16 @@ def main() -> int:
 
     config_path.write_text("\n".join(lines), encoding="ascii")
 
-    if initdefault_runlevel:
+    if not init_sysinit:
+        init_sysinit = "/etc/init.d/rcS"
+
+    if initdefault_runlevel or init_sysinit != "/etc/init.d/rcS":
         inittab_path = etc_dir / "inittab"
+        runlevel = initdefault_runlevel or "user"
         inittab_lines = [
             "# minimal inittab",
-            f"initdefault:{initdefault_runlevel}",
-            "sysinit:/etc/init.d/rcS",
+            f"initdefault:{runlevel}",
+            f"sysinit:{init_sysinit}",
             "respawn:user:/usr/bin/term",
             "respawn:rescue:/usr/bin/eshell",
             "",

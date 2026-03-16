@@ -5,6 +5,9 @@
 #include <fs.h>
 #include <init_policy.h>
 
+static struct init_service_info g_services[INIT_POLICY_MAX_SERVICES];
+static int g_order[INIT_POLICY_MAX_SERVICES];
+
 static void copy_text(char *dst, int cap, const char *src)
 {
   int i;
@@ -166,8 +169,8 @@ static int run_service_action(const struct init_service_info *service,
 
 int main(int argc, char **argv)
 {
-  struct init_service_info services[INIT_POLICY_MAX_SERVICES];
-  int order[INIT_POLICY_MAX_SERVICES];
+  struct init_service_info *services = g_services;
+  int *order = g_order;
   const char *runlevel;
   const char *action;
   int service_count;
@@ -183,6 +186,8 @@ int main(int argc, char **argv)
 
   runlevel = argv[1];
   action = argc >= 3 ? argv[2] : "start";
+  memset(services, 0, sizeof(g_services));
+  memset(order, 0, sizeof(g_order));
   service_count = scan_services(services, INIT_POLICY_MAX_SERVICES);
   order_count = init_policy_order_services(services, service_count, runlevel,
                                            order, INIT_POLICY_MAX_SERVICES);

@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include <fs.h>
 #include <init_policy.h>
+#include <sleep.h>
 
 static void init_debug_log(const char *text)
 {
@@ -108,6 +109,7 @@ static pid_t init_spawn_command(const char *command)
   char buf[INIT_POLICY_CMD_MAX];
   char *argv[8];
   int argc;
+  pid_t pid;
 
   if (command == 0 || command[0] == '\0')
     return -1;
@@ -119,10 +121,17 @@ static pid_t init_spawn_command(const char *command)
   if (argc <= 0)
     return -1;
   chdir("/");
-  return execve(argv[0], argv, 0);
+  pid = execve(argv[0], argv, 0);
+  if (pid < 0) {
+    init_debug_value("AUDIT init_spawn_failed=", argv[0]);
+    set_foreground_pid(STDIN_FILENO, 0);
+    return -1;
+  }
+  set_foreground_pid(STDIN_FILENO, pid);
+  return pid;
 }
 
-static void init_run_boot_script(const struct init_inittab *inittab)
+static int init_run_boot_script(const struct init_inittab *inittab)
 {
   char *argv[4];
   int status = 0;
@@ -137,7 +146,7 @@ static void init_run_boot_script(const struct init_inittab *inittab)
   pid = execve("/usr/bin/sh", argv, 0);
   if (pid < 0) {
     init_debug_log("AUDIT init_rc_spawn_failed\n");
-    return;
+    return 1;
   }
   if (waitpid(pid, &status, 0) < 0)
     status = 1;
@@ -146,6 +155,25 @@ static void init_run_boot_script(const struct init_inittab *inittab)
     init_debug_log("AUDIT init_rc_done ok\n");
   else
     init_debug_log("AUDIT init_rc_done fail\n");
+  return status;
+}
+
+static const char *init_select_respawn(const struct init_inittab *inittab,
+                                       int boot_status)
+{
+  const char *respawn;
+
+  respawn = init_policy_find_respawn(inittab, inittab->runlevel);
+  if (boot_status == 0)
+    return respawn;
+
+  respawn = init_policy_find_respawn(inittab, "rescue");
+  if (respawn != 0 && respawn[0] != '\0') {
+    init_debug_log("AUDIT init_enter_rescue\n");
+    return respawn;
+  }
+  init_debug_log("AUDIT init_rescue_missing\n");
+  return init_policy_find_respawn(inittab, inittab->runlevel);
 }
 
 int main(int argc, char **argv)
@@ -153,22 +181,27 @@ int main(int argc, char **argv)
   struct init_inittab inittab;
   const char *respawn;
   pid_t foreground_pid;
+  int boot_status;
   int status;
 
   (void)argc;
   (void)argv;
 
   init_load_policy(&inittab);
-  init_run_boot_script(&inittab);
-  respawn = init_policy_find_respawn(&inittab, inittab.runlevel);
+  boot_status = init_run_boot_script(&inittab);
+  respawn = init_select_respawn(&inittab, boot_status);
   foreground_pid = init_spawn_command(respawn);
   for (;;) {
     pid_t pid = waitpid(-1, &status, 0);
 
-    if (pid < 0)
+    if (pid < 0) {
+      sleep_ticks(1);
       continue;
-    if (pid == foreground_pid)
+    }
+    if (pid == foreground_pid) {
+      set_foreground_pid(STDIN_FILENO, 0);
       foreground_pid = init_spawn_command(respawn);
+    }
   }
   return 0;
 }

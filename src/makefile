@@ -230,7 +230,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-service test-qemu-jobs ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -296,6 +296,16 @@ test-qemu-init-rc:
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/init-rc-rootfs-overlay all
 	@echo "=== Running init rc smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) python3 $(BASEDIR)/src/test/run_qemu_init_rc_smoke.py $(FSBOOT) $(LOGDIR)
+	@$(MAKE) test-qemu-init-failure
+
+test-qemu-init-failure:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_INITDEFAULT_RUNLEVEL=server-headless SODEX_INIT_SYSINIT=/etc/init.d/rcS.fail python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/init-failure-rootfs-overlay
+	@mkdir -p $(LOGDIR)/init-failure-rootfs-overlay/etc/init.d
+	@cp $(BASEDIR)/src/test/data/init_rc_fail.sh $(LOGDIR)/init-failure-rootfs-overlay/etc/init.d/rcS.fail
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/init-failure-rootfs-overlay all
+	@echo "=== Running init failure smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_init_failure_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-service:
 	@$(MAKE) clean
@@ -303,6 +313,16 @@ test-qemu-service:
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/service-rootfs-overlay all
 	@echo "=== Running service smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_HOST_SSH_PORT=$(SODEX_HOST_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) python3 $(BASEDIR)/src/test/run_qemu_service_smoke.py $(FSBOOT) $(LOGDIR)
+	@$(MAKE) test-qemu-service-contract
+
+test-qemu-service-contract:
+	@$(MAKE) clean
+	@SODEX_ADMIN_STATUS_TOKEN=$(SODEX_ADMIN_STATUS_TOKEN) SODEX_ADMIN_CONTROL_TOKEN=$(SODEX_ADMIN_CONTROL_TOKEN) SODEX_ADMIN_ALLOW_IP=$(SODEX_ADMIN_ALLOW_IP) SODEX_INITDEFAULT_RUNLEVEL=server-headless SODEX_INIT_SYSINIT=/etc/init.d/rcS.contract SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) SODEX_SSH_SIGNER_PORT=$(SODEX_SSH_SIGNER_PORT) SODEX_SSH_HOSTKEY_ED25519_SEED=$(SODEX_SSH_HOSTKEY_ED25519_SEED) SODEX_SSH_RNG_SEED=$(SODEX_SSH_RNG_SEED) python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/service-contract-rootfs-overlay
+	@mkdir -p $(LOGDIR)/service-contract-rootfs-overlay/etc/init.d
+	@cp $(BASEDIR)/src/test/data/service_contract.sh $(LOGDIR)/service-contract-rootfs-overlay/etc/init.d/rcS.contract
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/service-contract-rootfs-overlay all
+	@echo "=== Running service contract smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_service_contract_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-jobs:
 	@$(MAKE) clean

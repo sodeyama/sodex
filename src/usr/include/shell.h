@@ -3,7 +3,7 @@
 
 #include <sys/types.h>
 
-#define SHELL_MAX_ARGS 16
+#define SHELL_MAX_ARGS 24
 #define SHELL_MAX_ASSIGNMENTS 8
 #define SHELL_MAX_COMMANDS 8
 #define SHELL_MAX_PIPELINES 32

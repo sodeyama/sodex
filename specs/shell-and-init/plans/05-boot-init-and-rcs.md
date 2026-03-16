@@ -73,6 +73,19 @@ service_start sshd /usr/bin/sshd
 - `rcS` 失敗時の fail-safe が決まっている
 - `init` が child reaper として残る
 
+## 実装メモ
+
+2026-03-17 の hardening で、PID1 reaper と boot failure path を固定した。
+
+- `waitpid(-1)` は `child_wait` queue で sleep し、
+  child の zombie 化と init への reparent 時に wakeup する
+- `init` は `rcS` の終了 status を見て、
+  失敗時は `inittab` の `rescue` respawn へフォールバックする
+- rescue shell の可視性は `AUDIT init_enter_rescue` と
+  `AUDIT eshell_ready` を smoke marker にして固定した
+- `run_qemu_init_failure_smoke.py` を追加し、
+  `rcS` failure でも fail-safe で立ち上がることを確認する
+
 ## 完了条件
 
 - `init.c` の hardcode service 起動が `rcS` に移る

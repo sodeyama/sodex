@@ -4,6 +4,7 @@
 #include <uip.h>
 #include <uip_arp.h>
 #include <ne2000.h>
+#include <poll.h>
 #include <socket.h>
 #include <string.h>
 
@@ -62,6 +63,7 @@ void uip_appcall(void) {
     dbg_puts("\n");
     sk->state = SOCK_STATE_CONNECTED;
     wakeup(&sk->connect_wq);
+    poll_notify_all();
   }
 
   if (uip_newdata()) {
@@ -75,6 +77,7 @@ void uip_appcall(void) {
     sk->state = SOCK_STATE_CLOSED;
     wakeup(&sk->recv_wq);
     wakeup(&sk->connect_wq);
+    poll_notify_all();
   }
 
   /* appcall 中だけ uip_send() / uip_close() を呼ぶ */
@@ -86,6 +89,7 @@ void uip_appcall(void) {
     dbg_puts("\n");
     uip_send(sk->tx_buf, sk->tx_len);
     sk->tx_pending = 0;
+    poll_notify_all();
     sent_output = 1;
   }
 

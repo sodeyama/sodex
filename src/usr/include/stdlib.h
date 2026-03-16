@@ -9,6 +9,8 @@
 
 #define CEIL(a, b) ((a&(~(b-1)))+b)
 
+struct admin_ssh_config;
+
 extern ssize_t write(int fd, const void *buf, size_t count);
 extern int open(const char *pathname, int flags, mode_t mode);
 extern ssize_t read(int fd, void *buf, size_t count);
@@ -30,6 +32,8 @@ extern int _brk(void* end_data_segment);
 extern pid_t waitpid(pid_t pid, int *status, int options);
 extern pid_t fork(void);
 extern int set_foreground_pid(int fd, pid_t pid);
+extern pid_t get_foreground_pid(int fd);
+extern int get_admin_ssh_config(struct admin_ssh_config *out);
 extern sighandler_t signal(int signum, sighandler_t sighandler);
 extern int kill(pid_t pid, int sig);
 

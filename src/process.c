@@ -26,7 +26,6 @@
 #include <execve.h>
 #include <admin_server.h>
 #include <debug_shell_server.h>
-#include <ssh_server.h>
 
 EXTERN void network_poll(void);
 EXTERN volatile u_int32_t kernel_tick;
@@ -121,7 +120,6 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
   admin_server_tick();
   http_server_tick();
   debug_shell_server_tick();
-  ssh_server_tick();
   socket_service_pending_tcp();
 
   while (current->signal) {
@@ -159,14 +157,10 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
       process_in_timer_interrupt = FALSE;
       _exit();
     }
-    // skip the current
-    current = dlist_entry(current->run_list.next,
-                          struct task_struct, run_list);
   } else if (state == TASK_RUNNING) {
   } else if (state == TASK_INTERRUPTIBLE) {
-    // skip sleeping process, move to next
-    current = dlist_entry(current->run_list.next,
-                          struct task_struct, run_list);
+    /* schedule() 側ですでに current->next を選ぶので、
+     * ここで進めると 1 task 余計に飛ばしてしまう。 */
   } else {
     _kprintf("The number %x of task state is not implemented\n",
              state);

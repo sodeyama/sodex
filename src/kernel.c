@@ -36,7 +36,6 @@
 #include <socket.h>
 #include <admin_server.h>
 #include <debug_shell_server.h>
-#include <ssh_server.h>
 #include <network_config.h>
 #include <tty.h>
 #include <font_registry.h>
@@ -149,7 +148,6 @@ PUBLIC void start_kernel()
   admin_server_init();
   http_server_init();
   debug_shell_server_init();
-  ssh_server_init();
   _kputs(" KERNEL: SETUP SERVER RUNTIME\n");
 
   init_process();

@@ -68,6 +68,17 @@ struct http_request {
   char token[ADMIN_TOKEN_MAX];
 };
 
+struct admin_ssh_config {
+  u_int32_t allow_ip;
+  u_int16_t ssh_port;
+  u_int16_t ssh_signer_port;
+  char ssh_password[ADMIN_SECRET_MAX];
+  char ssh_hostkey_ed25519_seed[ADMIN_HEX_SEED_MAX];
+  char ssh_hostkey_ed25519_public[ADMIN_HEX_PUBLICKEY_MAX];
+  char ssh_hostkey_ed25519_secret[ADMIN_HEX_SECRETKEY_MAX];
+  char ssh_rng_seed[ADMIN_HEX_SEED_MAX];
+};
+
 PUBLIC void admin_server_init(void);
 PUBLIC void admin_server_tick(void);
 PUBLIC void http_server_init(void);
@@ -105,6 +116,7 @@ PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_seed(void);
 PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_public(void);
 PUBLIC const char *admin_runtime_ssh_hostkey_ed25519_secret(void);
 PUBLIC const char *admin_runtime_ssh_rng_seed(void);
+PUBLIC int admin_runtime_copy_ssh_config(struct admin_ssh_config *out);
 PUBLIC void admin_runtime_audit_line(const char *line);
 PUBLIC void admin_runtime_note_listener_ready(int listener_kind);
 

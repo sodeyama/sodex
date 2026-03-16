@@ -24,6 +24,7 @@ int socket(int domain, int type, int protocol);
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int listen(int sockfd, int backlog);
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+int accept_nowait(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int send_msg(int sockfd, const void *buf, int len, int flags);
 int recv_msg(int sockfd, void *buf, int len, int flags);
@@ -31,6 +32,10 @@ int sendto(int sockfd, const void *buf, int len, int flags,
            const struct sockaddr *addr, socklen_t addrlen);
 int recvfrom(int sockfd, void *buf, int len, int flags,
              struct sockaddr *addr, socklen_t *addrlen);
+int recvfrom_nowait(int sockfd, void *buf, int len, int flags,
+                    struct sockaddr *addr);
+int ssh_signer_roundtrip(int port, const void *request, int request_len,
+                         void *response, int response_len);
 int closesocket(int sockfd);
 
 #endif

@@ -2,7 +2,9 @@
 memset: 
         pushl   %ebp
         movl    %esp, %ebp
-        movl    0x8(%ebp), %edi
+        pushl   %edi
+        movl    0x8(%ebp), %edx
+        movl    %edx, %edi
         movl    0xC(%ebp), %eax
         movl    0x10(%ebp), %ecx
 
@@ -10,6 +12,7 @@ memset:
         rep
         stosb
 
+        movl    %edx, %eax
+        popl    %edi
         popl    %ebp
         ret
-

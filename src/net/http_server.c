@@ -141,7 +141,8 @@ PRIVATE const char *http_status_text(int status_code)
 
 PUBLIC int http_build_response(int status_code, const char *body,
                                char *response, int response_cap,
-                               const char *content_type)
+                               const char *content_type,
+                               int retry_after_seconds)
 {
   int pos = 0;
   int body_len = body ? (int)strlen(body) : 0;
@@ -159,6 +160,10 @@ PUBLIC int http_build_response(int status_code, const char *body,
                          content_type ? content_type : "text/plain");
   pos = http_append_text(response, response_cap, pos, "\r\nContent-Length: ");
   pos = http_append_int(response, response_cap, pos, body_len);
+  if (retry_after_seconds > 0) {
+    pos = http_append_text(response, response_cap, pos, "\r\nRetry-After: ");
+    pos = http_append_int(response, response_cap, pos, retry_after_seconds);
+  }
   pos = http_append_text(response, response_cap, pos,
                          "\r\nConnection: close\r\n\r\n");
   if (body_len > 0) {
@@ -166,6 +171,27 @@ PUBLIC int http_build_response(int status_code, const char *body,
   }
   return pos;
 }
+
+#ifndef TEST_BUILD
+PRIVATE void http_build_auth_error_body(const char *reason,
+                                        u_int32_t retry_after_ticks,
+                                        char *body, int body_cap)
+{
+  int pos = 0;
+  int retry_after_seconds = admin_retry_after_seconds(retry_after_ticks);
+
+  if (body == 0 || body_cap <= 0)
+    return;
+
+  body[0] = '\0';
+  pos = http_append_text(body, body_cap, pos, reason ? reason : "error");
+  if (retry_after_seconds > 0) {
+    pos = http_append_text(body, body_cap, pos, " retry=");
+    pos = http_append_int(body, body_cap, pos, retry_after_seconds);
+  }
+  http_append_char(body, body_cap, pos, '\n');
+}
+#endif
 
 PUBLIC int http_parse_request(const char *data, int len,
                               struct http_request *out)
@@ -402,6 +428,7 @@ PRIVATE void http_accept_pending_connections(void)
     int child_fd;
     int slot;
     int auth_result;
+    u_int32_t retry_after_ticks = 0;
 
     disableInterrupt();
     child_fd = socket_try_accept(http_listener_fd, &peer);
@@ -409,16 +436,17 @@ PRIVATE void http_accept_pending_connections(void)
     if (child_fd < 0)
       return;
 
-    auth_result = admin_authorize_peer(peer.sin_addr, 0);
+    auth_result = admin_authorize_peer(peer.sin_addr, &retry_after_ticks);
     if (auth_result != ADMIN_AUTH_ALLOW) {
       char body[64];
       char response[ADMIN_RESPONSE_MAX];
-      http_copy_string(body, sizeof(body),
-                       auth_result == ADMIN_AUTH_THROTTLED
-                           ? "throttled\n"
-                           : "forbidden\n");
+      http_build_auth_error_body(auth_result == ADMIN_AUTH_THROTTLED
+                                     ? "throttled"
+                                     : "forbidden",
+                                 retry_after_ticks, body, sizeof(body));
       http_build_response(auth_result == ADMIN_AUTH_THROTTLED ? 429 : 403,
-                          body, response, sizeof(response), "text/plain");
+                          body, response, sizeof(response), "text/plain",
+                          admin_retry_after_seconds(retry_after_ticks));
       kern_send(child_fd, response, (int)strlen(response), 0);
       kern_close_socket(child_fd);
       continue;
@@ -427,7 +455,8 @@ PRIVATE void http_accept_pending_connections(void)
     slot = http_find_free_connection();
     if (slot < 0) {
       char response[ADMIN_RESPONSE_MAX];
-      http_build_response(403, "busy\n", response, sizeof(response), "text/plain");
+      http_build_response(403, "busy\n", response, sizeof(response), "text/plain",
+                          0);
       kern_send(child_fd, response, (int)strlen(response), 0);
       kern_close_socket(child_fd);
       continue;
@@ -449,6 +478,7 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
   int status_code = 200;
   const char *content_type = "application/json";
   int auth_result;
+  u_int32_t retry_after_ticks = 0;
 
   if (conn == 0 || !conn->in_use)
     return;
@@ -461,7 +491,8 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
   if (!conn->closing &&
       (int)(kernel_tick - conn->accepted_tick) > HTTP_IDLE_TIMEOUT_TICKS) {
     http_build_response(403, "timeout\n",
-                        conn->response, sizeof(conn->response), "text/plain");
+                        conn->response, sizeof(conn->response), "text/plain",
+                        0);
     http_send_and_close(conn, conn->response);
   }
 
@@ -484,7 +515,8 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
 
     if (conn->length + read_len >= ADMIN_HTTP_REQUEST_MAX) {
       http_build_response(413, "too_large\n",
-                          conn->response, sizeof(conn->response), "text/plain");
+                          conn->response, sizeof(conn->response), "text/plain",
+                          0);
       http_send_and_close(conn, conn->response);
       return;
     }
@@ -500,19 +532,25 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
   if (http_parse_request(conn->buffer, conn->length, &conn->request) < 0 ||
       http_map_request(&conn->request, &conn->admin_request) < 0) {
     http_build_response(400, "bad_request\n",
-                        conn->response, sizeof(conn->response), "text/plain");
+                        conn->response, sizeof(conn->response), "text/plain",
+                        0);
     http_send_and_close(conn, conn->response);
     return;
   }
 
   auth_result = admin_authorize_request_detailed(&conn->admin_request,
-                                                 conn->peer_addr, 0);
+                                                 conn->peer_addr,
+                                                 &retry_after_ticks);
   if (auth_result != ADMIN_AUTH_ALLOW) {
+    http_build_auth_error_body(auth_result == ADMIN_AUTH_THROTTLED
+                                   ? "throttled"
+                                   : "forbidden",
+                               retry_after_ticks, conn->body,
+                               sizeof(conn->body));
     http_build_response(auth_result == ADMIN_AUTH_THROTTLED ? 429 : 403,
-                        auth_result == ADMIN_AUTH_THROTTLED
-                            ? "throttled\n"
-                            : "forbidden\n",
-                        conn->response, sizeof(conn->response), "text/plain");
+                        conn->body,
+                        conn->response, sizeof(conn->response), "text/plain",
+                        admin_retry_after_seconds(retry_after_ticks));
     http_send_and_close(conn, conn->response);
     return;
   }
@@ -527,7 +565,7 @@ PRIVATE void http_poll_connection(struct http_connection *conn)
     status_code = 200;
   }
   http_build_response(status_code, conn->body,
-                      conn->response, sizeof(conn->response), content_type);
+                      conn->response, sizeof(conn->response), content_type, 0);
   http_send_and_close(conn, conn->response);
 }
 

@@ -27,9 +27,9 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | SRT-11 | throttle 応答に retry 情報を返す | SRT-09 | HTTP `429` と text protocol の両方で再試行待ち時間を client が受け取れる |
-| [ ] | SRT-12 | 起動設定の fail-safe と可視化を整える | SRT-07 | config 不備や token 欠落時の挙動が audit / ready marker / test で固定される |
-| [ ] | SRT-13 | server runtime の異常系テストを拡充する | SRT-08, SRT-09, SRT-10 | happy path だけでなく `403` / `429` / `busy` / `timeout` 系も回帰で拾える |
+| [x] | SRT-11 | throttle 応答に retry 情報を返す | SRT-09 | HTTP `429` と text protocol の両方で再試行待ち時間を client が受け取れる |
+| [x] | SRT-12 | 起動設定の fail-safe と可視化を整える | SRT-07 | config 不備や token 欠落時の挙動が audit / ready marker / test で固定される |
+| [x] | SRT-13 | server runtime の異常系テストを拡充する | SRT-08, SRT-09, SRT-10 | happy path だけでなく `403` / `429` / `busy` / `timeout` 系も回帰で拾える |
 | [ ] | SRT-14 | allowlist を複数 peer / CIDR へ広げる | SRT-07, SRT-08 | Linux host / Docker Desktop / CI runner の差を単一 `allow_ip` 上書きなしで吸収できる |
 | [ ] | SRT-15 | debug shell 用の最小 TCP-PTY bridge を実装する | SRT-10, SRT-12, SRT-13 | raw TCP client から token 付きで shell session を張り、切断/再接続まで安定する |
 | [ ] | SRT-16 | 暗号込み `SSH server` を段階導入する | SRT-15 | `OpenSSH` client から最小の shell login が通る |
@@ -98,8 +98,8 @@ Docker 経由の HTTP/admin smoke まで安定化できた。
   - `make docker-server-image` / `make test-docker-server` を追加した
 - [x] `SRT-08` が閉じた後の Docker/headless job の扱いを決める
   - `test-docker-server` は advisory ではなく通常の smoke として扱ってよい
-- [ ] repo ルートから `test-qemu-server` を叩ける入口を揃える
-  - 現状は `src/makefile` 側に target があり、root `makefile` には wrapper がない
+- [x] repo ルートから `test-qemu-server` を叩ける入口を揃える
+  - root `makefile` に `test-qemu-server` wrapper があり、repo ルートから直接叩ける
 - [ ] Linux runner 向け CI workflow/job を追加し、`test-qemu-server` を定期回帰へ載せる
   - repo 直下に CI workflow がまだなく、QEMU smoke は手元実行前提のまま
 - [ ] `test-docker-server` を CI job 化し、artifact upload を整える
@@ -112,26 +112,53 @@ Docker 経由の HTTP/admin smoke まで安定化できた。
 - `test-qemu-server` は ready marker 待ちと fault marker fail-fast を持つ常用 smoke に寄せた
 - Docker/headless 側も同じ ready marker と fault marker を見る smoke を追加し、`SRT-08` の close path 修正後に常用 smoke へ移せる状態にした
 
+2026-03-16 追記:
+
+- `test-docker-server` は build-time toolchain 注入、serial artifact、ready fallback probe までは整備した
+- ただしこの macOS + Docker Desktop arm64 環境では container 内 `qemu-system-i386` が ready に達せず、`Slirp: Failed to send packet` を伴う不安定さが残る
+- Docker smoke の closure 判定は Linux runner でもう一度固定する
+
 ### SRT-11: throttle 応答の retry 情報
 
-- [ ] `admin_authorize_peer()` / `admin_authorize_request_detailed()` の `retry_after_ticks` を call site まで通す
-- [ ] HTTP `429` に `Retry-After` と body 内の retry 値を載せる
-- [ ] text protocol の `ERR throttled` に retry 値を載せる
-- [ ] host test と smoke に throttle 応答の retry 検証を追加する
+- [x] `admin_authorize_peer()` / `admin_authorize_request_detailed()` の `retry_after_ticks` を call site まで通す
+- [x] HTTP `429` に `Retry-After` と body 内の retry 値を載せる
+- [x] text protocol の `ERR throttled` に retry 値を載せる
+- [x] host test と smoke に throttle 応答の retry 検証を追加する
+
+2026-03-16 追記:
+
+- `admin_retry_after_seconds()` を追加し、tick の backoff を秒へ丸めて HTTP/text/debug shell の全 call site へ流した
+- HTTP は `429 Too Many Requests` + `Retry-After: 1` + `throttled retry=1` body を返すようにした
+- text protocol / debug shell は `ERR throttled retry=1` を返すようにした
+- host test と QEMU/Docker smoke で retry 値の検証を追加した
 
 ### SRT-12: 起動設定の fail-safe と可視化
 
-- [ ] `/etc/sodex-admin.conf` の unknown key / parse error / size over を audit に残す
-- [ ] token 欠落時にどこまで listener を立てるかを決め、ready marker に反映する
-- [ ] config 不備時の fail-open / fail-closed を README と test で固定する
-- [ ] `write_server_runtime_overlay.py` と Docker/QEMU smoke で設定不備ケースを再現できるようにする
+- [x] `/etc/sodex-admin.conf` の unknown key / parse error / size over を audit に残す
+- [x] token 欠落時にどこまで listener を立てるかを決め、ready marker に反映する
+- [x] config 不備時の fail-open / fail-closed を README と test で固定する
+- [x] `write_server_runtime_overlay.py` と Docker/QEMU smoke で設定不備ケースを再現できるようにする
+
+2026-03-16 追記:
+
+- config parser は unknown key / invalid value / invalid line format を `config_invalid` audit に残し、`cfgerr` として集計する
+- `config_read open_failed/read_failed/too_large` も audit と `cfgerr` 集計へ含めた
+- token 欠落時は listener は起動したままにし、ready marker と `auth_config` audit で `stok` / `ctok` を見せる方針に固定した
+- `write_server_runtime_overlay.py` に `SODEX_ADMIN_CONFIG_EXTRA` を追加し、QEMU/Docker smoke から意図的な config 不備を注入できるようにした
 
 ### SRT-13: 異常系テストの拡充
 
-- [ ] HTTP の `403` / `429` を QEMU/Docker smoke に入れる
-- [ ] text protocol の `ERR forbidden` / `ERR unauthorized` / `ERR throttled` を回帰項目にする
-- [ ] `busy` / `timeout` / `too_large` の host test を追加する
-- [ ] `SODEX_ADMIN_ALLOW_IP` 上書きと config 差し替えの回帰を固定する
+- [x] HTTP の `403` / `429` を QEMU/Docker smoke に入れる
+- [x] text protocol の `ERR forbidden` / `ERR unauthorized` / `ERR throttled` を回帰項目にする
+- [x] `busy` / `timeout` / `too_large` の host test を追加する
+- [x] `SODEX_ADMIN_ALLOW_IP` 上書きと config 差し替えの回帰を固定する
+
+2026-03-16 追記:
+
+- QEMU/Docker smoke は `GET /status` / `POST /agent/start` の `403`、認証失敗連打後の `429`、回復後の `healthz` を確認する
+- text protocol は `STATUS` の unauthorized、wrong token 連打後の throttled、回復後の `PING` を確認する
+- host test に `ERR busy` / `ERR timeout` / `ERR too_large` の response helper 回帰を追加した
+- ready marker の `stok` / `ctok` / `cfgerr` と、config 差し替え時の audit を host test / smoke で固定した
 
 ### SRT-14: allowlist の複数 peer / CIDR 対応
 

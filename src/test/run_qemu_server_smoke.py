@@ -17,6 +17,7 @@ HOST_HTTP_PORT = 18080
 HOST_ADMIN_PORT = 10023
 STATUS_TOKEN = os.environ.get("SODEX_ADMIN_STATUS_TOKEN", "status-secret")
 CONTROL_TOKEN = os.environ.get("SODEX_ADMIN_CONTROL_TOKEN", "control-secret")
+EXPECTED_CONFIG_ERRORS = int(os.environ.get("SODEX_EXPECT_CONFIG_ERRORS", "0") or "0")
 READY_MARKER = "AUDIT server_runtime_ready"
 FAILURE_MARKERS = ("PF:", "PageFault", "General Protection Exception")
 
@@ -124,6 +125,127 @@ def assert_contains(text: str, needle: str, label: str) -> None:
         raise AssertionError(f"{label}: expected {needle!r} in {text!r}")
 
 
+def assert_status_code(head: str, expected: int, label: str) -> None:
+    assert_contains(head, f"{expected} ", label)
+
+
+def assert_retry_after(head: str, expected_seconds: int, label: str) -> None:
+    assert_contains(head, f"Retry-After: {expected_seconds}", label)
+
+
+def status_access_token() -> str | None:
+    if STATUS_TOKEN:
+        return STATUS_TOKEN
+    if CONTROL_TOKEN:
+        return CONTROL_TOKEN
+    return None
+
+
+def parse_ready_fields(serial_text: str) -> dict[str, str]:
+    for line in reversed(serial_text.splitlines()):
+        if READY_MARKER in line:
+            fields: dict[str, str] = {}
+            for field in line.split():
+                if "=" not in field:
+                    continue
+                key, value = field.split("=", 1)
+                fields[key] = value
+            return fields
+    raise AssertionError("ready marker line was not found")
+
+
+def assert_ready_fields(serial_text: str) -> None:
+    fields = parse_ready_fields(serial_text)
+    expected_stok = "on" if STATUS_TOKEN else "off"
+    expected_ctok = "on" if CONTROL_TOKEN else "off"
+
+    if fields.get("stok") != expected_stok:
+        raise AssertionError(f"ready stok mismatch: {fields!r}")
+    if fields.get("ctok") != expected_ctok:
+        raise AssertionError(f"ready ctok mismatch: {fields!r}")
+    if int(fields.get("cfgerr", "-1")) != EXPECTED_CONFIG_ERRORS:
+        raise AssertionError(f"ready cfgerr mismatch: {fields!r}")
+
+
+def assert_http_status_behavior() -> None:
+    token = status_access_token()
+
+    if token is None:
+        head, body = send_http("GET", "/status")
+        assert_status_code(head, 403, "status forbidden head")
+        assert_contains(body, "forbidden", "status forbidden body")
+        return
+
+    head, body = send_http("GET", "/status", token)
+    assert_status_code(head, 200, "status head")
+    assert_contains(body, '"agent":"stopped"', "status body")
+
+
+def assert_http_control_behavior() -> None:
+    token = status_access_token()
+
+    if not CONTROL_TOKEN:
+        head, body = send_http("POST", "/agent/start")
+        assert_status_code(head, 403, "start forbidden head")
+        assert_contains(body, "forbidden", "start forbidden body")
+        return
+
+    head, body = send_http("POST", "/agent/start", CONTROL_TOKEN)
+    assert_status_code(head, 200, "start head")
+    assert_contains(body, '"agent":"running"', "start body")
+
+    if token is not None:
+        head, body = send_http("GET", "/status", token)
+        assert_status_code(head, 200, "status running head")
+        assert_contains(body, '"agent":"running"', "status running body")
+
+    head, body = send_http("POST", "/agent/stop", CONTROL_TOKEN)
+    assert_status_code(head, 200, "stop head")
+    assert_contains(body, '"agent":"stopped"', "stop body")
+
+
+def assert_admin_status_behavior() -> None:
+    token = status_access_token()
+
+    admin = send_admin("PING\n")
+    assert_contains(admin, "OK PONG", "admin ping")
+
+    if token is None:
+        admin = send_admin("STATUS\n")
+        assert_contains(admin, "ERR unauthorized", "admin unauthorized")
+        return
+
+    admin = send_admin(f"TOKEN {token} STATUS\n")
+    assert_contains(admin, "OK agent=stopped", "admin status")
+
+    admin = send_admin("NOPE\n")
+    assert_contains(admin, "ERR invalid_command", "admin invalid")
+
+    admin = send_admin(f"TOKEN {token} LOG TAIL 32\n")
+    assert_contains(admin, "server_runtime_ready", "admin ready log tail")
+
+
+def assert_http_throttle_behavior() -> None:
+    for _ in range(3):
+        head, body = send_http("GET", "/status", "wrong-secret")
+        assert_status_code(head, 403, "http pre-throttle head")
+        assert_contains(body, "forbidden", "http pre-throttle body")
+
+    head, body = send_http("GET", "/status", "wrong-secret")
+    assert_status_code(head, 429, "http throttle head")
+    assert_retry_after(head, 1, "http throttle retry-after")
+    assert_contains(body, "throttled retry=1", "http throttle body")
+
+
+def assert_admin_throttle_behavior() -> None:
+    for _ in range(3):
+        admin = send_admin("TOKEN wrong-secret STATUS\n")
+        assert_contains(admin, "ERR unauthorized", "admin pre-throttle")
+
+    admin = send_admin("TOKEN wrong-secret STATUS\n")
+    assert_contains(admin, "ERR throttled retry=1", "admin throttle")
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: run_qemu_server_smoke.py <fsboot> <logdir>", file=sys.stderr)
@@ -176,45 +298,29 @@ def main() -> int:
     try:
         deadline = time.time() + timeout
         wait_until_ready(deadline, serial_log, qemu_log)
+        assert_ready_fields(read_text(serial_log))
 
         head, body = send_http("GET", "/healthz")
-        assert_contains(head, "200 OK", "health head")
+        assert_status_code(head, 200, "health head")
         if body != "ok\n":
             raise AssertionError(f"health body mismatch: {body!r}")
 
-        head, body = send_http("GET", "/status", STATUS_TOKEN)
-        assert_contains(head, "200 OK", "status head")
-        assert_contains(body, '"agent":"stopped"', "status body")
+        assert_http_status_behavior()
+        assert_http_control_behavior()
+        assert_admin_status_behavior()
+        assert_http_throttle_behavior()
+        time.sleep(1.1)
 
-        head, body = send_http("POST", "/agent/start", CONTROL_TOKEN)
-        assert_contains(head, "200 OK", "start head")
-        assert_contains(body, '"agent":"running"', "start body")
+        head, body = send_http("GET", "/healthz")
+        assert_status_code(head, 200, "health recovery head")
+        if body != "ok\n":
+            raise AssertionError(f"health recovery body mismatch: {body!r}")
 
-        head, body = send_http("GET", "/status", STATUS_TOKEN)
-        assert_contains(body, '"agent":"running"', "status running body")
-
-        head, body = send_http("POST", "/agent/stop", CONTROL_TOKEN)
-        assert_contains(head, "200 OK", "stop head")
-        assert_contains(body, '"agent":"stopped"', "stop body")
+        assert_admin_throttle_behavior()
+        time.sleep(1.1)
 
         admin = send_admin("PING\n")
-        assert_contains(admin, "OK PONG", "admin ping")
-
-        admin = send_admin("STATUS\n")
-        assert_contains(admin, "ERR unauthorized", "admin unauthorized")
-
-        admin = send_admin(f"TOKEN {STATUS_TOKEN} STATUS\n")
-        assert_contains(admin, "OK agent=stopped", "admin status")
-
-        admin = send_admin(f"TOKEN {CONTROL_TOKEN} AGENT START\n")
-        assert_contains(admin, "OK agent=running", "admin start")
-
-        admin = send_admin("NOPE\n")
-        assert_contains(admin, "ERR invalid_command", "admin invalid")
-
-        admin = send_admin(f"TOKEN {STATUS_TOKEN} LOG TAIL 32\n")
-        assert_contains(admin, "agent_start", "admin log tail")
-        assert_contains(admin, "server_runtime_ready", "admin ready log tail")
+        assert_contains(admin, "OK PONG", "admin recovery ping")
 
         assert_no_guest_failure(serial_log, qemu_log)
 

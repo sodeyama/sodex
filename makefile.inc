@@ -25,14 +25,49 @@ LIST      = ${BUILDDIR}/list
 LOGDIR    = ${BUILDDIR}/log
 
 # Toolchain (cross-compiler for i486 kernel)
-# GNU make の built-in 変数よりこちらを優先しつつ、
-# command line の `make CC=...` はそのまま上書きできるようにする。
-AS      = /opt/homebrew/bin/x86_64-elf-as
-CC      = /opt/homebrew/bin/x86_64-elf-gcc
-CXX     = /usr/bin/g++
-LD      = /opt/homebrew/bin/x86_64-elf-ld
-MAKE    = /usr/bin/make
-AR      = /opt/homebrew/bin/x86_64-elf-ar
+# GNU make の built-in 既定値だけを上書きし、
+# command line / 環境変数からの指定はそのまま尊重する。
+ifeq ($(origin AS), default)
+AS = /opt/homebrew/bin/x86_64-elf-as
+endif
+ifeq ($(origin AS), undefined)
+AS = /opt/homebrew/bin/x86_64-elf-as
+endif
+
+ifeq ($(origin CC), default)
+CC = /opt/homebrew/bin/x86_64-elf-gcc
+endif
+ifeq ($(origin CC), undefined)
+CC = /opt/homebrew/bin/x86_64-elf-gcc
+endif
+
+ifeq ($(origin CXX), default)
+CXX = /usr/bin/g++
+endif
+ifeq ($(origin CXX), undefined)
+CXX = /usr/bin/g++
+endif
+
+ifeq ($(origin LD), default)
+LD = /opt/homebrew/bin/x86_64-elf-ld
+endif
+ifeq ($(origin LD), undefined)
+LD = /opt/homebrew/bin/x86_64-elf-ld
+endif
+
+ifeq ($(origin MAKE), default)
+MAKE = /usr/bin/make
+endif
+ifeq ($(origin MAKE), undefined)
+MAKE = /usr/bin/make
+endif
+
+ifeq ($(origin AR), default)
+AR = /opt/homebrew/bin/x86_64-elf-ar
+endif
+ifeq ($(origin AR), undefined)
+AR = /opt/homebrew/bin/x86_64-elf-ar
+endif
 
 # Compiler and linker flags
 CFLAGS  = -m32 -g -O0 -nostdlib -fno-exceptions -ffreestanding -fno-builtin -fno-pie -fno-pic -Wall -Wno-int-conversion -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -fno-stack-protector -fno-common -mno-mmx -mno-sse -mno-sse2

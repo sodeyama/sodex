@@ -58,6 +58,7 @@ def main() -> int:
     ssh_hostkey_public = os.environ.get("SODEX_SSH_HOSTKEY_ED25519_PUBLIC", "")
     ssh_hostkey_secret = os.environ.get("SODEX_SSH_HOSTKEY_ED25519_SECRET", "")
     ssh_rng_seed = os.environ.get("SODEX_SSH_RNG_SEED", "")
+    config_extra = os.environ.get("SODEX_ADMIN_CONFIG_EXTRA", "")
 
     if ssh_hostkey_seed and (not ssh_hostkey_public or not ssh_hostkey_secret):
         ssh_hostkey_public, ssh_hostkey_secret = derive_ssh_hostkey(ssh_hostkey_seed)
@@ -87,6 +88,8 @@ def main() -> int:
         lines.append(f"ssh_hostkey_ed25519_secret={ssh_hostkey_secret}")
     if ssh_rng_seed:
         lines.append(f"ssh_rng_seed={ssh_rng_seed}")
+    if config_extra:
+        lines.extend(config_extra.splitlines())
     lines.append("")
 
     config_path.write_text("\n".join(lines), encoding="ascii")

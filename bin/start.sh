@@ -1,7 +1,7 @@
 #!/bin/sh
 
 print_usage() {
-  echo "usage: $0 [user|server|server-headless|net] [--ssh] [--ssh-host-port=PORT] [--ssh-guest-port=PORT]"
+  echo "usage: $0 [user|server|server-headless|net] [--ssh|--no-ssh] [--ssh-host-port=PORT] [--ssh-guest-port=PORT]"
 }
 
 is_valid_port() {
@@ -43,8 +43,10 @@ HOST_ADMIN_PORT="${SODEX_HOST_ADMIN_PORT:-10023}"
 HOST_SSH_PORT="${SODEX_HOST_SSH_PORT:-10022}"
 GUEST_SSH_PORT="${SODEX_SSH_PORT:-10022}"
 QEMU_ACCEL="${SODEX_QEMU_ACCEL:-}"
+QEMU_DEBUG_FLAGS="${SODEX_QEMU_DEBUG_FLAGS-int,cpu_reset}"
+QEMU_SERIAL_MODE="${SODEX_QEMU_SERIAL_MODE:-stdio}"
 MODE="user"
-ENABLE_SSH=0
+SSH_SELECTION="auto"
 mkdir -p "$LOG_DIR"
 
 while [ $# -gt 0 ]; do
@@ -53,15 +55,18 @@ while [ $# -gt 0 ]; do
       MODE="$1"
       ;;
     --ssh)
-      ENABLE_SSH=1
+      SSH_SELECTION="on"
+      ;;
+    --no-ssh)
+      SSH_SELECTION="off"
       ;;
     --ssh-host-port=*)
       HOST_SSH_PORT="${1#*=}"
-      ENABLE_SSH=1
+      SSH_SELECTION="on"
       ;;
     --ssh-guest-port=*)
       GUEST_SSH_PORT="${1#*=}"
-      ENABLE_SSH=1
+      SSH_SELECTION="on"
       ;;
     -h|--help)
       print_usage
@@ -76,6 +81,25 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+case "$SSH_SELECTION" in
+  on)
+    ENABLE_SSH=1
+    ;;
+  off)
+    ENABLE_SSH=0
+    ;;
+  *)
+    case "$MODE" in
+      server|server-headless)
+        ENABLE_SSH=1
+        ;;
+      *)
+        ENABLE_SSH=0
+        ;;
+    esac
+    ;;
+esac
+
 if [ "$ENABLE_SSH" -eq 1 ]; then
   if ! is_valid_port "$HOST_SSH_PORT"; then
     echo "不正な host SSH ポートです: $HOST_SSH_PORT" >&2
@@ -89,13 +113,20 @@ fi
 
 COMMON_OPTS="-drive file=$BUILD_BIN/fsboot.bin,format=raw,if=ide \
     -m $QEMU_MEM_MB \
-    -d int,cpu_reset -D $LOG_DIR/qemu_debug.log \
     -monitor unix:$LOG_DIR/monitor.sock,server,nowait"
 
 COMMON_SERIAL_FILE_OPTS="-serial file:$LOG_DIR/serial.log"
+HEADLESS_SERIAL_OPTS="-serial stdio"
 COMMON_ACCEL_OPTS=""
+COMMON_DEBUG_OPTS=""
 if [ -n "$QEMU_ACCEL" ]; then
   COMMON_ACCEL_OPTS="-accel $QEMU_ACCEL"
+fi
+if [ -n "$QEMU_DEBUG_FLAGS" ]; then
+  COMMON_DEBUG_OPTS="-d $QEMU_DEBUG_FLAGS -D $LOG_DIR/qemu_debug.log"
+fi
+if [ "$QEMU_SERIAL_MODE" = "file" ]; then
+  HEADLESS_SERIAL_OPTS="-serial file:$LOG_DIR/serial.log"
 fi
 
 NIC_OPTS="-device ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net0"
@@ -118,6 +149,7 @@ case "$MODE" in
     "$QEMU_CMD" \
         $COMMON_OPTS \
         $COMMON_SERIAL_FILE_OPTS \
+        $COMMON_DEBUG_OPTS \
         $COMMON_ACCEL_OPTS \
         -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \
@@ -135,9 +167,9 @@ case "$MODE" in
     "$QEMU_CMD" \
         -drive file=$BUILD_BIN/fsboot.bin,format=raw,if=ide \
         -m "$QEMU_MEM_MB" \
-        -serial stdio \
+        $HEADLESS_SERIAL_OPTS \
         -monitor unix:$LOG_DIR/monitor.sock,server,nowait \
-        -d int,cpu_reset -D "$LOG_DIR/qemu_debug.log" \
+        $COMMON_DEBUG_OPTS \
         $COMMON_ACCEL_OPTS \
         -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \
@@ -156,6 +188,7 @@ case "$MODE" in
     sudo "$QEMU_CMD" \
         $COMMON_OPTS \
         $COMMON_SERIAL_FILE_OPTS \
+        $COMMON_DEBUG_OPTS \
         $COMMON_ACCEL_OPTS \
         -netdev vmnet-shared,id=net0,start-address=10.0.2.1,end-address=10.0.2.254,subnet-mask=255.255.255.0 \
         $NIC_OPTS \
@@ -172,6 +205,7 @@ case "$MODE" in
     "$QEMU_CMD" \
         $COMMON_OPTS \
         $COMMON_SERIAL_FILE_OPTS \
+        $COMMON_DEBUG_OPTS \
         $COMMON_ACCEL_OPTS \
         -netdev user,id=net0$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \

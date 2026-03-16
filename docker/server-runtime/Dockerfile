@@ -10,6 +10,8 @@ RUN apt-get update \
         gcc-i686-linux-gnu \
         make \
         python3 \
+        python3-pil \
+        util-linux \
         qemu-system-x86 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,10 +26,12 @@ ENV LD=/usr/bin/i686-linux-gnu-ld
 ENV AR=/usr/bin/i686-linux-gnu-ar
 ENV MAKE=/usr/bin/make
 ENV QEMU_CMD=/usr/bin/qemu-system-i386
+ENV SODEX_QEMU_DEBUG_FLAGS=
+ENV SODEX_QEMU_SERIAL_MODE=file
 ENV SODEX_HOST_BIND_ADDR=0.0.0.0
 ENV SODEX_HOST_HTTP_PORT=18080
 ENV SODEX_HOST_ADMIN_PORT=10023
 
-EXPOSE 18080 10023
+EXPOSE 18080 10023 10022
 
 ENTRYPOINT ["./docker/server-runtime/entrypoint.sh"]

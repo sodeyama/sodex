@@ -168,6 +168,45 @@ TEST(load_config_text_rejects_invalid_ssh_seed) {
     ASSERT(!admin_runtime_ssh_enabled());
 }
 
+TEST(build_admin_error_response_formats_retry_and_common_errors) {
+    char response[ADMIN_RESPONSE_MAX];
+
+    ASSERT(admin_build_error_response("throttled", 100, response, sizeof(response)) > 0);
+    ASSERT_STR_EQ(response, "ERR throttled retry=1\n");
+
+    ASSERT(admin_build_error_response("busy", 0, response, sizeof(response)) > 0);
+    ASSERT_STR_EQ(response, "ERR busy\n");
+
+    ASSERT(admin_build_error_response("timeout", 0, response, sizeof(response)) > 0);
+    ASSERT_STR_EQ(response, "ERR timeout\n");
+
+    ASSERT(admin_build_error_response("too_large", 0, response, sizeof(response)) > 0);
+    ASSERT_STR_EQ(response, "ERR too_large\n");
+}
+
+TEST(load_config_text_audits_invalid_lines_and_counts_errors) {
+    struct admin_request req;
+    char response[ADMIN_RESPONSE_MAX];
+    const char *config =
+        "status_token = runtime-status\n"
+        "unknown_key = value\n"
+        "allow_ip = not-an-ip\n";
+
+    admin_runtime_reset();
+    ASSERT_EQ(admin_runtime_load_config_text(config, (int)strlen(config)), 1);
+    ASSERT_EQ(admin_runtime_status_token_enabled(), 1);
+    ASSERT_EQ(admin_runtime_control_token_enabled(), 0);
+    ASSERT_EQ(admin_runtime_config_error_count(), 2);
+
+    memset(&req, 0, sizeof(req));
+    req.action = ADMIN_ACTION_LOG_TAIL;
+    req.arg = 8;
+
+    ASSERT(admin_execute_request(&req, response, sizeof(response), 0) > 0);
+    ASSERT(strstr(response, "config_invalid line=2 reason=unknown_key key=unknown_key") != 0);
+    ASSERT(strstr(response, "config_invalid line=3 reason=invalid_value key=allow_ip") != 0);
+}
+
 TEST(rate_limit_allowlist_rejects_and_audits) {
     char response[ADMIN_RESPONSE_MAX];
     struct admin_request log_req;
@@ -244,7 +283,27 @@ TEST(listener_ready_emits_serial_ready_marker_to_audit_ring) {
     ASSERT(admin_execute_request(&req, response, sizeof(response), 0) > 0);
     ASSERT(strstr(response, "listener_ready kind=admin port=10023") != 0);
     ASSERT(strstr(response, "listener_ready kind=http port=8080") != 0);
-    ASSERT(strstr(response, "server_runtime_ready allow_ip=10.0.2.2 admin=10023 http=8080") != 0);
+    ASSERT(strstr(response, "server_runtime_ready allow_ip=10.0.2.2 admin=10023 http=8080 stok=off ctok=off cfgerr=0") != 0);
+}
+
+TEST(listener_ready_reflects_token_presence_and_config_errors) {
+    struct admin_request req;
+    char response[ADMIN_RESPONSE_MAX];
+    const char *config =
+        "status_token = runtime-status\n"
+        "unknown_key = value\n";
+
+    admin_runtime_reset();
+    ASSERT_EQ(admin_runtime_load_config_text(config, (int)strlen(config)), 1);
+    admin_runtime_note_listener_ready(ADMIN_LISTENER_ADMIN);
+    admin_runtime_note_listener_ready(ADMIN_LISTENER_HTTP);
+
+    memset(&req, 0, sizeof(req));
+    req.action = ADMIN_ACTION_LOG_TAIL;
+    req.arg = 8;
+
+    ASSERT(admin_execute_request(&req, response, sizeof(response), 0) > 0);
+    ASSERT(strstr(response, "server_runtime_ready allow_ip=10.0.2.2 admin=10023 http=8080 stok=on ctok=off cfgerr=1") != 0);
 }
 
 int main(void) {
@@ -257,8 +316,11 @@ int main(void) {
     RUN_TEST(load_config_text_updates_ssh_runtime);
     RUN_TEST(load_config_text_updates_raw_ssh_hostkey);
     RUN_TEST(load_config_text_rejects_invalid_ssh_seed);
+    RUN_TEST(build_admin_error_response_formats_retry_and_common_errors);
+    RUN_TEST(load_config_text_audits_invalid_lines_and_counts_errors);
     RUN_TEST(rate_limit_allowlist_rejects_and_audits);
     RUN_TEST(rate_limit_shares_bucket_across_auth_failure_reasons);
     RUN_TEST(listener_ready_emits_serial_ready_marker_to_audit_ring);
+    RUN_TEST(listener_ready_reflects_token_presence_and_config_errors);
     TEST_REPORT();
 }

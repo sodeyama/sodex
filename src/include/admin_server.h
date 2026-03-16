@@ -81,6 +81,10 @@ PUBLIC int admin_authorize_request(const struct admin_request *req,
 PUBLIC int admin_execute_request(const struct admin_request *req,
                                  char *response, int response_cap,
                                  int json_mode);
+PUBLIC int admin_build_error_response(const char *reason,
+                                      u_int32_t retry_after_ticks,
+                                      char *response, int response_cap);
+PUBLIC int admin_retry_after_seconds(u_int32_t retry_after_ticks);
 PUBLIC int admin_role_from_token(const char *token);
 PUBLIC int admin_is_source_allowed(u_int32_t peer_addr);
 PUBLIC int admin_authorize_peer(u_int32_t peer_addr,
@@ -88,6 +92,9 @@ PUBLIC int admin_authorize_peer(u_int32_t peer_addr,
 PUBLIC int admin_authorize_request_detailed(const struct admin_request *req,
                                             u_int32_t peer_addr,
                                             u_int32_t *retry_after_ticks);
+PUBLIC int admin_runtime_status_token_enabled(void);
+PUBLIC int admin_runtime_control_token_enabled(void);
+PUBLIC int admin_runtime_config_error_count(void);
 PUBLIC int admin_runtime_debug_shell_enabled(void);
 PUBLIC int admin_runtime_debug_shell_port(void);
 PUBLIC int admin_runtime_ssh_enabled(void);
@@ -107,7 +114,8 @@ PUBLIC int http_map_request(const struct http_request *req,
                             struct admin_request *out);
 PUBLIC int http_build_response(int status_code, const char *body,
                                char *response, int response_cap,
-                               const char *content_type);
+                               const char *content_type,
+                               int retry_after_seconds);
 
 #ifdef TEST_BUILD
 PUBLIC void admin_runtime_set_tokens(const char *status_token,

@@ -417,6 +417,8 @@ PRIVATE void debug_shell_accept_pending_connections(void)
     struct sockaddr_in peer;
     int child_fd;
     int auth_result;
+    u_int32_t retry_after_ticks = 0;
+    char response[32];
 
     disableInterrupt();
     child_fd = socket_try_accept(debug_shell_listener_fd, &peer);
@@ -424,20 +426,21 @@ PRIVATE void debug_shell_accept_pending_connections(void)
     if (child_fd < 0)
       return;
 
-    auth_result = admin_authorize_peer(peer.sin_addr, 0);
+    auth_result = admin_authorize_peer(peer.sin_addr, &retry_after_ticks);
     if (auth_result != ADMIN_AUTH_ALLOW) {
-      kern_send(child_fd,
-                auth_result == ADMIN_AUTH_THROTTLED
-                    ? "ERR throttled\n"
-                    : "ERR forbidden\n",
-                auth_result == ADMIN_AUTH_THROTTLED ? 14 : 14, 0);
+      admin_build_error_response(auth_result == ADMIN_AUTH_THROTTLED
+                                     ? "throttled"
+                                     : "forbidden",
+                                 retry_after_ticks, response, sizeof(response));
+      kern_send(child_fd, response, (int)strlen(response), 0);
       kern_close_socket(child_fd);
       continue;
     }
 
     if (debug_shell_conn.in_use) {
       debug_shell_audit_peer("reject_busy_debug_shell", peer.sin_addr);
-      kern_send(child_fd, "ERR busy\n", 9, 0);
+      admin_build_error_response("busy", 0, response, sizeof(response));
+      kern_send(child_fd, response, (int)strlen(response), 0);
       kern_close_socket(child_fd);
       continue;
     }
@@ -462,8 +465,10 @@ PRIVATE void debug_shell_handle_preface(struct debug_shell_connection *conn)
 {
   int line_len;
   char token[ADMIN_TOKEN_MAX];
+  char response[32];
   struct admin_request req;
   int auth_result;
+  u_int32_t retry_after_ticks = 0;
 
   line_len = debug_shell_extract_line_length(conn->buffer, conn->length);
   if (line_len < 0)
@@ -479,12 +484,14 @@ PRIVATE void debug_shell_handle_preface(struct debug_shell_connection *conn)
   memset(&req, 0, sizeof(req));
   req.required_role = ADMIN_ROLE_CONTROL;
   debug_shell_copy_string(req.token, sizeof(req.token), token);
-  auth_result = admin_authorize_request_detailed(&req, conn->peer_addr, 0);
+  auth_result = admin_authorize_request_detailed(&req, conn->peer_addr,
+                                                 &retry_after_ticks);
   if (auth_result != ADMIN_AUTH_ALLOW) {
-    debug_shell_send_and_close(conn,
-                               auth_result == ADMIN_AUTH_THROTTLED
-                                   ? "ERR throttled\n"
-                                   : "ERR unauthorized\n");
+    admin_build_error_response(auth_result == ADMIN_AUTH_THROTTLED
+                                   ? "throttled"
+                                   : "unauthorized",
+                               retry_after_ticks, response, sizeof(response));
+    debug_shell_send_and_close(conn, response);
     return;
   }
 
@@ -498,6 +505,7 @@ PRIVATE void debug_shell_handle_preface(struct debug_shell_connection *conn)
 PRIVATE void debug_shell_pump_socket_to_tty(struct debug_shell_connection *conn)
 {
   char chunk[DEBUG_SHELL_IO_CHUNK];
+  char response[32];
   int read_len;
 
   if (conn->start_pending || conn->start_in_progress)
@@ -514,7 +522,8 @@ PRIVATE void debug_shell_pump_socket_to_tty(struct debug_shell_connection *conn)
     if (!conn->authenticated) {
       if (conn->length + read_len >= DEBUG_SHELL_PREFACE_MAX) {
         debug_shell_audit_peer("too_large_debug_shell", conn->peer_addr);
-        debug_shell_send_and_close(conn, "ERR too_large\n");
+        admin_build_error_response("too_large", 0, response, sizeof(response));
+        debug_shell_send_and_close(conn, response);
         return;
       }
       memcpy(conn->buffer + conn->length, chunk, read_len);
@@ -550,6 +559,7 @@ PRIVATE void debug_shell_pump_tty_to_socket(struct debug_shell_connection *conn)
 
 PRIVATE void debug_shell_poll_connection(struct debug_shell_connection *conn)
 {
+  char response[32];
   u_int32_t timeout_ticks;
 
   if (conn == 0 || !conn->in_use)
@@ -565,7 +575,8 @@ PRIVATE void debug_shell_poll_connection(struct debug_shell_connection *conn)
   if (!conn->closing &&
       (int)(kernel_tick - conn->last_activity_tick) > (int)timeout_ticks) {
     debug_shell_audit_peer("timeout_debug_shell", conn->peer_addr);
-    debug_shell_send_and_close(conn, "ERR timeout\n");
+    admin_build_error_response("timeout", 0, response, sizeof(response));
+    debug_shell_send_and_close(conn, response);
   }
 
   if (conn->closing) {

@@ -77,6 +77,7 @@ Linux ホスト
 | 06 | [06-ssh-readiness.md](plans/06-ssh-readiness.md) | `SSH` 実装の前提と go/no-go 判定 | 01-05 |
 | 07 | [07-tcp-pty-bridge.md](plans/07-tcp-pty-bridge.md) | 暗号なしで shell relay を検証する最小 TCP-PTY bridge | 01-06 |
 | 08 | [08-ssh-server.md](plans/08-ssh-server.md) | 暗号込み `SSH server` の段階導入 | 06, 07 |
+| 09 | [09-runtime-hardening.md](plans/09-runtime-hardening.md) | retry 可視化、config fail-safe、異常系 smoke の hardening | 05, 08 |
 
 実装タスクと残フォローアップは [TASKS.md](TASKS.md) で管理する。
 
@@ -117,7 +118,7 @@ Linux ホスト
 
 ## 実装状況
 
-2026-03-15 時点で、以下を確認済み。
+2026-03-16 時点で、以下を確認済み。
 
 - passive TCP の inbound accept と backlog 処理
 - `QEMU user net + hostfwd` による host `127.0.0.1:18080` -> guest `10.0.2.15:8080`
@@ -125,9 +126,13 @@ Linux ホスト
 - text protocol の `PING`, `STATUS`, `AGENT START`, `AGENT STOP`, `LOG TAIL`
 - HTTP の `GET /healthz`, `GET /status`, `POST /agent/start`, `POST /agent/stop`
 - `/etc/sodex-admin.conf` による起動時 token / allowlist 注入
+- config invalid line / read failure / size over の audit と `cfgerr` 集計
 - allowlist と audit ring buffer
 - 認証失敗に対する peer 単位 rate limit と backoff
+- HTTP `429 Retry-After` と text protocol `ERR throttled retry=<sec>`
+- ready marker `server_runtime_ready ... stok=... ctok=... cfgerr=...`
 - `docker/server-runtime/Dockerfile` / `entrypoint.sh` / `run_docker_server_smoke.py` による Docker/headless 常駐起動と published-port smoke
+- QEMU/Docker smoke による `403` / `429` / throttle 回復 / token 欠落状態の回帰確認
 - `debug_shell_port` と raw TCP preface、`PTY` relay、`test-qemu-debug-shell` による reconnect smoke
 - `curve25519-sha256` + `ssh-ed25519` + `aes128-ctr` + `hmac-sha2-256` + `password` に絞った最小 `SSH server`
 - host の `ssh -tt` から guest `eshell` へ login し、`backspace` 付き `pwd` / `ls` / `cat` + `Ctrl-C` / `exit` / wrong password / reconnect を `test-qemu-ssh` で確認

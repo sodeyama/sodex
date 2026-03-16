@@ -34,6 +34,7 @@ static u_int32_t kernel_tick = 0;
 EXTERN volatile u_int32_t kernel_tick;
 #endif
 
+#include <clock-arch.h>
 #include <admin_server.h>
 
 #ifndef SODEX_ADMIN_STATUS_TOKEN
@@ -92,6 +93,14 @@ EXTERN volatile u_int32_t kernel_tick;
 #define ADMIN_AUTH_BACKOFF_BASE_TICKS 100
 #define ADMIN_AUTH_BACKOFF_MAX_SHIFT 3
 
+enum admin_config_line_result {
+  ADMIN_CONFIG_LINE_IGNORED = 0,
+  ADMIN_CONFIG_LINE_APPLIED = 1,
+  ADMIN_CONFIG_LINE_UNKNOWN_KEY = -1,
+  ADMIN_CONFIG_LINE_INVALID_FORMAT = -2,
+  ADMIN_CONFIG_LINE_INVALID_VALUE = -3
+};
+
 struct admin_auth_bucket {
   int in_use;
   u_int32_t peer_addr;
@@ -123,6 +132,7 @@ struct admin_runtime_state {
   struct admin_auth_bucket auth_buckets[ADMIN_AUTH_BUCKETS];
   int listener_ready_mask;
   int listener_ready_announced;
+  int config_error_count;
 };
 
 struct admin_runtime_state admin_runtime;
@@ -222,6 +232,14 @@ PRIVATE int admin_append_int(char *buf, int cap, int pos, int value)
 PRIVATE int admin_append_uptime(char *buf, int cap, int pos)
 {
   return admin_append_int(buf, cap, pos, (int)kernel_tick);
+}
+
+PUBLIC int admin_retry_after_seconds(u_int32_t retry_after_ticks)
+{
+  if (retry_after_ticks == 0)
+    return 0;
+
+  return (int)((retry_after_ticks + CLOCK_CONF_SECOND - 1) / CLOCK_CONF_SECOND);
 }
 
 PRIVATE int admin_parse_positive_int(const char *text)
@@ -408,6 +426,35 @@ PRIVATE void admin_audit_auth_event(const char *prefix, const char *reason,
   admin_audit_line(message);
 }
 
+PRIVATE void admin_audit_config_issue(int line_no, int reason_code,
+                                      const char *key)
+{
+  char message[ADMIN_AUDIT_LINE_SIZE];
+  int pos = 0;
+  const char *reason = "invalid_value";
+
+  if (reason_code == ADMIN_CONFIG_LINE_UNKNOWN_KEY)
+    reason = "unknown_key";
+  else if (reason_code == ADMIN_CONFIG_LINE_INVALID_FORMAT)
+    reason = "invalid_format";
+
+  pos = admin_append_text(message, sizeof(message), pos, "config_invalid line=");
+  pos = admin_append_int(message, sizeof(message), pos, line_no);
+  pos = admin_append_text(message, sizeof(message), pos, " reason=");
+  pos = admin_append_text(message, sizeof(message), pos, reason);
+  if (key != 0 && key[0] != '\0') {
+    pos = admin_append_text(message, sizeof(message), pos, " key=");
+    pos = admin_append_text(message, sizeof(message), pos, key);
+  }
+  message[pos] = '\0';
+  admin_audit_line(message);
+}
+
+PRIVATE int admin_token_enabled(const char *token)
+{
+  return token != 0 && token[0] != '\0';
+}
+
 PRIVATE struct admin_auth_bucket *admin_find_auth_bucket(u_int32_t peer_addr,
                                                          int create)
 {
@@ -588,11 +635,24 @@ PUBLIC void admin_runtime_note_listener_ready(int listener_kind)
                           "server_runtime_ready allow_ip=");
   pos = admin_append_text(message, sizeof(message), pos, ipbuf);
   pos = admin_append_text(message, sizeof(message), pos, " admin=10023 http=8080");
+  pos = admin_append_text(message, sizeof(message), pos, " stok=");
+  pos = admin_append_text(message, sizeof(message), pos,
+                          admin_token_enabled(admin_runtime.status_token)
+                              ? "on"
+                              : "off");
+  pos = admin_append_text(message, sizeof(message), pos, " ctok=");
+  pos = admin_append_text(message, sizeof(message), pos,
+                          admin_token_enabled(admin_runtime.control_token)
+                              ? "on"
+                              : "off");
+  pos = admin_append_text(message, sizeof(message), pos, " cfgerr=");
+  pos = admin_append_int(message, sizeof(message), pos,
+                         admin_runtime.config_error_count);
   message[pos] = '\0';
   admin_audit_line(message);
 }
 
-PRIVATE int admin_apply_config_line(const char *line)
+PRIVATE int admin_apply_config_line(const char *line, char *key_out, int key_out_cap)
 {
   char key[32];
   char value[ADMIN_SECRET_MAX];
@@ -602,106 +662,116 @@ PRIVATE int admin_apply_config_line(const char *line)
   int port;
 
   if (line == 0)
-    return 0;
+    return ADMIN_CONFIG_LINE_IGNORED;
+
+  if (key_out != 0 && key_out_cap > 0)
+    key_out[0] = '\0';
 
   admin_trim_line(line, (int)strlen(line), raw, sizeof(raw));
   if (raw[0] == '\0' || raw[0] == '#')
-    return 0;
+    return ADMIN_CONFIG_LINE_IGNORED;
 
   sep = strchr(raw, '=');
-  if (sep == 0)
-    return -1;
+  if (sep == 0) {
+    admin_copy_string(key_out, key_out_cap, raw);
+    return ADMIN_CONFIG_LINE_INVALID_FORMAT;
+  }
   *sep = '\0';
 
   admin_trim_line(raw, (int)strlen(raw), key, sizeof(key));
   admin_trim_line(sep + 1, (int)strlen(sep + 1), value, sizeof(value));
+  admin_copy_string(key_out, key_out_cap, key);
+
+  if (key[0] == '\0')
+    return ADMIN_CONFIG_LINE_INVALID_FORMAT;
 
   if (strcmp(key, "status_token") == 0) {
     admin_copy_string(admin_runtime.status_token,
                       sizeof(admin_runtime.status_token), value);
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "control_token") == 0) {
     admin_copy_string(admin_runtime.control_token,
                       sizeof(admin_runtime.control_token), value);
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "allow_ip") == 0) {
     if (!admin_parse_ipv4(value, &allow_ip))
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     admin_runtime.allow_ip = allow_ip;
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "debug_shell_port") == 0) {
     port = admin_parse_positive_int(value);
     if (port < 0 || port > 65535)
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     admin_runtime.debug_shell_port = (u_int16_t)port;
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "ssh_port") == 0) {
     port = admin_parse_positive_int(value);
     if (port < 0 || port > 65535)
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     admin_runtime.ssh_port = (u_int16_t)port;
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "ssh_password") == 0) {
     admin_copy_string(admin_runtime.ssh_password,
                       sizeof(admin_runtime.ssh_password), value);
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "ssh_signer_port") == 0) {
     port = admin_parse_positive_int(value);
     if (port < 0 || port > 65535)
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     admin_runtime.ssh_signer_port = (u_int16_t)port;
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "ssh_hostkey_ed25519_seed") == 0) {
     if ((int)strlen(value) != ADMIN_HEX_SEED_MAX - 1 ||
         !admin_is_hex_string(value)) {
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     }
     admin_copy_string(admin_runtime.ssh_hostkey_ed25519_seed,
                       sizeof(admin_runtime.ssh_hostkey_ed25519_seed), value);
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "ssh_hostkey_ed25519_public") == 0) {
     if ((int)strlen(value) != ADMIN_HEX_PUBLICKEY_MAX - 1 ||
         !admin_is_hex_string(value)) {
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     }
     admin_copy_string(admin_runtime.ssh_hostkey_ed25519_public,
                       sizeof(admin_runtime.ssh_hostkey_ed25519_public), value);
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "ssh_hostkey_ed25519_secret") == 0) {
     if ((int)strlen(value) != ADMIN_HEX_SECRETKEY_MAX - 1 ||
         !admin_is_hex_string(value)) {
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     }
     admin_copy_string(admin_runtime.ssh_hostkey_ed25519_secret,
                       sizeof(admin_runtime.ssh_hostkey_ed25519_secret), value);
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
   if (strcmp(key, "ssh_rng_seed") == 0) {
     if ((int)strlen(value) != ADMIN_HEX_SEED_MAX - 1 ||
         !admin_is_hex_string(value)) {
-      return -1;
+      return ADMIN_CONFIG_LINE_INVALID_VALUE;
     }
     admin_copy_string(admin_runtime.ssh_rng_seed,
                       sizeof(admin_runtime.ssh_rng_seed), value);
-    return 1;
+    return ADMIN_CONFIG_LINE_APPLIED;
   }
 
-  return -1;
+  return ADMIN_CONFIG_LINE_UNKNOWN_KEY;
 }
 
-PRIVATE int admin_apply_config_text(const char *text, int len)
+PRIVATE int admin_apply_config_text(const char *text, int len, int audit_issues)
 {
   int start = 0;
   int applied = 0;
+  int line_no = 1;
 
   if (text == 0 || len <= 0)
     return 0;
@@ -716,14 +786,22 @@ PRIVATE int admin_apply_config_text(const char *text, int len)
 
     {
       char line[ADMIN_TEXT_REQUEST_MAX];
+      char key[32];
+
       admin_trim_line(text + start, end - start, line, sizeof(line));
-      line_result = admin_apply_config_line(line);
+      line_result = admin_apply_config_line(line, key, sizeof(key));
+      if (line_result < 0) {
+        admin_runtime.config_error_count++;
+        if (audit_issues)
+          admin_audit_config_issue(line_no, line_result, key);
+      }
     }
 
     if (line_result > 0)
       applied += line_result;
 
     start = end + 1;
+    line_no++;
   }
 
   return applied;
@@ -818,6 +896,28 @@ PRIVATE int admin_build_log_tail(char *response, int response_cap, int limit)
   return pos;
 }
 
+PUBLIC int admin_build_error_response(const char *reason,
+                                      u_int32_t retry_after_ticks,
+                                      char *response, int response_cap)
+{
+  int pos = 0;
+  int retry_after_seconds = admin_retry_after_seconds(retry_after_ticks);
+
+  if (response == 0 || response_cap <= 0)
+    return -1;
+
+  response[0] = '\0';
+  pos = admin_append_text(response, response_cap, pos, "ERR ");
+  pos = admin_append_text(response, response_cap, pos,
+                          reason ? reason : "unsupported");
+  if (retry_after_seconds > 0) {
+    pos = admin_append_text(response, response_cap, pos, " retry=");
+    pos = admin_append_int(response, response_cap, pos, retry_after_seconds);
+  }
+  pos = admin_append_char(response, response_cap, pos, '\n');
+  return pos;
+}
+
 PUBLIC void admin_runtime_reset(void)
 {
   memset(&admin_runtime, 0, sizeof(admin_runtime));
@@ -874,12 +974,16 @@ PUBLIC void admin_runtime_reset(void)
       memset(config, 0, sizeof(config));
       if (size >= (int)sizeof(config)) {
         _kprintf("server config too large: %s\n", SODEX_ADMIN_CONFIG_PATH);
+        admin_runtime.config_error_count++;
         admin_audit_line("config_read too_large");
       } else {
         int read_len = ext3_read(fd, config, size);
         if (read_len > 0) {
           config[read_len] = '\0';
-          applied = admin_apply_config_text(config, read_len);
+          applied = admin_apply_config_text(config, read_len, TRUE);
+        } else if (read_len < 0) {
+          admin_runtime.config_error_count++;
+          admin_audit_line("config_read read_failed");
         }
         message_pos = 0;
         message_pos = admin_append_text(message, sizeof(message), message_pos,
@@ -890,17 +994,45 @@ PUBLIC void admin_runtime_reset(void)
                                         " applied=");
         message_pos = admin_append_int(message, sizeof(message), message_pos,
                                        applied);
+        message_pos = admin_append_text(message, sizeof(message), message_pos,
+                                        " errors=");
+        message_pos = admin_append_int(message, sizeof(message), message_pos,
+                                       admin_runtime.config_error_count);
         message[message_pos] = '\0';
         admin_audit_line(message);
       }
       close(fd);
     } else {
+      admin_runtime.config_error_count++;
       admin_audit_line("config_read open_failed");
     }
 
     files_close_all(&gtask);
     memset(&gtask, 0, sizeof(gtask));
     current = saved_current;
+  }
+#endif
+
+#ifndef TEST_BUILD
+  {
+    char message[ADMIN_AUDIT_LINE_SIZE];
+    int pos = 0;
+
+    pos = admin_append_text(message, sizeof(message), pos, "auth_config stok=");
+    pos = admin_append_text(message, sizeof(message), pos,
+                            admin_token_enabled(admin_runtime.status_token)
+                                ? "on"
+                                : "off");
+    pos = admin_append_text(message, sizeof(message), pos, " ctok=");
+    pos = admin_append_text(message, sizeof(message), pos,
+                            admin_token_enabled(admin_runtime.control_token)
+                                ? "on"
+                                : "off");
+    pos = admin_append_text(message, sizeof(message), pos, " cfgerr=");
+    pos = admin_append_int(message, sizeof(message), pos,
+                           admin_runtime.config_error_count);
+    message[pos] = '\0';
+    admin_audit_line(message);
   }
 #endif
 
@@ -950,6 +1082,21 @@ PUBLIC int admin_runtime_debug_shell_enabled(void)
 {
   return admin_runtime.debug_shell_port != 0 &&
          admin_runtime.control_token[0] != '\0';
+}
+
+PUBLIC int admin_runtime_status_token_enabled(void)
+{
+  return admin_token_enabled(admin_runtime.status_token);
+}
+
+PUBLIC int admin_runtime_control_token_enabled(void)
+{
+  return admin_token_enabled(admin_runtime.control_token);
+}
+
+PUBLIC int admin_runtime_config_error_count(void)
+{
+  return admin_runtime.config_error_count;
 }
 
 PUBLIC int admin_runtime_debug_shell_port(void)
@@ -1282,6 +1429,8 @@ PRIVATE void admin_accept_pending_connections(void)
     int child_fd;
     int slot;
     int auth_result;
+    u_int32_t retry_after_ticks = 0;
+    char response[32];
 
     disableInterrupt();
     child_fd = socket_try_accept(admin_listener_fd, &peer);
@@ -1289,12 +1438,13 @@ PRIVATE void admin_accept_pending_connections(void)
     if (child_fd < 0)
       return;
 
-    auth_result = admin_authorize_peer(peer.sin_addr, 0);
+    auth_result = admin_authorize_peer(peer.sin_addr, &retry_after_ticks);
     if (auth_result != ADMIN_AUTH_ALLOW) {
-      if (auth_result == ADMIN_AUTH_THROTTLED)
-        kern_send(child_fd, "ERR throttled\n", 14, 0);
-      else
-        kern_send(child_fd, "ERR forbidden\n", 14, 0);
+      admin_build_error_response(auth_result == ADMIN_AUTH_THROTTLED
+                                     ? "throttled"
+                                     : "forbidden",
+                                 retry_after_ticks, response, sizeof(response));
+      kern_send(child_fd, response, (int)strlen(response), 0);
       kern_close_socket(child_fd);
       continue;
     }
@@ -1302,7 +1452,8 @@ PRIVATE void admin_accept_pending_connections(void)
     slot = admin_find_free_connection();
     if (slot < 0) {
       admin_audit_peer("reject_busy", peer.sin_addr);
-      kern_send(child_fd, "ERR busy\n", 9, 0);
+      admin_build_error_response("busy", 0, response, sizeof(response));
+      kern_send(child_fd, response, (int)strlen(response), 0);
       kern_close_socket(child_fd);
       continue;
     }
@@ -1323,6 +1474,7 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
   int read_len;
   int line_len;
   int auth_result;
+  u_int32_t retry_after_ticks = 0;
 
   if (conn == 0 || !conn->in_use)
     return;
@@ -1335,7 +1487,9 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
   if (!conn->closing &&
       (int)(kernel_tick - conn->accepted_tick) > ADMIN_IDLE_TIMEOUT_TICKS) {
     admin_audit_peer("timeout_admin", conn->peer_addr);
-    admin_send_and_close(conn, "ERR timeout\n");
+    admin_build_error_response("timeout", 0,
+                               conn->response, sizeof(conn->response));
+    admin_send_and_close(conn, conn->response);
   }
 
   if (conn->closing)
@@ -1357,7 +1511,9 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
 
     if (conn->length + read_len >= ADMIN_TEXT_REQUEST_MAX) {
       admin_audit_peer("too_large_admin", conn->peer_addr);
-      admin_send_and_close(conn, "ERR too_large\n");
+      admin_build_error_response("too_large", 0,
+                                 conn->response, sizeof(conn->response));
+      admin_send_and_close(conn, conn->response);
       return;
     }
 
@@ -1372,17 +1528,22 @@ PRIVATE void admin_poll_connection(struct admin_connection *conn)
 
   if (admin_parse_command(conn->buffer, line_len, &conn->request) < 0) {
     admin_audit_peer("invalid_admin", conn->peer_addr);
-    admin_send_and_close(conn, "ERR invalid_command\n");
+    admin_build_error_response("invalid_command", 0,
+                               conn->response, sizeof(conn->response));
+    admin_send_and_close(conn, conn->response);
     return;
   }
 
   auth_result = admin_authorize_request_detailed(&conn->request,
-                                                 conn->peer_addr, 0);
+                                                 conn->peer_addr,
+                                                 &retry_after_ticks);
   if (auth_result != ADMIN_AUTH_ALLOW) {
-    admin_send_and_close(conn,
-                         auth_result == ADMIN_AUTH_THROTTLED
-                             ? "ERR throttled\n"
-                             : "ERR unauthorized\n");
+    admin_build_error_response(auth_result == ADMIN_AUTH_THROTTLED
+                                   ? "throttled"
+                                   : "unauthorized",
+                               retry_after_ticks,
+                               conn->response, sizeof(conn->response));
+    admin_send_and_close(conn, conn->response);
     return;
   }
 
@@ -1452,7 +1613,7 @@ PUBLIC void admin_runtime_append_test_audit(const char *message)
 
 PUBLIC int admin_runtime_load_config_text(const char *text, int len)
 {
-  return admin_apply_config_text(text, len);
+  return admin_apply_config_text(text, len, TRUE);
 }
 
 PUBLIC void admin_runtime_set_debug_shell_port(int port)

@@ -82,10 +82,20 @@ TEST(status_request_roundtrip) {
 TEST(build_http_response) {
     char response[ADMIN_RESPONSE_MAX];
 
-    ASSERT(http_build_response(200, "ok\n", response, sizeof(response), "text/plain") > 0);
+    ASSERT(http_build_response(200, "ok\n", response, sizeof(response), "text/plain", 0) > 0);
     ASSERT(strstr(response, "HTTP/1.1 200 OK") != 0);
     ASSERT(strstr(response, "Content-Length: 3") != 0);
     ASSERT(strstr(response, "\r\n\r\nok\n") != 0);
+}
+
+TEST(build_http_retry_response) {
+    char response[ADMIN_RESPONSE_MAX];
+
+    ASSERT(http_build_response(429, "throttled retry=1\n", response, sizeof(response),
+                               "text/plain", 1) > 0);
+    ASSERT(strstr(response, "HTTP/1.1 429 Too Many Requests") != 0);
+    ASSERT(strstr(response, "Retry-After: 1") != 0);
+    ASSERT(strstr(response, "\r\n\r\nthrottled retry=1\n") != 0);
 }
 
 TEST(http_auth_rate_limit_recovers_after_backoff) {
@@ -136,6 +146,7 @@ int main(void) {
     RUN_TEST(map_http_to_admin_actions);
     RUN_TEST(status_request_roundtrip);
     RUN_TEST(build_http_response);
+    RUN_TEST(build_http_retry_response);
     RUN_TEST(http_auth_rate_limit_recovers_after_backoff);
     TEST_REPORT();
 }

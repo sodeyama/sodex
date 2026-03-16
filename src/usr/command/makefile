@@ -8,6 +8,10 @@ CSRCS = $(wildcard *.c)
 COBJS = $(addprefix $(SUB_OBJDIR)/,$(subst .c,.o,$(CSRCS)))
 OBJS  = ${COBJS}
 SSHD_EXTRA_OBJS = \
+	$(SUB_OBJDIR)/sshd_server.o \
+	$(SUB_OBJDIR)/sshd_packet_core.o \
+	$(SUB_OBJDIR)/sshd_auth_core.o \
+	$(SUB_OBJDIR)/sshd_channel_core.o \
 	$(SUB_OBJDIR)/sshd_ssh_crypto.o \
 	$(SUB_OBJDIR)/sshd_tweetnacl.o \
 	$(SUB_OBJDIR)/sshd_sha256.o \
@@ -54,13 +58,7 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/send.o -o ${SEND} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ping.o -o ${PING} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/term.o -o ${TERM} ${STATIC_LIBS}
-	${LD} ${LFLAGS} \
-		$(SUB_OBJDIR)/sshd.o \
-		$(SUB_OBJDIR)/sshd_ssh_crypto.o \
-		$(SUB_OBJDIR)/sshd_tweetnacl.o \
-		$(SUB_OBJDIR)/sshd_sha256.o \
-		$(SUB_OBJDIR)/sshd_aes.o \
-		-o ${SSHD} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/sshd.o ${SSHD_EXTRA_OBJS} -o ${SSHD} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/touch.o -o ${TOUCH} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/mkdir.o -o ${MKDIR} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/rm.o -o ${RM} ${STATIC_LIBS}
@@ -71,7 +69,19 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/memgrow.o -o ${MEMGROW} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/fslarge.o -o ${FSLARGE} ${STATIC_LIBS}
 
-$(SUB_OBJDIR)/sshd.o: sshd.c ../../net/ssh_server.c ../../include/ssh_crypto.h ../../include/admin_server.h
+$(SUB_OBJDIR)/sshd.o: sshd.c ../../include/ssh_server.h
+	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_server.o: ../../net/ssh_server.c ../../include/ssh_server.h ../../include/ssh_crypto.h ../../include/ssh_packet_core.h ../../include/ssh_auth_core.h ../../include/ssh_channel_core.h
+	${CC} -DUSERLAND_SSHD_BUILD=1 -c ${SSHD_CFLAGS} -I ${INCLUDE} -idirafter ${USR_INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_packet_core.o: ../../lib/ssh_packet_core.c ../../include/ssh_packet_core.h
+	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -idirafter ${USR_INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_auth_core.o: ../../lib/ssh_auth_core.c ../../include/ssh_auth_core.h ../../include/ssh_packet_core.h
+	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -idirafter ${USR_INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/sshd_channel_core.o: ../../lib/ssh_channel_core.c ../../include/ssh_channel_core.h ../../include/ssh_packet_core.h
 	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -idirafter ${USR_INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/sshd_ssh_crypto.o: ../../lib/ssh_crypto.c

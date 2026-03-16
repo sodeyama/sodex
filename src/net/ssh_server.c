@@ -678,15 +678,17 @@ PUBLIC int sys_kill(pid_t pid, int sig)
 #include <network_config.h>
 #endif
 
+#include <admin_server.h>
 #include <ssh_server.h>
+#include <ssh_packet_core.h>
+#include <ssh_auth_core.h>
+#include <ssh_channel_core.h>
 #include <ssh_crypto.h>
 #include <ssh_runtime_policy.h>
 
 #ifndef TEST_BUILD
 
 #define SSH_BANNER "SSH-2.0-SodexSSH_0.1\r\n"
-#define SSH_AUTH_TIMEOUT_TICKS 1000
-#define SSH_IDLE_TIMEOUT_TICKS 6000
 #define SSH_CLOSE_DRAIN_TICKS 40
 #define SSH_RX_BUFFER_SIZE 4096
 #define SSH_PACKET_PLAIN_MAX 2048
@@ -740,20 +742,6 @@ PUBLIC int sys_kill(pid_t pid, int sig)
 #define SSH_MSG_CHANNEL_SUCCESS 99
 #define SSH_MSG_CHANNEL_FAILURE 100
 
-struct ssh_writer {
-  u_int8_t *buf;
-  int cap;
-  int len;
-  int error;
-};
-
-struct ssh_reader {
-  const u_int8_t *buf;
-  int len;
-  int pos;
-  int error;
-};
-
 struct ssh_out_packet {
   int len;
   int activate_tx_crypto;
@@ -803,8 +791,13 @@ struct ssh_connection {
   int rx_encrypted;
   int auth_done;
   int auth_failures;
+  int auth_pending_failure;
+  int auth_pending_close;
+  u_int32_t auth_delay_until_tick;
+  int auth_identity_set;
   int userauth_service_ready;
   char username[32];
+  char auth_service[32];
   char banner_buf[SSH_BANNER_MAX];
   int banner_len;
   u_int8_t rx_buf[SSH_RX_BUFFER_SIZE];
@@ -961,23 +954,6 @@ PRIVATE void ssh_copy_string(char *dest, int cap, const char *src)
     i++;
   }
   dest[i] = '\0';
-}
-
-PRIVATE void ssh_move_bytes(u_int8_t *dest, const u_int8_t *src, int len)
-{
-  int i;
-
-  if (dest == src || len <= 0)
-    return;
-  if (dest < src) {
-    for (i = 0; i < len; i++) {
-      dest[i] = src[i];
-    }
-    return;
-  }
-  for (i = len - 1; i >= 0; i--) {
-    dest[i] = src[i];
-  }
 }
 
 PRIVATE void ssh_format_ip(u_int32_t peer_addr, char *buf, int cap)
@@ -1212,180 +1188,6 @@ PRIVATE void ssh_fill_bind_addr(struct sockaddr_in *addr, u_int16_t port)
   addr->sin_family = AF_INET;
   addr->sin_port = htons(port);
   addr->sin_addr = 0;
-}
-
-PRIVATE void ssh_write_u32_be(u_int8_t *buf, u_int32_t value)
-{
-  buf[0] = (u_int8_t)(value >> 24);
-  buf[1] = (u_int8_t)(value >> 16);
-  buf[2] = (u_int8_t)(value >> 8);
-  buf[3] = (u_int8_t)value;
-}
-
-PRIVATE u_int32_t ssh_read_u32_be(const u_int8_t *buf)
-{
-  return ((u_int32_t)buf[0] << 24) |
-         ((u_int32_t)buf[1] << 16) |
-         ((u_int32_t)buf[2] << 8) |
-         (u_int32_t)buf[3];
-}
-
-PRIVATE void ssh_writer_init(struct ssh_writer *writer, u_int8_t *buf, int cap)
-{
-  writer->buf = buf;
-  writer->cap = cap;
-  writer->len = 0;
-  writer->error = FALSE;
-}
-
-PRIVATE void ssh_writer_put_data(struct ssh_writer *writer,
-                                 const u_int8_t *data, int len)
-{
-  if (writer->error || len < 0)
-    return;
-  if (writer->len + len > writer->cap) {
-    writer->error = TRUE;
-    return;
-  }
-  if (len > 0 && data != 0)
-    memcpy(writer->buf + writer->len, data, (size_t)len);
-  writer->len += len;
-}
-
-PRIVATE void ssh_writer_put_byte(struct ssh_writer *writer, u_int8_t value)
-{
-  ssh_writer_put_data(writer, &value, 1);
-}
-
-PRIVATE void ssh_writer_put_bool(struct ssh_writer *writer, int value)
-{
-  ssh_writer_put_byte(writer, value ? 1 : 0);
-}
-
-PRIVATE void ssh_writer_put_u32(struct ssh_writer *writer, u_int32_t value)
-{
-  u_int8_t buf[4];
-
-  ssh_write_u32_be(buf, value);
-  ssh_writer_put_data(writer, buf, sizeof(buf));
-}
-
-PRIVATE void ssh_writer_put_string(struct ssh_writer *writer,
-                                   const u_int8_t *data, int len)
-{
-  if (len < 0) {
-    writer->error = TRUE;
-    return;
-  }
-  ssh_writer_put_u32(writer, (u_int32_t)len);
-  ssh_writer_put_data(writer, data, len);
-}
-
-PRIVATE void ssh_writer_put_cstring(struct ssh_writer *writer, const char *text)
-{
-  ssh_writer_put_string(writer, (const u_int8_t *)text, (int)strlen(text));
-}
-
-PRIVATE void ssh_writer_put_mpint(struct ssh_writer *writer,
-                                  const u_int8_t *data, int len)
-{
-  int start = 0;
-  int out_len;
-
-  while (start < len && data[start] == 0)
-    start++;
-  if (start == len) {
-    ssh_writer_put_u32(writer, 0);
-    return;
-  }
-
-  out_len = len - start;
-  if ((data[start] & 0x80) != 0) {
-    ssh_writer_put_u32(writer, (u_int32_t)(out_len + 1));
-    ssh_writer_put_byte(writer, 0);
-  } else {
-    ssh_writer_put_u32(writer, (u_int32_t)out_len);
-  }
-  ssh_writer_put_data(writer, data + start, out_len);
-}
-
-PRIVATE void ssh_reader_init(struct ssh_reader *reader,
-                             const u_int8_t *buf, int len)
-{
-  reader->buf = buf;
-  reader->len = len;
-  reader->pos = 0;
-  reader->error = FALSE;
-}
-
-PRIVATE u_int8_t ssh_reader_get_byte(struct ssh_reader *reader)
-{
-  if (reader->error || reader->pos + 1 > reader->len) {
-    reader->error = TRUE;
-    return 0;
-  }
-  return reader->buf[reader->pos++];
-}
-
-PRIVATE int ssh_reader_get_bool(struct ssh_reader *reader)
-{
-  return ssh_reader_get_byte(reader) != 0;
-}
-
-PRIVATE u_int32_t ssh_reader_get_u32(struct ssh_reader *reader)
-{
-  u_int32_t value;
-
-  if (reader->error || reader->pos + 4 > reader->len) {
-    reader->error = TRUE;
-    return 0;
-  }
-  value = ssh_read_u32_be(reader->buf + reader->pos);
-  reader->pos += 4;
-  return value;
-}
-
-PRIVATE void ssh_reader_get_string(struct ssh_reader *reader,
-                                   const u_int8_t **data, int *len)
-{
-  u_int32_t size = ssh_reader_get_u32(reader);
-
-  if (reader->error)
-    return;
-  if (reader->pos + (int)size > reader->len) {
-    reader->error = TRUE;
-    return;
-  }
-  *data = reader->buf + reader->pos;
-  *len = (int)size;
-  reader->pos += (int)size;
-}
-
-PRIVATE int ssh_bytes_equal(const u_int8_t *lhs, int lhs_len, const char *rhs)
-{
-  int rhs_len = (int)strlen(rhs);
-
-  if (lhs_len != rhs_len)
-    return FALSE;
-  return memcmp(lhs, rhs, (size_t)lhs_len) == 0;
-}
-
-PRIVATE int ssh_namelist_has(const u_int8_t *data, int len, const char *name)
-{
-  int start = 0;
-
-  while (start <= len) {
-    int end = start;
-
-    while (end < len && data[end] != ',')
-      end++;
-    if (end > start && ssh_bytes_equal(data + start, end - start, name))
-      return TRUE;
-    if (end >= len)
-      break;
-    start = end + 1;
-  }
-  return FALSE;
 }
 
 PRIVATE int ssh_reset_channel(struct ssh_channel_state *channel)
@@ -2220,17 +2022,67 @@ PRIVATE int ssh_queue_userauth_failure(struct ssh_connection *conn)
   return ssh_queue_payload(conn, payload, writer.len, FALSE);
 }
 
+PRIVATE void ssh_load_auth_identity(const struct ssh_connection *conn,
+                                    struct ssh_auth_identity *identity)
+{
+  if (identity == 0)
+    return;
+  ssh_auth_identity_reset(identity);
+  if (conn == 0 || !conn->auth_identity_set)
+    return;
+  identity->set = TRUE;
+  ssh_copy_string(identity->username, sizeof(identity->username), conn->username);
+  ssh_copy_string(identity->service, sizeof(identity->service), conn->auth_service);
+}
+
+PRIVATE void ssh_store_auth_identity(struct ssh_connection *conn,
+                                     const struct ssh_auth_identity *identity)
+{
+  if (conn == 0 || identity == 0 || !identity->set)
+    return;
+  conn->auth_identity_set = TRUE;
+  ssh_copy_string(conn->username, sizeof(conn->username), identity->username);
+  ssh_copy_string(conn->auth_service, sizeof(conn->auth_service), identity->service);
+}
+
+PRIVATE int ssh_auth_delay_pending(struct ssh_connection *conn)
+{
+  if (conn == 0)
+    return FALSE;
+  return ssh_auth_failure_delay_pending(kernel_tick, conn->auth_delay_until_tick);
+}
+
+PRIVATE int ssh_flush_auth_pending(struct ssh_connection *conn)
+{
+  if (conn == 0 || conn->auth_delay_until_tick == 0)
+    return 0;
+  if (ssh_auth_delay_pending(conn))
+    return 0;
+
+  conn->auth_delay_until_tick = 0;
+  if (conn->auth_pending_close) {
+    conn->auth_pending_close = FALSE;
+    ssh_audit_peer("ssh_auth_retry_limit", conn->peer_addr);
+    ssh_queue_close(conn, "auth_retry_limit");
+    return 1;
+  }
+  if (conn->auth_pending_failure) {
+    conn->auth_pending_failure = FALSE;
+    return ssh_queue_userauth_failure(conn);
+  }
+  return 0;
+}
+
 PRIVATE int ssh_handle_auth_failure(struct ssh_connection *conn)
 {
   conn->auth_failures++;
   ssh_audit_peer("ssh_auth_failure", conn->peer_addr);
   ssh_audit_state("ssh_auth_fail_count", conn->auth_failures);
-
-  if (!ssh_auth_failure_should_close(conn->auth_failures))
-    return ssh_queue_userauth_failure(conn);
-
-  ssh_audit_peer("ssh_auth_retry_limit", conn->peer_addr);
-  ssh_queue_close(conn, "auth_retry_limit");
+  conn->auth_delay_until_tick = ssh_auth_failure_delay_until(kernel_tick);
+  conn->auth_pending_close =
+      ssh_auth_failure_should_close(conn->auth_failures) ? TRUE : FALSE;
+  conn->auth_pending_failure = conn->auth_pending_close ? FALSE : TRUE;
+  ssh_audit_state("ssh_auth_fail_delay_until", (int)conn->auth_delay_until_tick);
   return 0;
 }
 
@@ -2440,20 +2292,18 @@ PRIVATE int ssh_spawn_shell(struct ssh_connection *conn)
 PRIVATE int ssh_handle_service_request(struct ssh_connection *conn,
                                        const u_int8_t *payload, int payload_len)
 {
-  struct ssh_reader reader;
-  const u_int8_t *name = 0;
-  int name_len = 0;
+  char service_name[SSH_AUTH_TEXT_MAX];
 
-  ssh_reader_init(&reader, payload + 1, payload_len - 1);
-  ssh_reader_get_string(&reader, &name, &name_len);
-  if (reader.error)
+  if (ssh_auth_parse_service_request(payload, payload_len,
+                                     service_name, sizeof(service_name)) < 0) {
     return -1;
+  }
 
-  if (ssh_bytes_equal(name, name_len, "ssh-userauth")) {
+  if (strcmp(service_name, "ssh-userauth") == 0) {
     conn->userauth_service_ready = TRUE;
     return ssh_queue_service_accept(conn, "ssh-userauth");
   }
-  if (conn->auth_done && ssh_bytes_equal(name, name_len, "ssh-connection")) {
+  if (conn->auth_done && strcmp(service_name, "ssh-connection") == 0) {
     return ssh_queue_service_accept(conn, "ssh-connection");
   }
   return -1;
@@ -2462,44 +2312,38 @@ PRIVATE int ssh_handle_service_request(struct ssh_connection *conn,
 PRIVATE int ssh_handle_userauth_request(struct ssh_connection *conn,
                                         const u_int8_t *payload, int payload_len)
 {
-  struct ssh_reader reader;
-  const u_int8_t *username = 0;
-  const u_int8_t *service = 0;
-  const u_int8_t *method = 0;
-  const u_int8_t *password = 0;
-  int username_len = 0;
-  int service_len = 0;
-  int method_len = 0;
-  int password_len = 0;
-  int change_request;
+  struct ssh_auth_request request;
+  struct ssh_auth_identity identity;
   const char *expected_password = server_runtime_ssh_password();
 
   if (!conn->userauth_service_ready)
     return -1;
-
-  ssh_reader_init(&reader, payload + 1, payload_len - 1);
-  ssh_reader_get_string(&reader, &username, &username_len);
-  ssh_reader_get_string(&reader, &service, &service_len);
-  ssh_reader_get_string(&reader, &method, &method_len);
-  if (reader.error)
-    return -1;
-
-  if (!ssh_bytes_equal(method, method_len, "password")) {
-    return ssh_handle_auth_failure(conn);
+  if (conn->auth_pending_failure || conn->auth_pending_close ||
+      ssh_auth_delay_pending(conn)) {
+    return 0;
   }
 
-  change_request = ssh_reader_get_bool(&reader);
-  ssh_reader_get_string(&reader, &password, &password_len);
-  if (reader.error)
+  if (ssh_auth_parse_request(payload, payload_len, &request) < 0)
     return -1;
+  ssh_load_auth_identity(conn, &identity);
+  if (!identity.set) {
+    if (ssh_auth_identity_capture(&identity, &request) < 0)
+      return -1;
+    ssh_store_auth_identity(conn, &identity);
+  } else if (!ssh_auth_identity_matches(&identity, &request)) {
+    ssh_queue_close(conn, "auth_identity_changed");
+    return 0;
+  }
 
-  if (!change_request &&
-      ssh_bytes_equal(username, username_len, "root") &&
-      ssh_bytes_equal(service, service_len, "ssh-connection") &&
-      password_len == (int)strlen(expected_password) &&
-      memcmp(password, expected_password, (size_t)password_len) == 0) {
+  if (ssh_auth_password_request_matches(&request,
+                                        "root",
+                                        "ssh-connection",
+                                        expected_password)) {
     conn->auth_done = TRUE;
-    ssh_copy_string(conn->username, sizeof(conn->username), "root");
+    conn->auth_pending_failure = FALSE;
+    conn->auth_pending_close = FALSE;
+    conn->auth_delay_until_tick = 0;
+    ssh_copy_string(conn->username, sizeof(conn->username), request.username);
     ssh_audit_peer("ssh_auth_success", conn->peer_addr);
     return ssh_queue_userauth_success(conn);
   }
@@ -2510,32 +2354,21 @@ PRIVATE int ssh_handle_userauth_request(struct ssh_connection *conn,
 PRIVATE int ssh_handle_channel_open(struct ssh_connection *conn,
                                     const u_int8_t *payload, int payload_len)
 {
-  struct ssh_reader reader;
-  const u_int8_t *type = 0;
-  int type_len = 0;
-  u_int32_t peer_id;
-  u_int32_t peer_window;
-  u_int32_t peer_max_packet;
+  struct ssh_channel_open_request request;
 
   if (!conn->auth_done)
     return -1;
-
-  ssh_reader_init(&reader, payload + 1, payload_len - 1);
-  ssh_reader_get_string(&reader, &type, &type_len);
-  peer_id = ssh_reader_get_u32(&reader);
-  peer_window = ssh_reader_get_u32(&reader);
-  peer_max_packet = ssh_reader_get_u32(&reader);
-  if (reader.error)
+  if (ssh_channel_parse_open(payload, payload_len, &request) < 0)
     return -1;
 
-  if (conn->channel.open || !ssh_bytes_equal(type, type_len, "session")) {
-    return ssh_queue_channel_open_failure(conn, peer_id, "session_only");
+  if (conn->channel.open || strcmp(request.type, "session") != 0) {
+    return ssh_queue_channel_open_failure(conn, request.peer_id, "session_only");
   }
 
   conn->channel.open = TRUE;
-  conn->channel.peer_id = peer_id;
-  conn->channel.peer_window = peer_window;
-  conn->channel.peer_max_packet = peer_max_packet;
+  conn->channel.peer_id = request.peer_id;
+  conn->channel.peer_window = request.peer_window;
+  conn->channel.peer_max_packet = request.peer_max_packet;
   conn->channel.local_id = 0;
   conn->channel.cols = SSH_DEFAULT_COLS;
   conn->channel.rows = SSH_DEFAULT_ROWS;
@@ -2546,74 +2379,52 @@ PRIVATE int ssh_handle_channel_open(struct ssh_connection *conn,
 PRIVATE int ssh_handle_channel_request(struct ssh_connection *conn,
                                        const u_int8_t *payload, int payload_len)
 {
-  struct ssh_reader reader;
-  const u_int8_t *request = 0;
-  const u_int8_t *ignored = 0;
-  int request_len = 0;
-  int ignored_len = 0;
-  u_int32_t recipient;
-  int want_reply;
+  struct ssh_channel_request request;
 
-  ssh_reader_init(&reader, payload + 1, payload_len - 1);
-  recipient = ssh_reader_get_u32(&reader);
-  ssh_reader_get_string(&reader, &request, &request_len);
-  want_reply = ssh_reader_get_bool(&reader);
-  if (reader.error || !conn->channel.open || recipient != conn->channel.local_id)
+  if (ssh_channel_parse_request(payload, payload_len, &request) < 0 ||
+      !conn->channel.open || request.recipient != conn->channel.local_id) {
     return -1;
+  }
 
-  if (ssh_bytes_equal(request, request_len, "pty-req")) {
+  if (request.kind == SSH_CHANNEL_REQUEST_PTY) {
     server_audit_line("ssh_pty_req");
-    ssh_reader_get_string(&reader, &ignored, &ignored_len);
-    conn->channel.cols = (u_int16_t)ssh_reader_get_u32(&reader);
-    conn->channel.rows = (u_int16_t)ssh_reader_get_u32(&reader);
-    ssh_reader_get_u32(&reader);
-    ssh_reader_get_u32(&reader);
-    ssh_reader_get_string(&reader, &ignored, &ignored_len);
-    if (reader.error)
-      return -1;
+    conn->channel.cols = request.cols;
+    conn->channel.rows = request.rows;
     conn->channel.pty_requested = TRUE;
     if (conn->channel.tty != 0)
       tty_set_winsize(conn->channel.tty, conn->channel.cols, conn->channel.rows);
-    return want_reply ? ssh_queue_channel_status(conn, TRUE) : 0;
+    return request.want_reply ? ssh_queue_channel_status(conn, TRUE) : 0;
   }
 
-  if (ssh_bytes_equal(request, request_len, "window-change")) {
+  if (request.kind == SSH_CHANNEL_REQUEST_WINDOW_CHANGE) {
     server_audit_line("ssh_window_change");
-    conn->channel.cols = (u_int16_t)ssh_reader_get_u32(&reader);
-    conn->channel.rows = (u_int16_t)ssh_reader_get_u32(&reader);
-    ssh_reader_get_u32(&reader);
-    ssh_reader_get_u32(&reader);
-    if (reader.error)
-      return -1;
+    conn->channel.cols = request.cols;
+    conn->channel.rows = request.rows;
     if (conn->channel.tty != 0)
       tty_set_winsize(conn->channel.tty, conn->channel.cols, conn->channel.rows);
-    return want_reply ? ssh_queue_channel_status(conn, TRUE) : 0;
+    return request.want_reply ? ssh_queue_channel_status(conn, TRUE) : 0;
   }
 
-  if (ssh_bytes_equal(request, request_len, "shell")) {
+  if (request.kind == SSH_CHANNEL_REQUEST_SHELL) {
     server_audit_line("ssh_shell_req");
     if (ssh_spawn_shell(conn) < 0)
-      return want_reply ? ssh_queue_channel_status(conn, FALSE) : -1;
-    conn->channel.shell_reply_pending = want_reply ? TRUE : FALSE;
+      return request.want_reply ? ssh_queue_channel_status(conn, FALSE) : -1;
+    conn->channel.shell_reply_pending = request.want_reply ? TRUE : FALSE;
     return 0;
   }
 
-  return want_reply ? ssh_queue_channel_status(conn, FALSE) : 0;
+  return request.want_reply ? ssh_queue_channel_status(conn, FALSE) : 0;
 }
 
 PRIVATE int ssh_handle_channel_data(struct ssh_connection *conn,
                                     const u_int8_t *payload, int payload_len)
 {
-  struct ssh_reader reader;
-  const u_int8_t *data = 0;
-  int data_len = 0;
-  u_int32_t recipient;
+  struct ssh_channel_data_request request;
 
-  ssh_reader_init(&reader, payload + 1, payload_len - 1);
-  recipient = ssh_reader_get_u32(&reader);
-  ssh_reader_get_string(&reader, &data, &data_len);
-  if (reader.error || !conn->channel.open || recipient != conn->channel.local_id)
+  if (ssh_channel_parse_data(payload, payload_len, &request) < 0 ||
+      !conn->channel.open || request.recipient != conn->channel.local_id) {
     return -1;
+  }
   if (conn->channel.tty == 0)
     return 0;
 
@@ -2621,10 +2432,10 @@ PRIVATE int ssh_handle_channel_data(struct ssh_connection *conn,
   {
     int i;
 
-    for (i = 0; i < data_len; i++) {
-      if (data[i] == 0x03)
+    for (i = 0; i < request.data_len; i++) {
+      if (request.data[i] == 0x03)
         ssh_interrupt_foreground(conn);
-      tty_master_write(conn->channel.tty, data + i, 1);
+      tty_master_write(conn->channel.tty, request.data + i, 1);
     }
   }
   return 0;
@@ -2686,6 +2497,8 @@ PRIVATE int ssh_handle_payload(struct ssh_connection *conn,
     return 0;
   case SSH_MSG_CHANNEL_CLOSE:
     conn->channel.peer_close = TRUE;
+    if (ssh_queue_channel_close(conn) < 0)
+      return -1;
     ssh_queue_close(conn, "peer_close");
     return 0;
   case SSH_MSG_CHANNEL_REQUEST:
@@ -2698,30 +2511,10 @@ PRIVATE int ssh_handle_payload(struct ssh_connection *conn,
 PRIVATE int ssh_try_decode_plain_packet(struct ssh_connection *conn,
                                         u_int8_t *payload, int *payload_len)
 {
-  u_int32_t packet_length;
-  int padding_len;
-  int total_len;
-
-  if (conn->rx_len < 4)
-    return 0;
-
-  packet_length = ssh_read_u32_be(conn->rx_buf);
-  total_len = (int)packet_length + 4;
-  if (packet_length < 5 || total_len > conn->rx_len)
-    return 0;
-  if (total_len > SSH_PACKET_PLAIN_MAX)
-    return -1;
-
-  padding_len = conn->rx_buf[4];
-  if (padding_len < 4 || (int)packet_length - padding_len - 1 < 0)
-    return -1;
-
-  *payload_len = (int)packet_length - padding_len - 1;
-  memcpy(payload, conn->rx_buf + 5, (size_t)*payload_len);
-  ssh_move_bytes(conn->rx_buf, conn->rx_buf + total_len, conn->rx_len - total_len);
-  conn->rx_len -= total_len;
-  conn->rx_seq++;
-  return 1;
+  return ssh_try_decode_plain_packet_buffer(conn->rx_buf, &conn->rx_len,
+                                            &conn->rx_seq,
+                                            SSH_PACKET_PLAIN_MAX,
+                                            payload, payload_len);
 }
 
 PRIVATE int ssh_try_decode_encrypted_packet(struct ssh_connection *conn,
@@ -2990,6 +2783,8 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
 
 PRIVATE void ssh_poll_shell(struct ssh_connection *conn)
 {
+  struct ssh_channel_close_plan plan;
+
   if (conn->channel.shell_pid <= 0)
     return;
   if (process_has_pid(conn->channel.shell_pid))
@@ -3001,9 +2796,16 @@ PRIVATE void ssh_poll_shell(struct ssh_connection *conn)
   }
   conn->channel.shell_pid = -1;
   conn->channel.prompt_kick_pending = FALSE;
-  ssh_queue_exit_status(conn, 0);
-  ssh_queue_channel_eof(conn);
-  ssh_queue_channel_close(conn);
+  ssh_channel_plan_shutdown(conn->channel.exit_status_sent,
+                            conn->channel.eof_sent,
+                            conn->channel.close_sent,
+                            &plan);
+  if (plan.send_exit_status)
+    ssh_queue_exit_status(conn, 0);
+  if (plan.send_eof)
+    ssh_queue_channel_eof(conn);
+  if (plan.send_close)
+    ssh_queue_channel_close(conn);
   ssh_queue_close(conn, "shell_exit");
 }
 
@@ -3050,6 +2852,7 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
   int payload_len;
   int result;
   int start_result = 0;
+  int timeout_phase;
   u_int32_t timeout_ticks;
   int iterations = 0;
 
@@ -3061,13 +2864,16 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
     return;
   }
 
-  timeout_ticks = conn->auth_done ? SSH_IDLE_TIMEOUT_TICKS
-                                  : SSH_AUTH_TIMEOUT_TICKS;
+  timeout_phase = ssh_timeout_phase(conn->auth_done,
+                                    conn->channel.open,
+                                    conn->channel.shell_pid > 0 ||
+                                    conn->channel.tty != 0);
+  timeout_ticks = ssh_timeout_ticks_for_phase(timeout_phase);
   if (!conn->closing &&
       (int)(kernel_tick - conn->last_activity_tick) > (int)timeout_ticks) {
-    ssh_audit_state(ssh_timeout_audit_label(conn->auth_done),
+    ssh_audit_state(ssh_timeout_audit_label_for_phase(timeout_phase),
                     (int)(kernel_tick - conn->last_activity_tick));
-    ssh_queue_close(conn, ssh_timeout_close_reason(conn->auth_done));
+    ssh_queue_close(conn, ssh_timeout_close_reason_for_phase(timeout_phase));
   }
 
   if (ssh_send_banner(conn) < 0) {
@@ -3092,7 +2898,15 @@ PRIVATE void ssh_poll_connection(struct ssh_connection *conn)
       ssh_audit_state("ssh_rx_len", conn->rx_len);
   }
 
+  if (!conn->closing) {
+    result = ssh_flush_auth_pending(conn);
+    if (result < 0)
+      ssh_queue_close(conn, "queue_failed");
+  }
+
   while (!conn->closing && conn->banner_received && iterations < 8) {
+    if (ssh_auth_delay_pending(conn))
+      break;
     result = ssh_try_decode_packet(conn, ssh_decode_payload_buf, &payload_len);
     if (result < 0) {
       ssh_queue_close(conn, "packet_invalid");
@@ -3186,61 +3000,50 @@ done:
   ssh_tick_active = FALSE;
 }
 #ifdef USERLAND_SSHD_BUILD
-PRIVATE int ssh_userland_channel_fd(struct ssh_connection *conn)
+PUBLIC int ssh_userland_channel_fd(void)
 {
-  if (conn == 0 || conn->channel.tty == 0 || !conn->channel.tty->active)
+  if (!ssh_conn.in_use || ssh_conn.channel.tty == 0 ||
+      !ssh_conn.channel.tty->active) {
     return -1;
-  return conn->channel.tty->fd;
+  }
+  return ssh_conn.channel.tty->fd;
 }
 
-PRIVATE int ssh_userland_fd_ready(int fd, short events)
-{
-  struct pollfd pfd;
-
-  if (fd < 0)
-    return FALSE;
-
-  pfd.fd = fd;
-  pfd.events = events;
-  pfd.revents = 0;
-  if (poll(&pfd, 1, 0) < 0)
-    return FALSE;
-  return (pfd.revents & events) != 0;
-}
-
-PRIVATE void ssh_userland_refresh_runtime(void)
+PUBLIC void ssh_userland_refresh_runtime(void)
 {
   if (ssh_conn.in_use && ssh_conn.fd >= 0)
     ssh_userland_refresh_socket(ssh_conn.fd);
 }
 
-PRIVATE void ssh_userland_wait_once(void)
+PUBLIC int ssh_userland_connection_pending(void)
 {
   if (ssh_conn.in_use && ssh_conn.fd >= 0) {
     if (ssh_socket_rx_ready(ssh_conn.fd))
-      return;
+      return TRUE;
     if (ssh_conn.out_count > 0 && !ssh_socket_tx_pending(ssh_conn.fd))
-      return;
-    if (ssh_userland_fd_ready(ssh_userland_channel_fd(&ssh_conn), POLLIN | POLLHUP))
-      return;
-  } else if (ssh_listener_fd >= 0) {
-    if (ssh_socket_rx_ready(ssh_listener_fd))
-      return;
+      return TRUE;
   }
-
-  /* userland では blocking poll の wakeup 依存を避け、1 tick ごとに再評価する。 */
-  sleep_ticks(1);
+  return FALSE;
 }
 
-int main(int argc, char **argv)
+PUBLIC int ssh_userland_listener_pending(void)
 {
-  (void)argc;
-  (void)argv;
+  if (ssh_conn.in_use || ssh_listener_fd < 0)
+    return FALSE;
+  return ssh_socket_rx_ready(ssh_listener_fd);
+}
 
+PUBLIC void ssh_userland_sync_tick(void)
+{
+  kernel_tick = get_kernel_tick();
+}
+
+PUBLIC void ssh_userland_bootstrap(void)
+{
   ssh_server_init();
   server_audit_line("sshd_main_enter");
   for (;;) {
-    kernel_tick = get_kernel_tick();
+    ssh_userland_sync_tick();
     ssh_userland_load_config();
     if (!server_runtime_ssh_enabled()) {
       server_audit_line("sshd_wait_config");
@@ -3250,21 +3053,18 @@ int main(int argc, char **argv)
     break;
   }
 
-  kernel_tick = get_kernel_tick();
+  ssh_userland_sync_tick();
   ssh_server_tick();
   server_audit_line("sshd_bootstrap_done");
-
-  for (;;) {
-    ssh_userland_wait_once();
-    kernel_tick = get_kernel_tick();
-    ssh_userland_refresh_runtime();
-    ssh_server_tick();
-  }
-
-  return 0;
 }
 #endif
 #else
 PUBLIC void ssh_server_init(void) {}
 PUBLIC void ssh_server_tick(void) {}
+PUBLIC void ssh_userland_bootstrap(void) {}
+PUBLIC void ssh_userland_sync_tick(void) {}
+PUBLIC void ssh_userland_refresh_runtime(void) {}
+PUBLIC int ssh_userland_connection_pending(void) { return FALSE; }
+PUBLIC int ssh_userland_listener_pending(void) { return FALSE; }
+PUBLIC int ssh_userland_channel_fd(void) { return -1; }
 #endif

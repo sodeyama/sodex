@@ -16,6 +16,10 @@
 - userland `sshd` で password auth failure を 1 接続 3 回までに制限し、close reason を `auth_retry_limit`、timeout reason を `auth_timeout` / `idle_timeout` に分けた
 - 外部調査の結論として `/etc/sodex-admin.conf` は当面維持しつつ、`server_runtime_config` / `server_audit` を shared entrypoint にして `ssh` / `debug shell` / `http` の `admin_server` 直参照を減らした
 - `test-qemu-ssh` の reconnect 回帰は、userland `recv==0` の close 検出と `uip_conn->appstate` の stale child 切り離しで解消した
+- 2026-03-16 の外部再調査で、`USS-03` / `USS-09` / `USS-12` の詳細 plan を OpenSSH / RFC 4252 / RFC 4254 ベースに再整理した
+- `ssh_packet_core` / `ssh_auth_core` / `ssh_channel_core` を shared 化し、host test を追加して `ssh_server.c` の pure logic を段階分離した
+- userland `sshd` の main loop は `src/usr/command/sshd.c` に移し、`ssh_server.c` は bootstrap / pending / refresh hook を公開する形へ整理した
+- OpenSSH の `none` probe を `USERAUTH_FAILURE` へ落とし、`no_channel_timeout`、username/service pinning、auth retry delay を入れた状態で `test-qemu-ssh` を green に戻した
 
 ## 優先順
 
@@ -33,7 +37,7 @@
 |---|---|---|---|---|
 | [~] | USS-01 | userland `sshd` の責務、起動条件、config/audit 境界を固定する | なし | `/usr/bin/sshd` の起動経路と config snapshot / audit sink は実装済み。責務分割を spec 側へさらに反映する余地がある |
 | [x] | USS-02 | socket + `PTY` を待つ最小 wait API を追加する | USS-01 | `poll` syscall と `get_foreground_pid` syscall を追加し、listener / session socket / `PTY` を userland から待てる |
-| [~] | USS-03 | `src/net/ssh_server.c` から pure logic を shared core へ分離する | USS-01, USS-02 | userland build は `USERLAND_SSHD_BUILD` で成立したが、pure logic の独立と host test 化は未完 |
+| [x] | USS-03 | `src/net/ssh_server.c` から pure logic を shared core へ分離する | USS-01, USS-02 | `ssh_packet_core` / `ssh_auth_core` / `ssh_channel_core` を追加し、kernel / userland build の両方から link しつつ host test を固定した |
 
 ## M1: userland `sshd` の bring-up
 
@@ -49,7 +53,7 @@
 |---|---|---|---|---|
 | [x] | USS-07 | `server` / `server-headless` の既定起動を userland `sshd` へ切り替える | USS-05, USS-06 | `init` の既定起動と kernel 側 call site の切替は完了した |
 | [x] | USS-08 | host test と `test-qemu-ssh` を userland `sshd` 前提で固定する | USS-05, USS-06 | `src/test/run_qemu_ssh_smoke.py` が login / wrong password / reconnect を通す |
-| [~] | USS-09 | kernel listener と `ssh_server_tick()` 依存を削り、cleanup する | USS-07, USS-08 | 既定経路の依存削除と green test は完了。調査用 audit / helper の整理は残る |
+| [x] | USS-09 | kernel listener と `ssh_server_tick()` 依存を削り、cleanup する | USS-07, USS-08 | userland `sshd` の wait/main loop を command 側へ分離し、`shell_exit` の `exit-status` -> `EOF` -> `CLOSE` と reconnect 回帰を smoke で固定した |
 
 ## M3: 残フォローアップ
 
@@ -57,7 +61,7 @@
 |---|---|---|---|---|
 | [x] | USS-10 | `ssh_*` config を `admin_server` 依存からさらに分離するか判断する | USS-07 | 外部調査の結果、`/etc/sodex-admin.conf` は当面維持し、shared `server_runtime_config` API を挟む方針で固定した |
 | [x] | USS-11 | audit sink を userland server 共通で使える形に整理する | USS-07 | `server_audit` を shared entrypoint とし、`ssh` / `debug shell` / `http` が同じ sink を使う形へ整理した |
-| [~] | USS-12 | 単一接続制限を維持したまま、timeout と auth retry 制限を見直す | USS-08 | 1 接続 3 回失敗で切断と timeout reason の分離は実装済み。retry/backoff や閾値の再調整は残る |
+| [x] | USS-12 | 単一接続制限を維持したまま、timeout と auth retry 制限を見直す | USS-08 | `auth_timeout` / `no_channel_timeout` / `idle_timeout`、3 回失敗で切断、retry delay、username/service pinning、`none` auth probe の failure 応答を実装し、host test と QEMU smoke を通した |
 
 ## M4: signer-less 復旧と完走条件の再固定
 

@@ -64,7 +64,6 @@ extern struct task_struct *getpstat(void);
 
 PRIVATE void disableInterrupt(void) {}
 PRIVATE void enableInterrupt(void) {}
-PRIVATE void network_poll(void) {}
 
 PRIVATE u_int16_t htons(u_int16_t hostshort)
 {
@@ -110,141 +109,6 @@ PRIVATE void ssh_userland_reset_config(void)
 {
   memset(&ssh_userland_runtime, 0, sizeof(ssh_userland_runtime));
   ssh_userland_listener_ready = FALSE;
-}
-
-PRIVATE void ssh_userland_trim_line(const char *line, int len,
-                                    char *out, int out_cap)
-{
-  int start = 0;
-  int end = len;
-  int pos = 0;
-
-  if (out == 0 || out_cap <= 0) {
-    return;
-  }
-
-  while (start < end &&
-         (line[start] == ' ' || line[start] == '\t' ||
-          line[start] == '\r' || line[start] == '\n')) {
-    start++;
-  }
-  while (end > start &&
-         (line[end - 1] == ' ' || line[end - 1] == '\t' ||
-          line[end - 1] == '\r' || line[end - 1] == '\n')) {
-    end--;
-  }
-
-  while (start < end && pos < out_cap - 1) {
-    out[pos++] = line[start++];
-  }
-  out[pos] = '\0';
-}
-
-PRIVATE int ssh_userland_parse_ip(const char *text, u_int32_t *out)
-{
-  u_int8_t parts[4];
-  int index = 0;
-  int value = 0;
-  int have_digit = FALSE;
-
-  if (text == 0 || out == 0)
-    return -1;
-
-  memset(parts, 0, sizeof(parts));
-  while (*text != '\0') {
-    if (*text >= '0' && *text <= '9') {
-      value = value * 10 + (*text - '0');
-      if (value > 255)
-        return -1;
-      have_digit = TRUE;
-    } else if (*text == '.') {
-      if (!have_digit || index >= 3)
-        return -1;
-      parts[index++] = (u_int8_t)value;
-      value = 0;
-      have_digit = FALSE;
-    } else {
-      return -1;
-    }
-    text++;
-  }
-
-  if (!have_digit || index != 3)
-    return -1;
-
-  parts[index] = (u_int8_t)value;
-  *out = ((u_int32_t)parts[0]) |
-         ((u_int32_t)parts[1] << 8) |
-         ((u_int32_t)parts[2] << 16) |
-         ((u_int32_t)parts[3] << 24);
-  return 0;
-}
-
-PRIVATE void ssh_userland_apply_config_line(const char *line)
-{
-  char trimmed[256];
-  char key[64];
-  char value[192];
-  char *sep;
-  int key_len;
-
-  ssh_userland_trim_line(line, (int)strlen(line), trimmed, sizeof(trimmed));
-  if (trimmed[0] == '\0' || trimmed[0] == '#')
-    return;
-
-  sep = strchr(trimmed, '=');
-  if (sep == 0)
-    return;
-
-  key_len = (int)(sep - trimmed);
-  if (key_len <= 0 || key_len >= (int)sizeof(key))
-    return;
-  memcpy(key, trimmed, (size_t)key_len);
-  key[key_len] = '\0';
-  ssh_userland_trim_line(sep + 1, (int)strlen(sep + 1), value, sizeof(value));
-
-  if (strcmp(key, "allow_ip") == 0) {
-    u_int32_t allow_ip;
-
-    if (ssh_userland_parse_ip(value, &allow_ip) == 0)
-      ssh_userland_runtime.allow_ip = allow_ip;
-    return;
-  }
-  if (strcmp(key, "ssh_port") == 0) {
-    ssh_userland_runtime.ssh_port = (u_int16_t)atoi(value);
-    return;
-  }
-  if (strcmp(key, "ssh_password") == 0) {
-    ssh_userland_copy_string(ssh_userland_runtime.ssh_password,
-                             sizeof(ssh_userland_runtime.ssh_password), value);
-    return;
-  }
-  if (strcmp(key, "ssh_signer_port") == 0) {
-    ssh_userland_runtime.ssh_signer_port = (u_int16_t)atoi(value);
-    return;
-  }
-  if (strcmp(key, "ssh_hostkey_ed25519_seed") == 0) {
-    ssh_userland_copy_string(ssh_userland_runtime.ssh_hostkey_ed25519_seed,
-                             sizeof(ssh_userland_runtime.ssh_hostkey_ed25519_seed),
-                             value);
-    return;
-  }
-  if (strcmp(key, "ssh_hostkey_ed25519_public") == 0) {
-    ssh_userland_copy_string(ssh_userland_runtime.ssh_hostkey_ed25519_public,
-                             sizeof(ssh_userland_runtime.ssh_hostkey_ed25519_public),
-                             value);
-    return;
-  }
-  if (strcmp(key, "ssh_hostkey_ed25519_secret") == 0) {
-    ssh_userland_copy_string(ssh_userland_runtime.ssh_hostkey_ed25519_secret,
-                             sizeof(ssh_userland_runtime.ssh_hostkey_ed25519_secret),
-                             value);
-    return;
-  }
-  if (strcmp(key, "ssh_rng_seed") == 0) {
-    ssh_userland_copy_string(ssh_userland_runtime.ssh_rng_seed,
-                             sizeof(ssh_userland_runtime.ssh_rng_seed), value);
-  }
 }
 
 PRIVATE int ssh_userland_load_config(void)
@@ -1515,32 +1379,11 @@ PRIVATE int ssh_build_hostkey_blob(u_int8_t *buf, int cap)
   return writer.len;
 }
 
+#ifndef USERLAND_SSHD_BUILD
 PRIVATE int ssh_signer_recv_exact(int fd, u_int8_t *buf, int len)
 {
-  int read_len;
-
-#ifdef USERLAND_SSHD_BUILD
-  struct pollfd pfd;
-  int wait_result;
-
-  pfd.fd = fd;
-  pfd.events = POLLIN | POLLHUP;
-  pfd.revents = 0;
-  wait_result = poll(&pfd, 1, SSH_SIGNER_RECV_RETRIES);
-  if (wait_result <= 0 || (pfd.revents & POLLIN) == 0) {
-    ssh_audit_state("ssh_signer_wait", wait_result);
-    ssh_audit_state("ssh_signer_wait_revents", pfd.revents);
-    return -1;
-  }
-  read_len = recvfrom_nowait(fd, buf, len, 0, 0);
-  if (read_len < 0) {
-    ssh_audit_state("ssh_signer_err", read_len);
-    return -1;
-  }
-  ssh_audit_state("ssh_signer_read_len", read_len);
-  return read_len == len ? 0 : -1;
-#else
   int retry = 0;
+  int read_len;
 
   while (retry < SSH_SIGNER_RECV_RETRIES) {
     read_len = kern_recv(fd, buf, len, 0);
@@ -1557,8 +1400,8 @@ PRIVATE int ssh_signer_recv_exact(int fd, u_int8_t *buf, int len)
   }
 
   return -1;
-#endif
 }
+#endif
 
 PRIVATE void ssh_close_signer_socket(void)
 {
@@ -1568,6 +1411,7 @@ PRIVATE void ssh_close_signer_socket(void)
   ssh_signer_fd = -1;
 }
 
+#ifndef USERLAND_SSHD_BUILD
 PRIVATE int ssh_get_signer_socket(void)
 {
   if (server_runtime_ssh_signer_port() <= 0) {
@@ -1580,6 +1424,7 @@ PRIVATE int ssh_get_signer_socket(void)
   ssh_signer_fd = kern_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   return ssh_signer_fd;
 }
+#endif
 
 PRIVATE int ssh_request_host_signature(
     u_int8_t signature[SSH_CRYPTO_ED25519_SIGNATURE_BYTES],

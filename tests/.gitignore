@@ -3,3 +3,4 @@
 test_*
 !test_*.c
 !test_*.h
+derive_ssh_keypair

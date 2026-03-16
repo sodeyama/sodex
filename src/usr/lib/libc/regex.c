@@ -21,7 +21,6 @@ struct Dtrans** dtrans;
 struct Dnode** dnode;
 
 static void perror(const char * ptr);
-static char getNextCurrent();
 static char getBackCurrent();
 static void setNextCurrent();
 static struct Leaf* growTree(struct Leaf* left, struct Leaf* right, enum op_t op);
@@ -65,11 +64,6 @@ static void Stree(char *setch) {
   baseStr = setch;
   current = *(inspectedStr);
   regexRoot = regexp();
-}
-
-static char getNextCurrent()
-{
-  return *(inspectedStr+1);
 }
 
 static char getBackCurrent()
@@ -551,4 +545,3 @@ static int dfaRegexp(char* search)
 
   return TRUE;
 }
-

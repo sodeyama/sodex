@@ -8,6 +8,7 @@ OBJS = $(SUB_OBJDIR)/crt0.o
 
 all: ${OBJS}
 	cd libc; make
+	cd libagent; make
 
 $(SUB_OBJDIR)/%.o: %.S
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
@@ -18,4 +19,5 @@ $(SUB_OBJDIR)/%.o: %.c
 .PHONY: clean
 clean:
 	cd libc; make clean
+	cd libagent; make clean
 	rm -f ${OBJS}

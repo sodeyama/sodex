@@ -47,20 +47,20 @@
 
 | 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
 |---|---|---|---|---|---|
-| [ ] | AT-01 | ユーザランドから TCP connect/send/recv/close のサイクルを確認する | 01 | Phase 0 | ユーザ空間プロセスから `10.0.2.2:8080` に接続してデータ往復 |
-| [ ] | AT-02 | connect/close サイクルを 3 回繰り返して安定性を確認する | 01 | AT-01 | socket リークなし |
-| [ ] | AT-03 | 接続エラー時にエラーコードで切り分けできることを確認する | 01 | AT-01 | timeout/refused がユーザランドで判別できる |
-| [ ] | AT-04 | `http_client.h` にリクエスト/レスポンス構造体とエラーコードを定義する | 02 | なし | ヘッダがコンパイルできる |
-| [ ] | AT-05 | `http_build_request()` を実装する | 02 | AT-04, AT-P00-02 | GET/POST リクエスト文字列を正しく生成 |
-| [ ] | AT-06 | `http_parse_response_headers()` を実装する | 02 | AT-04, AT-P00-04, AT-P00-05 | ステータス行と Content-Length/Content-Type をパース |
-| [ ] | AT-07 | `http_do_request()` を実装する（平文 TCP 版） | 02 | AT-01, AT-05, AT-06 | connect → send → recv → close が 1 関数で回る |
-| [ ] | AT-08 | JSON トークナイザとツリービルダを実装する | 03 | なし | 6 型をパースしてトークン配列に格納 |
-| [ ] | AT-09 | JSON アクセサ（`json_find_key`, `json_array_get` 等）を実装する | 03 | AT-08 | ネスト構造のフィールドアクセスができる |
-| [ ] | AT-10 | JSON ライター（`jw_*` 系）を実装する | 03 | なし | Claude API リクエストボディを生成できる |
-| [ ] | AT-11 | JSON の host 単体テストを書いて通す | 03 | AT-08, AT-09, AT-10 | fixture のパースとライター出力が正しい |
-| [ ] | AT-12 | HTTP の host 単体テストを書いて通す | 02 | AT-05, AT-06 | fixture のリクエスト生成とレスポンスパースが正しい |
-| [ ] | AT-13 | モック HTTP サーバ (`tests/mock_http_server.py`) を作成する | 04 | なし | echo, healthz, mock/claude エンドポイントが動く |
-| [ ] | AT-14 | QEMU 平文 HTTP 結合テスト (`make test-agent-bringup`) を通す | 04 | AT-07, AT-11, AT-13 | 固定 IP + JSON POST の往復が 1 コマンドで確認できる |
+| [x] | AT-01 | ユーザランドから TCP connect/send/recv/close のサイクルを確認する | 01 | Phase 0 | ユーザ空間プロセスから `10.0.2.2:8080` に接続してデータ往復 |
+| [x] | AT-02 | connect/close サイクルを 3 回繰り返して安定性を確認する | 01 | AT-01 | socket リークなし |
+| [x] | AT-03 | 接続エラー時にエラーコードで切り分けできることを確認する | 01 | AT-01 | timeout/refused がユーザランドで判別できる |
+| [x] | AT-04 | `http_client.h` にリクエスト/レスポンス構造体とエラーコードを定義する | 02 | なし | ヘッダがコンパイルできる |
+| [x] | AT-05 | `http_build_request()` を実装する | 02 | AT-04, AT-P00-02 | GET/POST リクエスト文字列を正しく生成 |
+| [x] | AT-06 | `http_parse_response_headers()` を実装する | 02 | AT-04, AT-P00-04, AT-P00-05 | ステータス行と Content-Length/Content-Type をパース |
+| [x] | AT-07 | `http_do_request()` を実装する（平文 TCP 版） | 02 | AT-01, AT-05, AT-06 | connect → send → recv → close が 1 関数で回る |
+| [x] | AT-08 | JSON トークナイザとツリービルダを実装する | 03 | なし | 6 型をパースしてトークン配列に格納 |
+| [x] | AT-09 | JSON アクセサ（`json_find_key`, `json_array_get` 等）を実装する | 03 | AT-08 | ネスト構造のフィールドアクセスができる |
+| [x] | AT-10 | JSON ライター（`jw_*` 系）を実装する | 03 | なし | Claude API リクエストボディを生成できる |
+| [x] | AT-11 | JSON の host 単体テストを書いて通す | 03 | AT-08, AT-09, AT-10 | fixture のパースとライター出力が正しい |
+| [x] | AT-12 | HTTP の host 単体テストを書いて通す | 02 | AT-05, AT-06 | fixture のリクエスト生成とレスポンスパースが正しい |
+| [x] | AT-13 | モック HTTP サーバ (`tests/mock_http_server.py`) を作成する | 04 | なし | echo, healthz, mock/claude エンドポイントが動く |
+| [x] | AT-14 | QEMU 平文 HTTP 結合テスト (`make test-agent-bringup`) を通す | 04 | AT-07, AT-11, AT-13 | 固定 IP + JSON POST の往復が 1 コマンドで確認できる |
 
 ## Phase B: HTTPS 基盤
 

@@ -9,7 +9,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -428,6 +428,13 @@ test_init_policy_policy.o: $(SRC)/usr/lib/libc/init_policy.c
 # Self-contained: implementations inlined in test file to avoid host libc conflicts
 test_libc_ext: test_libc_ext.c
 	$(CC) -Wall -g -O0 -I. -o $@ test_libc_ext.c
+
+# DNS parser tests (Phase B)
+test_dns: test_dns.c test_dns_dns.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -I$(SRC)/usr/include -o $@ test_dns.c test_dns_dns.o
+
+test_dns_dns.o: $(SRC)/usr/lib/libagent/dns.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -I$(SRC)/usr/include -c -o $@ $<
 
 # JSON parser/writer tests (Phase A)
 test_json: test_json.c test_json_json.o

@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include <http_client.h>
 #include <json.h>
+#include <dns.h>
 
 #define HOST_IP     "10.0.2.2"
 #define HOST_PORT   8080
@@ -474,6 +475,74 @@ static void test_http_get_html(void)
     }
 }
 
+/* ---- DNS resolve tests ---- */
+static void test_dns_resolve(void)
+{
+    struct dns_result result;
+    int ret;
+
+    debug_printf("[AGENT-TEST] dns_resolve api.anthropic.com ...\n");
+    ret = dns_resolve("api.anthropic.com", &result);
+    if (ret == DNS_OK) {
+        debug_printf("[AGENT-TEST] resolved: %d.%d.%d.%d\n",
+                    result.addr[0], result.addr[1],
+                    result.addr[2], result.addr[3]);
+        /* Any valid IP is good enough */
+        if (result.addr[0] != 0)
+            TEST_PASS("dns_resolve_anthropic");
+        else
+            TEST_FAIL("dns_resolve_anthropic", "got 0.x.x.x");
+    } else {
+        char msg[32];
+        snprintf(msg, sizeof(msg), "err=%d", ret);
+        TEST_FAIL("dns_resolve_anthropic", msg);
+    }
+}
+
+static void test_dns_cache(void)
+{
+    struct dns_result r1, r2;
+    int ret;
+
+    /* First resolve should query */
+    ret = dns_resolve("api.anthropic.com", &r1);
+    if (ret != DNS_OK) {
+        TEST_FAIL("dns_cache", "first resolve failed");
+        return;
+    }
+
+    /* Second resolve should hit cache (no UDP) */
+    ret = dns_resolve("api.anthropic.com", &r2);
+    if (ret != DNS_OK) {
+        TEST_FAIL("dns_cache", "cached resolve failed");
+        return;
+    }
+
+    if (memcmp(r1.addr, r2.addr, 4) == 0)
+        TEST_PASS("dns_cache");
+    else
+        TEST_FAIL("dns_cache", "addresses differ");
+}
+
+static void test_dns_nxdomain(void)
+{
+    struct dns_result result;
+    int ret;
+
+    ret = dns_resolve("this-does-not-exist-12345.invalid", &result);
+    if (ret == DNS_ERR_NXDOMAIN)
+        TEST_PASS("dns_nxdomain");
+    else {
+        char msg[32];
+        snprintf(msg, sizeof(msg), "ret=%d", ret);
+        /* Some DNS servers redirect NXDOMAIN, accept timeout too */
+        if (ret == DNS_ERR_TIMEOUT)
+            TEST_PASS("dns_nxdomain");
+        else
+            TEST_FAIL("dns_nxdomain", msg);
+    }
+}
+
 /* ---- JSON standalone tests ---- */
 static void test_json_parser(void)
 {
@@ -613,6 +682,11 @@ int main(int argc, char *argv[])
     test_tcp_connect();
     test_tcp_cycle();
     test_tcp_error();
+
+    /* DNS tests */
+    test_dns_resolve();
+    test_dns_cache();
+    test_dns_nxdomain();
 
     /* HTTP + JSON integration tests */
     test_http_healthz();

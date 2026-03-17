@@ -111,6 +111,14 @@ if [ "$ENABLE_SSH" -eq 1 ]; then
   fi
 fi
 
+# Check Claude API key availability
+CLAUDE_CONF="$REPO_ROOT/src/rootfs-overlay/etc/claude.conf"
+if [ -f "$CLAUDE_CONF" ]; then
+  echo "[Claude] API key loaded (ask command available)"
+elif [ -f "$REPO_ROOT/.env.local" ]; then
+  echo "[Claude] .env.local found but not injected. Run: cd src && make inject-api-key"
+fi
+
 COMMON_OPTS="-drive file=$BUILD_BIN/fsboot.bin,format=raw,if=ide \
     -m $QEMU_MEM_MB \
     -monitor unix:$LOG_DIR/monitor.sock,server,nowait"

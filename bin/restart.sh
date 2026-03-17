@@ -94,11 +94,19 @@ if [ "$ENABLE_SSH" -eq 1 ]; then
 
   make -C "$REPO_ROOT" clean || exit 1
   mkdir -p "$LOG_DIR" || exit 1
+  # Inject Claude API key if .env.local exists
+  if [ -f "$REPO_ROOT/.env.local" ]; then
+    make -C "$REPO_ROOT/src" inject-api-key || true
+  fi
   python3 "$REPO_ROOT/src/test/write_server_runtime_overlay.py" "$SSH_OVERLAY_DIR" || exit 1
   SODEX_ROOTFS_OVERLAY="$SSH_OVERLAY_DIR" make -C "$REPO_ROOT" || exit 1
   exec "$REPO_ROOT/bin/start.sh" "$@"
 fi
 
 make -C "$REPO_ROOT" clean || exit 1
+# Inject Claude API key if .env.local exists
+if [ -f "$REPO_ROOT/.env.local" ]; then
+  make -C "$REPO_ROOT/src" inject-api-key || true
+fi
 make -C "$REPO_ROOT" || exit 1
 exec "$REPO_ROOT/bin/start.sh" "$@"

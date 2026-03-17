@@ -17,6 +17,7 @@ SSHD_EXTRA_OBJS = \
 	$(SUB_OBJDIR)/sshd_sha256.o \
 	$(SUB_OBJDIR)/sshd_aes.o
 SSHD_CFLAGS = $(filter-out -O0,$(CFLAGS)) -O2 -march=i486 -msoft-float -mno-mmx -mno-sse -mno-sse2
+TERM_CFLAGS = $(filter-out -O0,$(CFLAGS)) -Os -march=i486 -msoft-float -mno-mmx -mno-sse -mno-sse2
 
 ESHELL  = ${USRDIR}/bin/eshell
 SH      = ${USRDIR}/bin/sh
@@ -105,6 +106,9 @@ $(SUB_OBJDIR)/sshd_sha256.o: ../../lib/sha256.c
 
 $(SUB_OBJDIR)/sshd_aes.o: ../../lib/aes.c
 	${CC} -c ${SSHD_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+
+$(SUB_OBJDIR)/term.o: term.c
+	${CC} -c ${TERM_CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
 
 $(SUB_OBJDIR)/%.o: %.c
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

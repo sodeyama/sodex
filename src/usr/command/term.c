@@ -463,6 +463,7 @@ PRIVATE void term_present(struct term_app *app, int scroll_delta)
   int width;
   int height;
   int pixel_rows = 0;
+  int flush_needed = FALSE;
 
   if (app == NULL || app->use_framebuffer == 0)
     return;
@@ -477,22 +478,30 @@ PRIVATE void term_present(struct term_app *app, int scroll_delta)
               (size_t)copy_bytes);
       app->metrics.present_copy_area +=
           (u_int32_t)(app->fb.width * (app->fb.height - pixel_rows));
+      flush_needed = TRUE;
     }
   }
 
-  if (app->present_valid == 0)
+  if (app->present_valid == 0) {
+    if (flush_needed != FALSE)
+      fb_flush();
     return;
+  }
 
   width = app->present_right - app->present_left;
   height = app->present_bottom - app->present_top;
-  if (width <= 0 || height <= 0)
+  if (width <= 0 || height <= 0) {
+    if (flush_needed != FALSE)
+      fb_flush();
     return;
+  }
   cell_renderer_present(&app->renderer,
                         app->present_left,
                         app->present_top,
                         width,
                         height);
   app->metrics.present_copy_area += (u_int32_t)(width * height);
+  fb_flush();
 }
 
 PRIVATE int sync_viewport(struct term_app *app)

@@ -1032,6 +1032,7 @@ PRIVATE char *ssh_metric_append_u32(char *dst, u_int32_t value)
 
   if (value == 0) {
     *dst++ = '0';
+    *dst = '\0';
     return dst;
   }
   while (value > 0 && len < (int)sizeof(digits)) {
@@ -1040,6 +1041,7 @@ PRIVATE char *ssh_metric_append_u32(char *dst, u_int32_t value)
   }
   while (len > 0)
     *dst++ = digits[--len];
+  *dst = '\0';
   return dst;
 }
 

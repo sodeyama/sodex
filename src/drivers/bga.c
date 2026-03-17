@@ -182,3 +182,16 @@ PUBLIC int bga_init(struct fb_info *info)
   bga_write_reg(BGA_INDEX_ENABLE, BGA_ENABLE_DISABLED);
   return -1;
 }
+
+PUBLIC void bga_refresh(void)
+{
+  u_int16_t enable;
+
+  if (bga_detect() < 0)
+    return;
+
+  enable = bga_read_reg(BGA_INDEX_ENABLE);
+  if ((enable & BGA_ENABLE_ENABLED) == 0)
+    return;
+  bga_write_reg(BGA_INDEX_ENABLE, enable);
+}

@@ -166,6 +166,32 @@ def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str
     raise TimeoutError(f"metric not found: {point}")
 
 
+def wait_for_metric_count(serial_log: pathlib.Path, marker: str,
+                          minimum: int, timeout: float) -> str:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if serial_log.exists():
+            matches = [
+                line for line in serial_log.read_text(errors="replace").splitlines()
+                if marker in line
+            ]
+            if len(matches) >= minimum:
+                return matches[-1]
+        time.sleep(0.2)
+    raise TimeoutError(f"metric count not reached: {marker} >= {minimum}")
+
+
+def parse_metric_fields(line: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+
+    for part in line.strip().split():
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        result[key] = value
+    return result
+
+
 def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
                     reference: dict[str, int | str], timeout: float) -> None:
     deadline = time.time() + timeout
@@ -299,6 +325,10 @@ def main() -> int:
         time.sleep(0.6)
         monitor.send_text("u")
         time.sleep(0.9)
+        vi_metric_line = wait_for_metric_count(serial_log,
+                                               "TERM_METRIC component=vi",
+                                               3,
+                                               5)
         monitor.send_text("ZZ")
         wait_for_prompt(monitor, prompt_ppm, reference, timeout)
         monitor.send_text("touch aftervi.txt\n")
@@ -307,8 +337,20 @@ def main() -> int:
         monitor.command("quit", pause=0.1)
         qemu.wait(timeout=5)
         assert_vi_state(fsboot)
+        vi_metric = parse_metric_fields(vi_metric_line)
+        if int(vi_metric.get("redraws", "0")) < 3:
+            raise AssertionError("vi metric missing redraw count")
+        if int(vi_metric.get("redraw_bytes", "0")) <= 0:
+            raise AssertionError("vi metric missing redraw_bytes")
+        if int(vi_metric.get("dirty_rows", "0")) <= 0:
+            raise AssertionError("vi metric missing dirty_rows")
+        if int(vi_metric.get("dirty_spans", "0")) <= 0:
+            raise AssertionError("vi metric missing dirty_spans")
+        if "full_fallbacks" not in vi_metric:
+            raise AssertionError("vi metric missing full_fallbacks")
 
         print("=== VI QEMU SMOKE DONE ===")
+        print(vi_metric_line)
         print(f"Artifacts: {serial_log}, {qemu_log}")
         return 0
     except Exception as exc:

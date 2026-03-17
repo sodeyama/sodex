@@ -40,7 +40,9 @@ static void vi_screen_write_n(const char *text, int len);
 static char *vi_screen_append_uint(char *p, u_int32_t value);
 static void vi_screen_move_cursor(int row, int col);
 static int vi_screen_ensure_state(int rows, int cols);
+#ifdef TEST_BUILD
 static void vi_screen_release_state(void);
+#endif
 static void vi_screen_clear_row(struct vi_screen_cell *row_cells,
                                 int cols, int reverse);
 static int vi_screen_visual_byte_bounds(const struct vi_visual_state *visual,
@@ -177,6 +179,7 @@ static void vi_screen_move_cursor(int row, int col)
   vi_screen_write_n(buf, (int)(p - buf));
 }
 
+#ifdef TEST_BUILD
 static void vi_screen_release_state(void)
 {
   if (vi_screen_state.cells != NULL)
@@ -185,6 +188,7 @@ static void vi_screen_release_state(void)
     free(vi_screen_state.prev_cells);
   memset(&vi_screen_state, 0, sizeof(vi_screen_state));
 }
+#endif
 
 static int vi_screen_ensure_state(int rows, int cols)
 {

@@ -14,5 +14,6 @@ struct fb_info {
 };
 
 int get_fb_info(struct fb_info *info);
+void fb_flush(void);
 
 #endif /* _USR_FB_H */

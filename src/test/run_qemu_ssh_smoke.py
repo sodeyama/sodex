@@ -223,6 +223,18 @@ def assert_contains(text: str, needle: str, label: str) -> None:
     if needle not in text:
         raise AssertionError(f"{label}: expected {needle!r} in {text!r}")
 
+
+def parse_metric_fields(line: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+
+    for part in line.strip().split():
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        result[key] = value
+    return result
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: run_qemu_ssh_smoke.py <fsboot> <logdir>", file=sys.stderr)
@@ -334,6 +346,27 @@ def main() -> int:
             raise AssertionError("serial log missing ssh_auth_failure audit")
         if "reason=protocol_error" in serial_text:
             raise AssertionError("serial log contains protocol_error close")
+        ssh_metric_lines = [
+            line for line in serial_text.splitlines()
+            if "SSH_METRIC " in line
+        ]
+        if len(ssh_metric_lines) < 2:
+            raise AssertionError("serial log missing SSH_METRIC lines")
+        for line in ssh_metric_lines:
+            fields = parse_metric_fields(line)
+            for key in (
+                "pty_read_bytes",
+                "channel_data_avg_len",
+                "packets_per_frame",
+                "ticks_per_frame",
+            ):
+                if key not in fields or not fields[key].isdigit():
+                    raise AssertionError(f"invalid ssh metric line: {line!r}")
+        if not any(
+            int(parse_metric_fields(line)["pty_read_bytes"]) > 0
+            for line in ssh_metric_lines
+        ):
+            raise AssertionError("serial log missing non-empty SSH_METRIC reads")
 
         assert_no_guest_failure(serial_log, qemu_log)
         print("=== SSH SMOKE DONE ===")

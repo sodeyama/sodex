@@ -133,6 +133,8 @@ int claude_parse_response(
             out->stop_reason = CLAUDE_STOP_TOOL_USE;
         else if (json_token_eq(json_str, &tokens[tok], "max_tokens"))
             out->stop_reason = CLAUDE_STOP_MAX_TOKENS;
+        else if (json_token_eq(json_str, &tokens[tok], "stop_sequence"))
+            out->stop_reason = CLAUDE_STOP_STOP_SEQUENCE;
     }
 
     /* usage */
@@ -359,6 +361,8 @@ int claude_parse_sse_event(
                     state->stop_reason = CLAUDE_STOP_TOOL_USE;
                 else if (json_token_eq(event->data, &tokens[sr_tok], "max_tokens"))
                     state->stop_reason = CLAUDE_STOP_MAX_TOKENS;
+                else if (json_token_eq(event->data, &tokens[sr_tok], "stop_sequence"))
+                    state->stop_reason = CLAUDE_STOP_STOP_SEQUENCE;
             }
         }
         /* output_tokens from usage */

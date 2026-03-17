@@ -13,6 +13,10 @@
 #define IPPROTO_UDP  17
 #define IPPROTO_ICMP 1
 
+#define SOL_SOCKET   1
+#define SO_RCVTIMEO  20   /* Receive timeout in milliseconds (u_int32_t) */
+#define SO_SNDTIMEO  21   /* Send timeout in milliseconds (u_int32_t) */
+
 typedef u_int32_t socklen_t;
 
 struct sockaddr {
@@ -37,5 +41,7 @@ int recvfrom_nowait(int sockfd, void *buf, int len, int flags,
 int ssh_signer_roundtrip(int port, const void *request, int request_len,
                          void *response, int response_len);
 int closesocket(int sockfd);
+int setsockopt(int sockfd, int level, int optname,
+               const void *optval, socklen_t optlen);
 
 #endif

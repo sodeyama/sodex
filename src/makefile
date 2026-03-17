@@ -230,7 +230,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-agent-bringup test-claude-smoke ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -342,10 +342,46 @@ ktest-link: kernel-subdirs ${OBJS} ${ASMOBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
 	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
 	$(MAKE) usr-build
 	$(MAKE) tools
-	$(MAKE) ${ACIENT} ${MIDDLE}
+	$(MAKE) ${MIDDLE}
+	@ksize=`${GETSIZE} ${KERNEL}`; \
+	if [ "$$ksize" -gt "${BOOT_KERNEL_MAX_SECTS}" ]; then \
+		echo "kernel.bin is too large ($$ksize > ${BOOT_KERNEL_MAX_SECTS} sectors)"; \
+		exit 1; \
+	fi
+	echo `${GETSIZE} ${KERNEL}`
+	${AS} ${ASFLAGS} --defsym KERNEL_SECTS=`${GETSIZE} ${KERNEL}` ${FIRST_BOOT_FILE} -o $(OBJDIR)/boota.o -a > ${LIST}/boota.lst
+	${LD} ${BOOTA_LFLAGS} $(OBJDIR)/boota.o -o ${ACIENT}
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2} ${ROOTFS_OVERLAY_ARG}
+
+test-agent-bringup:
+	@echo "=== Running agent bringup test (Phase A) in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/tests/run_agent_bringup.py
+
+test-claude-smoke:
+	@echo "=== Running Claude smoke test (Phase C) in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/tests/run_claude_smoke.py
+
+# === API key injection ===
+
+ENVFILE = $(BASEDIR)/.env.local
+CLAUDE_CONF = $(BASEDIR)/src/rootfs-overlay/etc/claude.conf
+
+.PHONY: inject-api-key
+inject-api-key:
+	@if [ ! -f "$(ENVFILE)" ]; then \
+		echo "ERROR: $(ENVFILE) not found."; \
+		echo "Create it with: echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env.local"; \
+		exit 1; \
+	fi
+	@API_KEY=$$(grep '^ANTHROPIC_API_KEY=' "$(ENVFILE)" | head -1 | cut -d= -f2-); \
+	if [ -z "$$API_KEY" ]; then \
+		echo "ERROR: ANTHROPIC_API_KEY not found in $(ENVFILE)"; \
+		exit 1; \
+	fi; \
+	echo "$$API_KEY" > "$(CLAUDE_CONF)"; \
+	echo "API key injected into rootfs overlay ($(CLAUDE_CONF))"
 
 # === Misc ===
 

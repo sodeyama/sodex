@@ -437,6 +437,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
   case SYS_CALL_ACCEPT_NOWAIT:
     ret = socket_try_accept(p1, (struct sockaddr_in *)p2);
     break;
+
+  case SYS_CALL_SETSOCKOPT:
+    ret = kern_setsockopt(p1, p2, p3, (const void *)p4, p5);
+    break;
   }
 
   *eax = ret;

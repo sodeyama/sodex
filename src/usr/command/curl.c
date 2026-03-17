@@ -1,0 +1,347 @@
+/*
+ * curl.c - Simple HTTP/HTTPS client command
+ *
+ * Usage: curl [options] <url>
+ *   -X <method>       HTTP method (GET, POST, PUT, DELETE) [default: GET]
+ *   -d <data>         Request body (implies POST if -X not set)
+ *   -H <header>       Add header (format: "Name: Value"), repeatable
+ *   -v                Verbose: show response status and headers
+ *   -o <file>         Write response body to file instead of stdout
+ *
+ * Examples:
+ *   curl http://10.0.2.2:8080/healthz
+ *   curl https://api.anthropic.com/v1/messages
+ *   curl -X POST -H "Content-Type: application/json" -d '{"key":"val"}' http://10.0.2.2:8080/echo
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <debug.h>
+#include <http_client.h>
+#include <dns.h>
+#include <entropy.h>
+#include <tls_client.h>
+
+#define MAX_HEADERS     8
+#define RECV_BUF_SIZE   8192
+
+/* ---- URL parser ---- */
+struct parsed_url {
+    char host[128];
+    char path[256];
+    u_int16_t port;
+    int  use_tls;
+};
+
+/*
+ * Parse URL into components.
+ * Supports: http://host[:port][/path] and https://host[:port][/path]
+ * Returns 0 on success, -1 on error.
+ */
+PRIVATE int parse_url(const char *url, struct parsed_url *out)
+{
+    const char *p;
+    const char *host_start;
+    const char *host_end;
+    const char *port_start;
+    int host_len;
+
+    memset(out, 0, sizeof(*out));
+
+    /* Determine scheme */
+    if (strncmp(url, "https://", 8) == 0) {
+        out->use_tls = 1;
+        out->port = 443;
+        p = url + 8;
+    } else if (strncmp(url, "http://", 7) == 0) {
+        out->use_tls = 0;
+        out->port = 80;
+        p = url + 7;
+    } else {
+        /* No scheme: assume http */
+        out->use_tls = 0;
+        out->port = 80;
+        p = url;
+    }
+
+    host_start = p;
+
+    /* Find end of host: '/', ':', or end of string */
+    host_end = p;
+    while (*host_end && *host_end != '/' && *host_end != ':')
+        host_end++;
+
+    host_len = host_end - host_start;
+    if (host_len <= 0 || host_len >= (int)sizeof(out->host))
+        return -1;
+
+    memcpy(out->host, host_start, host_len);
+    out->host[host_len] = '\0';
+
+    /* Parse optional port */
+    if (*host_end == ':') {
+        port_start = host_end + 1;
+        out->port = 0;
+        while (*port_start >= '0' && *port_start <= '9') {
+            out->port = out->port * 10 + (*port_start - '0');
+            port_start++;
+        }
+        host_end = port_start;
+    }
+
+    /* Parse path (default to "/") */
+    if (*host_end == '/') {
+        strncpy(out->path, host_end, sizeof(out->path) - 1);
+        out->path[sizeof(out->path) - 1] = '\0';
+    } else {
+        strcpy(out->path, "/");
+    }
+
+    return 0;
+}
+
+/* ---- Resolve hostname if needed ---- */
+PRIVATE int resolve_host(struct parsed_url *url, char *resolved_ip, int ip_cap)
+{
+    struct dns_result dns;
+    int ret;
+
+    /* Check if host is already an IP address (starts with digit) */
+    if (url->host[0] >= '0' && url->host[0] <= '9') {
+        strncpy(resolved_ip, url->host, ip_cap - 1);
+        resolved_ip[ip_cap - 1] = '\0';
+        return 0;
+    }
+
+    /* DNS lookup */
+    ret = dns_resolve(url->host, &dns);
+    if (ret != DNS_OK) {
+        printf("curl: could not resolve host '%s'", url->host);
+        if (ret == DNS_ERR_NXDOMAIN)
+            printf(" (NXDOMAIN)\n");
+        else if (ret == DNS_ERR_TIMEOUT)
+            printf(" (timeout)\n");
+        else
+            printf(" (error %d)\n", ret);
+        return -1;
+    }
+
+    snprintf(resolved_ip, ip_cap, "%d.%d.%d.%d",
+             dns.addr[0], dns.addr[1], dns.addr[2], dns.addr[3]);
+    return 0;
+}
+
+/* ---- Parse "Name: Value" into http_header ---- */
+PRIVATE int parse_header_arg(const char *arg, struct http_header *hdr,
+                             char *name_buf, int name_cap,
+                             char *value_buf, int value_cap)
+{
+    const char *colon = strchr(arg, ':');
+    int name_len;
+    const char *val;
+
+    if (!colon)
+        return -1;
+
+    name_len = colon - arg;
+    if (name_len <= 0 || name_len >= name_cap)
+        return -1;
+
+    memcpy(name_buf, arg, name_len);
+    name_buf[name_len] = '\0';
+
+    /* Skip ": " */
+    val = colon + 1;
+    while (*val == ' ')
+        val++;
+
+    strncpy(value_buf, val, value_cap - 1);
+    value_buf[value_cap - 1] = '\0';
+
+    hdr->name = name_buf;
+    hdr->value = value_buf;
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+    const char *method = (const char *)0;
+    const char *data = (const char *)0;
+    const char *output_file = (const char *)0;
+    int verbose = 0;
+
+    struct http_header headers[MAX_HEADERS + 1];
+    char hdr_names[MAX_HEADERS][64];
+    char hdr_values[MAX_HEADERS][128];
+    int num_headers = 0;
+
+    const char *url_str = (const char *)0;
+    struct parsed_url url;
+    char resolved_ip[20];
+
+    struct http_request req;
+    struct http_response resp;
+    char recv_buf[RECV_BUF_SIZE];
+    int ret;
+    int i;
+    int fd;
+    int tls_inited = 0;
+
+    /* Parse arguments */
+    i = 1;
+    while (i < argc) {
+        if (strcmp(argv[i], "-X") == 0 && i + 1 < argc) {
+            method = argv[++i];
+        } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
+            data = argv[++i];
+        } else if (strcmp(argv[i], "-H") == 0 && i + 1 < argc) {
+            i++;
+            if (num_headers < MAX_HEADERS) {
+                if (parse_header_arg(argv[i],
+                                     &headers[num_headers],
+                                     hdr_names[num_headers], 64,
+                                     hdr_values[num_headers], 128) == 0) {
+                    num_headers++;
+                } else {
+                    printf("curl: bad header format: %s\n", argv[i]);
+                    exit(1);
+                    return 1;
+                }
+            }
+        } else if (strcmp(argv[i], "-v") == 0) {
+            verbose = 1;
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            output_file = argv[++i];
+        } else if (argv[i][0] == '-') {
+            printf("curl: unknown option: %s\n", argv[i]);
+            exit(1);
+            return 1;
+        } else {
+            url_str = argv[i];
+        }
+        i++;
+    }
+
+    if (!url_str) {
+        printf("usage: curl [options] <url>\n");
+        printf("  -X <method>   HTTP method (default: GET)\n");
+        printf("  -d <data>     Request body\n");
+        printf("  -H <header>   Add header \"Name: Value\"\n");
+        printf("  -v            Verbose output\n");
+        printf("  -o <file>     Write body to file\n");
+        exit(1);
+        return 1;
+    }
+
+    /* Default method: POST if data provided, GET otherwise */
+    if (!method)
+        method = data ? "POST" : "GET";
+
+    /* Parse URL */
+    if (parse_url(url_str, &url) < 0) {
+        printf("curl: invalid URL: %s\n", url_str);
+        exit(1);
+        return 1;
+    }
+
+    if (verbose) {
+        printf("> %s %s%s%s\n", method,
+               url.use_tls ? "https://" : "http://",
+               url.host, url.path);
+    }
+
+    /* TLS init for HTTPS */
+    if (url.use_tls) {
+        entropy_init();
+        entropy_collect_jitter(512);
+        ret = tls_init();
+        if (ret != 0) {
+            printf("curl: TLS init failed (%d)\n", ret);
+            exit(1);
+            return 1;
+        }
+        tls_inited = 1;
+    }
+
+    /* Resolve hostname for non-TLS requests.
+     * TLS uses tls_connect() which handles DNS internally. */
+    if (!url.use_tls) {
+        if (resolve_host(&url, resolved_ip, sizeof(resolved_ip)) < 0) {
+            exit(1);
+            return 1;
+        }
+    }
+
+    /* Terminate header list */
+    headers[num_headers].name = (const char *)0;
+    headers[num_headers].value = (const char *)0;
+
+    /* Build request */
+    memset(&req, 0, sizeof(req));
+    req.method = method;
+    req.host = url.use_tls ? url.host : resolved_ip;
+    req.path = url.path;
+    req.port = url.port;
+    req.headers = num_headers > 0 ? headers : (const struct http_header *)0;
+    req.body = data;
+    req.body_len = data ? strlen(data) : 0;
+    req.use_tls = url.use_tls;
+
+    /* Execute request */
+    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
+
+    if (ret != HTTP_OK) {
+        printf("curl: request failed");
+        if (ret == HTTP_ERR_CONNECT)
+            printf(" (connection error)\n");
+        else if (ret == HTTP_ERR_SEND)
+            printf(" (send error)\n");
+        else if (ret == HTTP_ERR_RECV)
+            printf(" (receive error)\n");
+        else if (ret == HTTP_ERR_TIMEOUT)
+            printf(" (timeout)\n");
+        else
+            printf(" (error %d)\n", ret);
+        exit(1);
+        return 1;
+    }
+
+    /* Verbose: show status and headers info */
+    if (verbose) {
+        printf("< HTTP %d %s\n", resp.status_code, resp.status_text);
+        if (resp.content_type[0])
+            printf("< Content-Type: %s\n", resp.content_type);
+        if (resp.content_length >= 0)
+            printf("< Content-Length: %d\n", resp.content_length);
+        if (resp.is_chunked)
+            printf("< Transfer-Encoding: chunked\n");
+        if (resp.retry_after >= 0)
+            printf("< Retry-After: %d\n", resp.retry_after);
+        printf("<\n");
+    }
+
+    /* Output body */
+    if (resp.body && resp.body_len > 0) {
+        if (output_file) {
+            fd = creat(output_file, 0644);
+            if (fd < 0) {
+                printf("curl: cannot open '%s' for writing\n", output_file);
+                exit(1);
+                return 1;
+            }
+            write(fd, resp.body, resp.body_len);
+            close(fd);
+            if (verbose)
+                printf("Saved %d bytes to %s\n", resp.body_len, output_file);
+        } else {
+            write(1, resp.body, resp.body_len);
+            /* Add trailing newline if body doesn't end with one */
+            if (resp.body_len > 0 && resp.body[resp.body_len - 1] != '\n')
+                putc('\n');
+        }
+    }
+
+    exit(resp.status_code >= 200 && resp.status_code < 400 ? 0 : 1);
+    return 0;
+}

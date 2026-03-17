@@ -17,7 +17,7 @@ struct tty;
 #define EFLAGS_IF_ENABLE 0x200
 
 #define PROC_STACK  0xC0000000
-#define PROC_STACK_SIZE 0x4000
+#define PROC_STACK_SIZE 0x40000
 /* SSH の KEX と audit 出力で kernel stack が深くなるため余裕を持たせる。 */
 #define PROC_KERNEL_STACK_PAGES 8
 

@@ -19,13 +19,12 @@ __PAGE_OFFSET = 0xC0000000
 .global startup
 startup:
 /*
- * Initialize the page table which indicate the pg_tbl1 and pg_tbl2(4MBx2)
- */                     
-        movl    $(1024*2-1), %ecx
+ * Initialize the page tables: pg_tbl1, pg_tbl2, pg_tbl3 (4MB x 3 = 12MB)
+ */
+        movl    $(1024*3-1), %ecx
         movl    $(first_pg_tbl1-__PAGE_OFFSET), %edi
-        andl    $0xfffff000, %eax       
         movl    $0x7, %eax
-1:      
+1:
         stosl
         cmpl    $0, %ecx
         jz      2f
@@ -34,25 +33,35 @@ startup:
         jmp     1b
 2:
 /*
- * Initialize the page directory
- */                     
+ * Initialize the page directory (identity map + higher half)
+ */
+        /* Identity map: PDE[0]=tbl1, PDE[1]=tbl2, PDE[2]=tbl3 */
         movl    $(first_pg_tbl1-__PAGE_OFFSET), %eax
         andl    $0xfffff000, %eax
         addl    $0x7, %eax
         movl    $(first_pg_dir-__PAGE_OFFSET), %edi
         stosl
         movl    $(first_pg_tbl2-__PAGE_OFFSET), %eax
-        andl    $0xfffff000, %eax       
+        andl    $0xfffff000, %eax
+        addl    $0x7, %eax
+        stosl
+        movl    $(first_pg_tbl3-__PAGE_OFFSET), %eax
+        andl    $0xfffff000, %eax
         addl    $0x7, %eax
         stosl
 
+        /* Higher half: PDE[768]=tbl1, PDE[769]=tbl2, PDE[770]=tbl3 */
         movl    $(first_pg_tbl1-__PAGE_OFFSET), %eax
-        andl    $0xfffff000, %eax       
+        andl    $0xfffff000, %eax
         addl    $0x7, %eax
         movl    $(first_pg_dir-__PAGE_OFFSET+768*4), %edi
         stosl
         movl    $(first_pg_tbl2-__PAGE_OFFSET), %eax
-        andl    $0xfffff000, %eax       
+        andl    $0xfffff000, %eax
+        addl    $0x7, %eax
+        stosl
+        movl    $(first_pg_tbl3-__PAGE_OFFSET), %eax
+        andl    $0xfffff000, %eax
         addl    $0x7, %eax
         stosl       
 
@@ -73,7 +82,7 @@ startup:
         movl    %eax, (gdtr+2)
         lgdt    gdtr
 
-        movl    $0xC009C000, %esp
+        movl    $0xC009D000, %esp
 
 /*
  * Zero BSS section
@@ -100,6 +109,9 @@ first_pg_tbl1:
   .space 1024*4
 .global first_pg_tbl2
 first_pg_tbl2:
+  .space 1024*4
+.global first_pg_tbl3
+first_pg_tbl3:
   .space 1024*4
 
 .section ".data"

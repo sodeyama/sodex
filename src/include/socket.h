@@ -25,8 +25,25 @@ struct wait_queue;
 #define SOCK_STATE_CONNECTED  4
 #define SOCK_STATE_CLOSED     5
 
+/* Socket error codes (negative values returned by kern_connect etc.) */
+#define SOCK_ERR_TIMEOUT     (-1)   /* Connection or recv timed out */
+#define SOCK_ERR_REFUSED     (-2)   /* RST received (port not listening) */
+#define SOCK_ERR_ARP_FAIL    (-3)   /* ARP resolution failed */
+#define SOCK_ERR_NO_SOCKET   (-4)   /* No free socket slot */
+#define SOCK_ERR_BAD_STATE   (-5)   /* Invalid socket state for operation */
+
+/* Socket option levels and names */
+#define SOL_SOCKET           1
+#define SO_RCVTIMEO          20     /* Receive timeout in milliseconds */
+#define SO_SNDTIMEO          21     /* Send timeout in milliseconds */
+
+/* Default timeout: 10 seconds for connect, 5 seconds for recv */
+#define TCP_CONNECT_TIMEOUT_TICKS  1000   /* 10s at HZ=100 */
+#define TCP_RECV_DEFAULT_TICKS      500   /* 5s at HZ=100 */
+#define TCP_CLOSE_TIMEOUT_TICKS     500   /* 5s at HZ=100 */
+
 #define SOCK_ACCEPT_BACKLOG_SIZE 4
-#define SOCK_RXBUF_SIZE  4096
+#define SOCK_RXBUF_SIZE  8192
 #define SOCK_TXBUF_SIZE  1460  /* Max TCP segment payload (MSS) */
 
 struct sockaddr_in {
@@ -89,6 +106,8 @@ PUBLIC int  kern_recv(int sockfd, void *buf, int len, int flags);
 PUBLIC int  kern_sendto(int sockfd, void *buf, int len, int flags, struct sockaddr_in *addr);
 PUBLIC int  kern_recvfrom(int sockfd, void *buf, int len, int flags, struct sockaddr_in *addr);
 PUBLIC int  kern_close_socket(int sockfd);
+PUBLIC int  kern_setsockopt(int sockfd, int level, int optname,
+                            const void *optval, int optlen);
 PUBLIC int  socket_try_accept(int sockfd, struct sockaddr_in *addr);
 PUBLIC int  socket_begin_close(int sockfd);
 PUBLIC int  socket_bind_inbound_tcp(struct uip_conn *conn);

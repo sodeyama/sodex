@@ -508,7 +508,7 @@ PUBLIC int socket_bind_inbound_tcp(struct uip_conn *conn)
 
 PUBLIC int kern_connect(int sockfd, struct sockaddr_in *addr)
 {
-  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return SOCK_ERR_BAD_STATE;
   struct kern_socket *sk = &socket_table[sockfd];
 
   sk->remote_addr = *addr;
@@ -523,7 +523,7 @@ PUBLIC int kern_connect(int sockfd, struct sockaddr_in *addr)
     struct uip_conn *conn = uip_connect(&ipaddr, addr->sin_port);
     if (!conn) {
       enableInterrupt();
-      return -1;
+      return SOCK_ERR_NO_SOCKET;
     }
     conn->appstate = sockfd;
     sk->tcp_conn = conn;
@@ -536,25 +536,31 @@ PUBLIC int kern_connect(int sockfd, struct sockaddr_in *addr)
     }
     enableInterrupt();
 
-    /* Poll network until connected or timeout.
+    /* Poll network until connected or timeout (PIT tick based).
      * The sequence is: ARP request → ARP reply → SYN → SYN-ACK → CONNECTED.
      * We need periodic processing to retransmit SYN after ARP resolves. */
     {
       EXTERN void network_poll(void);
-      int poll_count;
+      u_int32_t deadline = kernel_tick + TCP_CONNECT_TIMEOUT_TICKS;
+      u_int32_t next_retry = kernel_tick + 50; /* retry SYN every 500ms */
       int syn_retry = 0;
-      for (poll_count = 0; poll_count < 20000000; poll_count++) {
+
+      while ((int)(kernel_tick - deadline) < 0) {
         disableInterrupt();
         network_poll();
         enableInterrupt();
 
         if (sk->state == SOCK_STATE_CONNECTED)
           return 0;
-        if (sk->state == SOCK_STATE_CLOSED)
-          return -1;
+        if (sk->state == SOCK_STATE_CLOSED) {
+          /* Distinguish RST (refused) from other close reasons */
+          if (sk->error == SOCK_ERR_REFUSED)
+            return SOCK_ERR_REFUSED;
+          return SOCK_ERR_REFUSED;
+        }
 
         /* Periodically retrigger SYN in case first was replaced by ARP */
-        if ((poll_count % 500000) == 499999 && syn_retry < 10) {
+        if ((int)(kernel_tick - next_retry) >= 0 && syn_retry < 10) {
           disableInterrupt();
           uip_periodic_conn(conn);
           if (uip_len > 0) {
@@ -563,15 +569,16 @@ PUBLIC int kern_connect(int sockfd, struct sockaddr_in *addr)
           }
           enableInterrupt();
           syn_retry++;
+          next_retry = kernel_tick + 50; /* next retry in 500ms */
         }
       }
     }
-    return -1; /* timeout */
+    return SOCK_ERR_TIMEOUT;
   } else if (sk->type == SOCK_RAW || sk->type == SOCK_DGRAM) {
     sk->state = SOCK_STATE_CONNECTED;
     return 0;
   }
-  return -1;
+  return SOCK_ERR_BAD_STATE;
 }
 
 /* Compute ICMP/IP checksum */
@@ -708,15 +715,40 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
   }
 
   if (sk->type == SOCK_STREAM && sk->tcp_conn) {
-    /* TCP send は pending だけ立てて、uIP periodic で送る。
-     * server handler 内から uip_poll_conn() を再入させると不安定になる。 */
-    disableInterrupt();
-    if (len > SOCK_TXBUF_SIZE) len = SOCK_TXBUF_SIZE;
-    memcpy(sk->tx_buf, buf, len);
-    sk->tx_len = len;
-    sk->tx_pending = 1;
-    enableInterrupt();
-    return len;
+    /* TCP send: split into MSS-sized chunks.
+     * Each chunk is queued as tx_pending and we poll until it's consumed
+     * by the uIP periodic handler before sending the next chunk. */
+    u_int8_t *src = (u_int8_t *)buf;
+    int total_sent = 0;
+
+    while (total_sent < len) {
+      int chunk = len - total_sent;
+      u_int32_t deadline;
+
+      if (chunk > SOCK_TXBUF_SIZE)
+        chunk = SOCK_TXBUF_SIZE;
+
+      /* Wait for any previous pending transmit to complete */
+      deadline = kernel_tick + sk->timeout_ticks;
+      while (sk->tx_pending) {
+        disableInterrupt();
+        network_poll();
+        enableInterrupt();
+        if ((int)(kernel_tick - deadline) >= 0)
+          return total_sent > 0 ? total_sent : SOCK_ERR_TIMEOUT;
+        if (sk->state == SOCK_STATE_CLOSED)
+          return total_sent > 0 ? total_sent : SOCK_ERR_REFUSED;
+      }
+
+      disableInterrupt();
+      memcpy(sk->tx_buf, src + total_sent, chunk);
+      sk->tx_len = chunk;
+      sk->tx_pending = 1;
+      enableInterrupt();
+
+      total_sent += chunk;
+    }
+    return total_sent;
   }
 
   return -1;
@@ -732,15 +764,18 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
   if (sk->type == SOCK_DGRAM && sk->udp_conn != 0)
     signer = socket_dbg_is_signer_port(sk->udp_conn->rport);
 
-  /* If no data, poll NE2000 directly (interrupts disabled to avoid context switch) */
+  /* If no data, poll NE2000 directly (PIT tick based timeout) */
   if (sk->rx_len == 0) {
     EXTERN void network_poll(void);
-    int poll_count;
-    for (poll_count = 0; poll_count < 5000000; poll_count++) {
+    u_int32_t deadline = kernel_tick + sk->timeout_ticks;
+
+    while ((int)(kernel_tick - deadline) < 0) {
       disableInterrupt();
       network_poll();
       enableInterrupt();
       if (sk->rx_len > 0)
+        break;
+      if (sk->state == SOCK_STATE_CLOSED)
         break;
     }
     if (signer && sk->rx_len > 0)
@@ -787,6 +822,29 @@ PUBLIC int socket_begin_close(int sockfd)
   wakeup(&sk->connect_wq);
   poll_notify_all();
   return 0;
+}
+
+PUBLIC int kern_setsockopt(int sockfd, int level, int optname,
+                          const void *optval, int optlen)
+{
+  struct kern_socket *sk;
+
+  if (sockfd < 0 || sockfd >= MAX_SOCKETS) return -1;
+  sk = &socket_table[sockfd];
+  if (sk->state == SOCK_STATE_UNUSED) return -1;
+
+  if (level == SOL_SOCKET && optname == SO_RCVTIMEO) {
+    if (optlen < (int)sizeof(u_int32_t) || optval == 0)
+      return -1;
+    /* optval is timeout in milliseconds; convert to PIT ticks (1 tick = 10ms) */
+    u_int32_t ms = *(const u_int32_t *)optval;
+    sk->timeout_ticks = ms / 10;
+    if (sk->timeout_ticks == 0 && ms > 0)
+      sk->timeout_ticks = 1;
+    return 0;
+  }
+
+  return -1;  /* unsupported option */
 }
 
 PUBLIC int kern_close_socket(int sockfd)
@@ -840,11 +898,11 @@ PUBLIC int kern_close_socket(int sockfd)
   }
 
   if (sk->tcp_conn) {
-    int poll_count;
+    u_int32_t deadline = kernel_tick + TCP_CLOSE_TIMEOUT_TICKS;
 
     socket_begin_close(sockfd);
 
-    for (poll_count = 0; poll_count < 10000000; poll_count++) {
+    while ((int)(kernel_tick - deadline) < 0) {
       disableInterrupt();
       network_poll();
       enableInterrupt();

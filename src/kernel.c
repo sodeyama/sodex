@@ -97,6 +97,10 @@ PUBLIC void start_kernel()
   _kputs(" KERNEL: SETUP KERNEL MEMORY\n");
 
 #ifdef KTEST_BUILD
+  /* ktest needs PSE paging before network tests to avoid boot page
+   * table fragility with large BSS.  Normal boot delays init_paging()
+   * until after DMA/PCI so VGA memory mapping is set up correctly. */
+  init_paging();
   run_kernel_tests();
   /* not reached */
 #endif

@@ -3,6 +3,18 @@
 `docs/research/sodex_agent_stateless_os_report.md` の Phase 1–2 前半に対応する。
 Anthropic API を直接叩くところまでの通信基盤を、障害切り分けしやすい順に積み上げる。
 
+## アーキテクチャ方針
+
+**全コンポーネントをユーザランド（ユーザ空間プロセス）で構築する。**
+
+カーネル側には最小限の改修のみ行い（ソケットタイムアウト、エラーコード、setsockopt syscall）、
+HTTP/JSON/DNS/TLS/SSE/Claude adapter は全てユーザ空間のライブラリ＋プロセスとして実装する。
+
+既存のユーザ空間基盤:
+- ソケット syscall ラッパー一式（socket/connect/send/recv/sendto/recvfrom/close）
+- 基本 libc（strlen, memcpy, strcmp, malloc/free, atoi, printf, htons/ntohs 等）
+- debug_write, get_kernel_tick, sleep_ticks syscall
+
 ## ゴール
 
 - QEMU 上の Sodex からホスト側モックサーバへ平文 HTTP POST/応答の往復ができる
@@ -28,11 +40,12 @@ Anthropic API を直接叩くところまでの通信基盤を、障害切り分
 
 | # | Plan | 概要 | 主な依存 |
 |---|------|------|---------|
-| 01 | [能動 TCP 接続](plans/01-active-tcp-client.md) | `kern_connect()` の安定化、能動 TCP のスモークテスト | server-runtime |
+| 00 | [ユーザランド基盤整備](plans/00-userland-foundation.md) | libc 拡張、カーネルソケット改修、setsockopt syscall | なし |
+| 01 | [能動 TCP 接続](plans/01-active-tcp-client.md) | ユーザランドからの TCP connect スモークテスト | 00 |
 | 02 | [HTTP/1.1 クライアント](plans/02-http-client.md) | リクエスト生成、レスポンスパース、Content-Length 受信 | 01 |
-| 03 | [JSON パーサ](plans/03-json-parser.md) | トークナイザ、最小 DOM パーサ、JSON ライター | なし |
+| 03 | [JSON パーサ](plans/03-json-parser.md) | トークナイザ、最小 DOM パーサ、JSON ライター | 00 |
 | 04 | [平文 HTTP 結合テスト](plans/04-plaintext-http-smoke.md) | ホスト側モックと JSON echo の往復確認 | 01, 02, 03 |
-| 05 | [DNS リゾルバ](plans/05-dns-resolver.md) | UDP DNS クエリ、A レコード解決 | 01 |
+| 05 | [DNS リゾルバ](plans/05-dns-resolver.md) | UDP DNS クエリ、A レコード解決 | 00 |
 | 06 | [エントロピーと PRNG](plans/06-entropy-prng.md) | PIT ジッタ収集、AES-CTR PRNG のシード改善 | なし |
 | 07 | [BearSSL 移植](plans/07-bearssl-port.md) | libc スタブ、I/O コールバック、最小ビルド | 01, 06 |
 | 08 | [TLS クライアント](plans/08-tls-client.md) | BearSSL 上の HTTPS 接続、証明書ピンニング | 02, 05, 07 |
@@ -43,6 +56,12 @@ Anthropic API を直接叩くところまでの通信基盤を、障害切り分
 ## 実装順序
 
 ```
+Phase 0: 基盤整備 (Plan 00)
+  00 ユーザランド基盤
+    ├── 00-A: libc 拡張（printf %d, snprintf, strstr, strncasecmp, strtol, debug_printf）
+    ├── 00-B: カーネルソケット改修（タイムアウト時間ベース化、エラーコード、バッファ拡張）
+    └── 00-C: setsockopt syscall 追加
+
 Phase A: 平文 HTTP + JSON (Plan 01–04)
   01 能動TCP → 02 HTTPクライアント → 03 JSONパーサ → 04 平文結合テスト
 
@@ -59,11 +78,13 @@ Phase C: Claude 統合 (Plan 09–11)
 
 ## 変更対象（横断）
 
-- 既存: `src/socket.c`, `src/net/netmain.c`, `src/kernel.c`, `makefile.inc`
-- 新規: `src/net/http_client.c`, `src/lib/json.c`, `src/net/dns.c`, `src/net/tls_client.c`, `src/net/sse_parser.c`, `src/agent/claude_adapter.c`
+- カーネル改修: `src/socket.c`, `src/include/socket.h`, `src/syscall.c`, `src/include/sys/syscalldef.h`
+- ユーザ空間 libc: `src/usr/lib/libc/`, `src/usr/include/`
+- ユーザ空間新規: `src/usr/lib/libagent/` (HTTP, JSON, DNS, TLS, SSE, Claude adapter)
+- ユーザ空間コマンド: `src/usr/command/agent.c` (最終的な agent プロセス)
 - テスト: `tests/` 配下に host 単体テスト、`tests/fixtures/` にサンプルデータ
-- 外部: `src/lib/bearssl/` に BearSSL ソースの最小サブセット
+- 外部: `src/usr/lib/bearssl/` に BearSSL ソースの最小サブセット
 
 ## TASKS.md
 
-着手時に `TASKS.md` を作成し、各 Plan の完了状態を追跡する。
+`TASKS.md` で各 Plan の完了状態を追跡する。

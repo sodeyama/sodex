@@ -6,3 +6,5 @@ __pycache__/
 *.dSYM/
 .claude/sessions/
 .claude/tmp/
+.env.local
+src/rootfs-overlay/etc/claude.conf

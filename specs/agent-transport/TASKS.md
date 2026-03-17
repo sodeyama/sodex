@@ -85,17 +85,17 @@
 
 | 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
 |---|---|---|---|---|---|
-| [ ] | AT-29 | SSE パーサの行バッファリングとイベント dispatch を実装する | 09 | なし | 断片受信でイベント再構成できる |
-| [ ] | AT-30 | SSE の host 単体テストを書いて通す | 09 | AT-29 | fixture の SSE ストリームが正しくパースされる |
-| [ ] | AT-31 | Claude API Config 構造体（endpoint, headers）を定義する | 10 | なし | テーブル駆動の設定ファイルがコンパイルできる |
-| [ ] | AT-32 | `claude_build_request()` を実装する | 10 | AT-10, AT-31 | Messages API リクエスト JSON を生成できる |
-| [ ] | AT-33 | `claude_parse_sse_event()` を実装する | 10 | AT-08, AT-29 | SSE の data JSON から内部表現に変換できる |
-| [ ] | AT-34 | tool_use パースと `claude_needs_tool_call()` を実装する | 10 | AT-33 | tool_use の id/name/input を取得できる |
-| [ ] | AT-35 | `claude_build_tool_result()` を実装する | 10 | AT-10 | tool_result メッセージの JSON を生成できる |
-| [ ] | AT-36 | Claude adapter の host 単体テストを書いて通す | 10 | AT-32, AT-33, AT-34 | fixture の生成・パースが正しい |
-| [ ] | AT-37 | `llm_provider` 抽象化インターフェースを定義し Claude を登録する | 10 | AT-32, AT-33 | 関数ポインタテーブル経由で Claude adapter が呼べる |
-| [ ] | AT-38 | 429/5xx のリトライとバックオフを実装する | 10 | AT-33 | リトライ後に成功レスポンスを受け取れる |
-| [ ] | AT-39 | 高レベル `claude_send_message()` を実装する | 11 | AT-27, AT-33, AT-37 | 1 関数で DNS→TLS→HTTP→SSE→パースが回る |
-| [ ] | AT-40 | モック Claude サーバを TLS + SSE 対応に拡張する | 11 | AT-13 | TLS 自己署名 + SSE ストリーミングを返す |
-| [ ] | AT-41 | `make test-claude-smoke` で結合テストを通す | 11 | AT-39, AT-40 | テキスト応答と tool_use 応答の 2 シナリオが PASS |
-| [ ] | AT-42 | 全レイヤーの診断ログフォーマットを統一する | 11 | AT-41 | DNS/TCP/TLS/HTTP/SSE/CLAUDE の各段階がシリアルに出る |
+| [x] | AT-29 | SSE パーサの行バッファリングとイベント dispatch を実装する | 09 | なし | 断片受信でイベント再構成できる |
+| [x] | AT-30 | SSE の host 単体テストを書いて通す | 09 | AT-29 | fixture の SSE ストリームが正しくパースされる |
+| [x] | AT-31 | Claude API Config 構造体（endpoint, headers）を定義する | 10 | なし | テーブル駆動の設定ファイルがコンパイルできる |
+| [x] | AT-32 | `claude_build_request()` を実装する | 10 | AT-10, AT-31 | Messages API リクエスト JSON を生成できる |
+| [x] | AT-33 | `claude_parse_sse_event()` を実装する | 10 | AT-08, AT-29 | SSE の data JSON から内部表現に変換できる |
+| [x] | AT-34 | tool_use パースと `claude_needs_tool_call()` を実装する | 10 | AT-33 | tool_use の id/name/input を取得できる |
+| [x] | AT-35 | `claude_build_tool_result()` を実装する | 10 | AT-10 | tool_result メッセージの JSON を生成できる |
+| [x] | AT-36 | Claude adapter の host 単体テストを書いて通す | 10 | AT-32, AT-33, AT-34 | fixture の生成・パースが正しい |
+| [x] | AT-37 | `llm_provider` 抽象化インターフェースを定義し Claude を登録する | 10 | AT-32, AT-33 | 関数ポインタテーブル経由で Claude adapter が呼べる |
+| [x] | AT-38 | 429/5xx のリトライとバックオフを実装する | 10 | AT-33 | リトライ後に成功レスポンスを受け取れる |
+| [x] | AT-39 | 高レベル `claude_send_message()` を実装する | 11 | AT-27, AT-33, AT-37 | 1 関数で DNS→TLS→HTTP→SSE→パースが回る |
+| [x] | AT-40 | モック Claude サーバを TLS + SSE 対応に拡張する | 11 | AT-13 | TLS 自己署名 + SSE ストリーミングを返す |
+| [x] | AT-41 | `make test-claude-smoke` で結合テストを通す | 11 | AT-39, AT-40 | テキスト応答と tool_use 応答の 2 シナリオが PASS |
+| [x] | AT-42 | 全レイヤーの診断ログフォーマットを統一する | 11 | AT-41 | DNS/TCP/TLS/HTTP/SSE/CLAUDE の各段階がシリアルに出る |

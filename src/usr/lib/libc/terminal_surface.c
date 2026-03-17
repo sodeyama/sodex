@@ -551,7 +551,7 @@ void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
       int dst = terminal_surface_index(surface, col, row);
       int src = terminal_surface_index(surface, col, row + lines);
       surface->cells[dst] = surface->cells[src];
-      surface->dirty[dst] = 1;
+      surface->dirty[dst] = surface->dirty[src];
     }
   }
   for (row = surface->rows - lines; row < surface->rows; row++) {
@@ -561,7 +561,13 @@ void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
       surface->dirty[index] = 1;
     }
   }
-  surface->dirty_count = surface->cols * surface->rows;
+  surface->dirty_count = 0;
+  for (row = 0; row < surface->rows; row++) {
+    for (col = 0; col < surface->cols; col++) {
+      if (surface->dirty[terminal_surface_index(surface, col, row)] != 0)
+        surface->dirty_count++;
+    }
+  }
   surface->scroll_count += lines;
 }
 

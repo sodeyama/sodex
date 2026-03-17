@@ -146,6 +146,32 @@ TEST(alternate_buffer_preserves_primary_screen) {
     terminal_surface_free(&surface);
 }
 
+TEST(scroll_preserves_shifted_dirty_cells_and_marks_exposed_rows) {
+    struct terminal_surface surface;
+    struct term_cell cell;
+
+    ASSERT_EQ(terminal_surface_init(&surface, 3, 3), 0);
+    terminal_surface_clear_damage(&surface);
+
+    cell.ch = 'A';
+    cell.fg = TERM_COLOR_GREEN;
+    cell.bg = TERM_COLOR_BLACK;
+    cell.attr = 0;
+    cell.width = 1;
+    terminal_surface_put_cell(&surface, 1, 1, &cell);
+    ASSERT(terminal_surface_is_dirty(&surface, 1, 1));
+
+    terminal_surface_scroll_up(&surface, 1, NULL);
+    ASSERT(terminal_surface_is_dirty(&surface, 1, 0));
+    ASSERT(!terminal_surface_is_dirty(&surface, 0, 0));
+    ASSERT(terminal_surface_is_dirty(&surface, 0, 2));
+    ASSERT(terminal_surface_is_dirty(&surface, 1, 2));
+    ASSERT(terminal_surface_is_dirty(&surface, 2, 2));
+    ASSERT_EQ(surface.scroll_count, 1);
+
+    terminal_surface_free(&surface);
+}
+
 int main(void)
 {
   printf("=== terminal surface tests ===\n");
@@ -156,6 +182,7 @@ int main(void)
     RUN_TEST(write_wide_codepoint_occupies_two_cells);
     RUN_TEST(writing_last_column_waits_for_next_character_before_scrolling);
     RUN_TEST(alternate_buffer_preserves_primary_screen);
+    RUN_TEST(scroll_preserves_shifted_dirty_cells_and_marks_exposed_rows);
 
     TEST_REPORT();
 }

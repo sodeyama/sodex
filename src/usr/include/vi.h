@@ -105,5 +105,8 @@ void vi_screen_redraw(const struct vi_buffer *buffer, enum vi_mode mode,
                       const struct vi_visual_state *visual,
                       int row_offset, int rows, int cols);
 void vi_screen_restore(void);
+#ifdef TEST_BUILD
+void vi_screen_test_reset_state(void);
+#endif
 
 #endif /* _USR_VI_H */

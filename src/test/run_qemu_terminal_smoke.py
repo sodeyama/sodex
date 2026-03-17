@@ -145,6 +145,17 @@ def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str
     raise TimeoutError(f"metric not found: {point}")
 
 
+def parse_metric_fields(line: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+
+    for part in line.strip().split():
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        result[key] = value
+    return result
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: run_qemu_terminal_smoke.py <fsboot> <logdir>", file=sys.stderr)
@@ -214,6 +225,16 @@ def main() -> int:
         monitor.send_enter(LONG_OUTPUT_ENTERS)
         long_line = wait_for_metric(serial_log, "long_output", 5)
         monitor.command(f"screendump {long_ppm}", pause=0.4)
+
+        full_metric = parse_metric_fields(full_line)
+        scroll_metric = parse_metric_fields(scroll_line)
+        long_metric = parse_metric_fields(long_line)
+        if int(full_metric.get("present_copy_area", "0")) <= 0:
+            raise AssertionError("full redraw metric missing present_copy_area")
+        if int(scroll_metric.get("scroll_fast_path", "0")) <= 0:
+            raise AssertionError("scroll metric missing scroll_fast_path usage")
+        if int(long_metric.get("present_copy_area", "0")) <= 0:
+            raise AssertionError("long output metric missing present_copy_area")
 
         print("")
         print("=== RICH TERMINAL QEMU SMOKE DONE ===")

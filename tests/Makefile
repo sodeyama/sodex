@@ -9,7 +9,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -298,6 +298,22 @@ test_vi_buffer_utf8.o: $(SRC)/usr/lib/libc/utf8.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_vi_buffer_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# vi screen redraw tests
+test_vi_screen: test_vi_screen.c test_vi_screen_vi_screen.o test_vi_screen_vi_buffer.o test_vi_screen_utf8.o test_vi_screen_wcwidth.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_vi_screen.c test_vi_screen_vi_screen.o test_vi_screen_vi_buffer.o test_vi_screen_utf8.o test_vi_screen_wcwidth.o
+
+test_vi_screen_vi_screen.o: $(SRC)/usr/lib/libc/vi_screen.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vi_screen_vi_buffer.o: $(SRC)/usr/lib/libc/vi_buffer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vi_screen_utf8.o: $(SRC)/usr/lib/libc/utf8.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_vi_screen_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # UTF-8 logic tests

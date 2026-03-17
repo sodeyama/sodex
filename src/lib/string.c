@@ -8,6 +8,26 @@ typedef unsigned int size_t;
 #include <sys/types.h>
 #endif
 
+void *memmove(void *dest, const void *src, size_t n)
+{
+  unsigned char *dst = (unsigned char *)dest;
+  const unsigned char *from = (const unsigned char *)src;
+  size_t i;
+
+  if (dst == from || n == 0)
+    return dest;
+
+  if (dst < from) {
+    for (i = 0; i < n; i++)
+      dst[i] = from[i];
+  } else {
+    for (i = n; i > 0; i--)
+      dst[i - 1] = from[i - 1];
+  }
+
+  return dest;
+}
+
 size_t strlen(const char* s)
 {
   size_t len = 0;

@@ -557,12 +557,17 @@ PUBLIC int sys_kill(pid_t pid, int sig)
 #define SSH_RX_BUFFER_SIZE 4096
 #define SSH_PACKET_PLAIN_MAX 2048
 #define SSH_PAYLOAD_MAX 1792
-#define SSH_OUTBOX_MAX 4
+#define SSH_OUTBOX_MAX 8
 #define SSH_PACKET_OUT_MAX 1460
 #define SSH_BANNER_MAX 128
 #define SSH_AUDIT_LINE_SIZE 96
+#define SSH_METRIC_LINE_SIZE 160
 #define SSH_CHANNEL_WINDOW 65536U
 #define SSH_CHANNEL_MAX_PACKET 1024U
+#define SSH_CHANNEL_DATA_SOFT_MAX 1200U
+#define SSH_TTY_READ_CHUNK 4096
+#define SSH_TTY_COOKED_CHUNK 8192
+#define SSH_TTY_DRAIN_BUDGET 16384U
 #define SSH_DEFAULT_COLS 80
 #define SSH_DEFAULT_ROWS 25
 #define SSH_SIGNER_MAGIC "SIG1"
@@ -605,6 +610,22 @@ PUBLIC int sys_kill(pid_t pid, int sig)
 #define SSH_MSG_CHANNEL_REQUEST 98
 #define SSH_MSG_CHANNEL_SUCCESS 99
 #define SSH_MSG_CHANNEL_FAILURE 100
+
+#define SSH_SYNC_BEGIN_SEQ "\x1b[?2026h"
+#define SSH_SYNC_END_SEQ "\x1b[?2026l"
+
+struct ssh_output_metrics {
+  u_int32_t last_tick_read_bytes;
+  u_int32_t channel_data_avg_len;
+  u_int32_t channel_data_samples;
+  u_int32_t frame_packets;
+  u_int32_t frame_start_tick;
+  u_int32_t last_frame_packets;
+  u_int32_t last_frame_ticks;
+  int frame_active;
+  char marker_window[8];
+  int marker_window_len;
+};
 
 struct ssh_out_packet {
   int len;
@@ -684,6 +705,7 @@ struct ssh_connection {
   int out_tail;
   int out_count;
   struct ssh_channel_state channel;
+  struct ssh_output_metrics output_metrics;
 };
 
 PRIVATE int ssh_listener_fd = -1;
@@ -717,10 +739,19 @@ PRIVATE u_int8_t ssh_queue_hmac_input[4 + SSH_PACKET_PLAIN_MAX];
 PRIVATE u_int8_t ssh_decode_packet_buf[SSH_PACKET_PLAIN_MAX];
 PRIVATE u_int8_t ssh_decode_payload_buf[SSH_PAYLOAD_MAX];
 PRIVATE u_int8_t ssh_channel_payload_buf[SSH_PAYLOAD_MAX];
+PRIVATE char ssh_tty_raw_chunk[SSH_TTY_READ_CHUNK];
+PRIVATE char ssh_tty_cooked_chunk[SSH_TTY_COOKED_CHUNK];
 PRIVATE int ssh_runtime_loaded = FALSE;
 PRIVATE int ssh_tick_active = FALSE;
 PRIVATE void ssh_close_signer_socket(void);
 PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn);
+PRIVATE int ssh_channel_data_cap(const struct ssh_connection *conn);
+PRIVATE char *ssh_metric_append_u32(char *dst, u_int32_t value);
+PRIVATE void ssh_emit_output_metric(struct ssh_connection *conn);
+PRIVATE void ssh_output_metrics_feed_bytes(struct ssh_connection *conn,
+                                           const char *data, int len);
+PRIVATE void ssh_output_metrics_note_packet(struct ssh_connection *conn,
+                                            int len);
 
 PRIVATE u_int32_t ssh_runtime_random_rotl(u_int32_t value, int bits)
 {
@@ -976,6 +1007,137 @@ PRIVATE void ssh_audit_state(const char *prefix, int value)
                     digit_text);
   }
   server_audit_line(message);
+}
+
+PRIVATE int ssh_channel_data_cap(const struct ssh_connection *conn)
+{
+  u_int32_t cap;
+
+  if (conn == 0)
+    return 0;
+  cap = conn->channel.peer_max_packet;
+  if (cap > SSH_CHANNEL_DATA_SOFT_MAX)
+    cap = SSH_CHANNEL_DATA_SOFT_MAX;
+  if (cap > conn->channel.peer_window)
+    cap = conn->channel.peer_window;
+  if (cap > SSH_PAYLOAD_MAX - 16)
+    cap = SSH_PAYLOAD_MAX - 16;
+  return (int)cap;
+}
+
+PRIVATE char *ssh_metric_append_u32(char *dst, u_int32_t value)
+{
+  char digits[16];
+  int len = 0;
+
+  if (value == 0) {
+    *dst++ = '0';
+    *dst = '\0';
+    return dst;
+  }
+  while (value > 0 && len < (int)sizeof(digits)) {
+    digits[len++] = (char)('0' + (value % 10U));
+    value /= 10U;
+  }
+  while (len > 0)
+    *dst++ = digits[--len];
+  *dst = '\0';
+  return dst;
+}
+
+PRIVATE void ssh_emit_output_metric(struct ssh_connection *conn)
+{
+  char message[SSH_METRIC_LINE_SIZE];
+  char *p = message;
+
+  if (conn == 0)
+    return;
+
+  ssh_copy_string(p, (int)sizeof(message), "SSH_METRIC pty_read_bytes=");
+  p += strlen(message);
+  p = ssh_metric_append_u32(p, conn->output_metrics.last_tick_read_bytes);
+  ssh_copy_string(p, (int)sizeof(message) - (int)(p - message),
+                  " channel_data_avg_len=");
+  p = message + strlen(message);
+  p = ssh_metric_append_u32(p, conn->output_metrics.channel_data_avg_len);
+  ssh_copy_string(p, (int)sizeof(message) - (int)(p - message),
+                  " packets_per_frame=");
+  p = message + strlen(message);
+  p = ssh_metric_append_u32(p, conn->output_metrics.last_frame_packets);
+  ssh_copy_string(p, (int)sizeof(message) - (int)(p - message),
+                  " ticks_per_frame=");
+  p = message + strlen(message);
+  p = ssh_metric_append_u32(p, conn->output_metrics.last_frame_ticks);
+  server_audit_line(message);
+}
+
+PRIVATE void ssh_output_metrics_feed_bytes(struct ssh_connection *conn,
+                                           const char *data, int len)
+{
+  int i;
+  int packet_accounted = FALSE;
+
+  if (conn == 0 || data == 0 || len <= 0)
+    return;
+  if (conn->output_metrics.frame_active != FALSE) {
+    conn->output_metrics.frame_packets++;
+    packet_accounted = TRUE;
+  }
+
+  for (i = 0; i < len; i++) {
+    if (conn->output_metrics.marker_window_len <
+        (int)sizeof(conn->output_metrics.marker_window)) {
+      conn->output_metrics.marker_window[
+          conn->output_metrics.marker_window_len++] = data[i];
+    } else {
+      memmove(conn->output_metrics.marker_window,
+              conn->output_metrics.marker_window + 1,
+              sizeof(conn->output_metrics.marker_window) - 1);
+      conn->output_metrics.marker_window[
+          sizeof(conn->output_metrics.marker_window) - 1] = data[i];
+    }
+
+    if (conn->output_metrics.marker_window_len ==
+            (int)sizeof(conn->output_metrics.marker_window) &&
+        memcmp(conn->output_metrics.marker_window,
+               SSH_SYNC_BEGIN_SEQ,
+               sizeof(conn->output_metrics.marker_window)) == 0) {
+      if (packet_accounted == FALSE) {
+        packet_accounted = TRUE;
+      }
+      conn->output_metrics.frame_active = TRUE;
+      conn->output_metrics.frame_packets = 1;
+      conn->output_metrics.frame_start_tick = kernel_tick;
+    } else if (conn->output_metrics.marker_window_len ==
+                   (int)sizeof(conn->output_metrics.marker_window) &&
+               memcmp(conn->output_metrics.marker_window,
+                      SSH_SYNC_END_SEQ,
+                      sizeof(conn->output_metrics.marker_window)) == 0 &&
+               conn->output_metrics.frame_active != FALSE) {
+      conn->output_metrics.frame_active = FALSE;
+      conn->output_metrics.last_frame_packets =
+          conn->output_metrics.frame_packets;
+      conn->output_metrics.last_frame_ticks =
+          (kernel_tick - conn->output_metrics.frame_start_tick) + 1;
+    }
+  }
+}
+
+PRIVATE void ssh_output_metrics_note_packet(struct ssh_connection *conn,
+                                            int len)
+{
+  u_int32_t samples;
+  u_int32_t total;
+
+  if (conn == 0 || len <= 0)
+    return;
+
+  samples = conn->output_metrics.channel_data_samples;
+  total = conn->output_metrics.channel_data_avg_len * samples;
+  total += (u_int32_t)len;
+  samples++;
+  conn->output_metrics.channel_data_samples = samples;
+  conn->output_metrics.channel_data_avg_len = total / samples;
 }
 
 PRIVATE int ssh_socket_tx_pending(int sockfd)
@@ -2537,7 +2699,8 @@ PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn)
 
 PRIVATE int ssh_translate_tty_chunk(struct ssh_connection *conn,
                                     const char *src, int src_len,
-                                    char *dest, int dest_cap)
+                                    char *dest, int dest_cap,
+                                    int *consumed_len)
 {
   int in_pos = 0;
   int out_pos = 0;
@@ -2561,17 +2724,22 @@ PRIVATE int ssh_translate_tty_chunk(struct ssh_connection *conn,
     conn->channel.tx_prev_cr = (ch == '\r') ? TRUE : FALSE;
   }
 
+  if (consumed_len != 0)
+    *consumed_len = in_pos;
   return out_pos;
 }
 
 PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
 {
-  char raw_chunk[128];
-  char cooked_chunk[256];
   int raw_cap;
   int read_len;
+  int raw_offset;
+  int consumed_len;
   int send_len;
-  u_int32_t cap;
+  int send_cap;
+  int outbox_remaining;
+  u_int32_t tick_budget;
+  u_int32_t tick_read_bytes = 0;
 
   if (!conn->channel.open || conn->channel.tty == 0)
     return;
@@ -2588,42 +2756,81 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
       return;
   }
 
-  cap = conn->channel.peer_max_packet;
-  if (cap > sizeof(cooked_chunk))
-    cap = sizeof(cooked_chunk);
-  if (cap > conn->channel.peer_window)
-    cap = conn->channel.peer_window;
-  if (cap == 0)
+  send_cap = ssh_channel_data_cap(conn);
+  if (send_cap <= 0)
     return;
 
-  raw_cap = (int)(cap / 2);
-  if (raw_cap <= 0)
-    raw_cap = 1;
-  if (raw_cap > (int)sizeof(raw_chunk))
-    raw_cap = sizeof(raw_chunk);
+  tick_budget = SSH_TTY_DRAIN_BUDGET;
+  while (conn->out_count < SSH_OUTBOX_MAX &&
+         conn->channel.peer_window > 0 &&
+         tick_budget != 0) {
+    send_cap = ssh_channel_data_cap(conn);
+    if (send_cap <= 0)
+      break;
 
-  read_len = (int)tty_master_read(conn->channel.tty, raw_chunk, raw_cap);
-  if (read_len <= 0) {
-    /* 初回 prompt が client 入力待ちで見えない run を避ける。 */
-    if (conn->channel.prompt_kick_pending &&
-        (int)(kernel_tick - conn->channel.shell_started_tick) >= 1) {
-      tty_master_write(conn->channel.tty, "\n", 1);
-      conn->channel.prompt_kick_pending = FALSE;
+    tick_budget = SSH_TTY_DRAIN_BUDGET - tick_read_bytes;
+    outbox_remaining = SSH_OUTBOX_MAX - conn->out_count;
+    raw_cap = send_cap / 2;
+    if (raw_cap <= 0)
+      raw_cap = 1;
+    raw_cap *= outbox_remaining;
+    if (raw_cap > (int)sizeof(ssh_tty_raw_chunk))
+      raw_cap = sizeof(ssh_tty_raw_chunk);
+    if ((u_int32_t)raw_cap > tick_budget)
+      raw_cap = (int)tick_budget;
+    if (raw_cap <= 0)
+      break;
+
+    read_len = (int)tty_master_read(conn->channel.tty, ssh_tty_raw_chunk, raw_cap);
+    if (read_len <= 0) {
+      /* 初回 prompt が client 入力待ちで見えない run を避ける。 */
+      if (tick_read_bytes == 0 &&
+          conn->channel.prompt_kick_pending &&
+          (int)(kernel_tick - conn->channel.shell_started_tick) >= 1) {
+        tty_master_write(conn->channel.tty, "\n", 1);
+        conn->channel.prompt_kick_pending = FALSE;
+      }
+      break;
     }
-    return;
+
+    conn->channel.prompt_kick_pending = FALSE;
+    tick_read_bytes += (u_int32_t)read_len;
+    raw_offset = 0;
+    while (raw_offset < read_len &&
+           conn->out_count < SSH_OUTBOX_MAX &&
+           conn->channel.peer_window > 0) {
+      send_cap = ssh_channel_data_cap(conn);
+      if (send_cap <= 0)
+        break;
+      if (send_cap > (int)sizeof(ssh_tty_cooked_chunk))
+        send_cap = sizeof(ssh_tty_cooked_chunk);
+
+      send_len = ssh_translate_tty_chunk(conn,
+                                         ssh_tty_raw_chunk + raw_offset,
+                                         read_len - raw_offset,
+                                         ssh_tty_cooked_chunk,
+                                         send_cap,
+                                         &consumed_len);
+      if (send_len <= 0 || consumed_len <= 0)
+        break;
+      raw_offset += consumed_len;
+      ssh_output_metrics_feed_bytes(conn, ssh_tty_cooked_chunk, send_len);
+      if (ssh_queue_channel_data(conn,
+                                 (const u_int8_t *)ssh_tty_cooked_chunk,
+                                 send_len) < 0) {
+        ssh_queue_close(conn, "queue_failed");
+        return;
+      }
+      ssh_output_metrics_note_packet(conn, send_len);
+      conn->channel.peer_window -= (u_int32_t)send_len;
+      conn->last_activity_tick = kernel_tick;
+    }
   }
 
-  conn->channel.prompt_kick_pending = FALSE;
-  send_len = ssh_translate_tty_chunk(conn, raw_chunk, read_len,
-                                     cooked_chunk, (int)cap);
-  if (send_len <= 0)
-    return;
-  if (ssh_queue_channel_data(conn, (const u_int8_t *)cooked_chunk, send_len) < 0) {
-    ssh_queue_close(conn, "queue_failed");
-    return;
+  if (tick_read_bytes > 0) {
+    conn->output_metrics.last_tick_read_bytes = tick_read_bytes;
+    ssh_emit_output_metric(conn);
   }
-  conn->channel.peer_window -= (u_int32_t)send_len;
-  conn->last_activity_tick = kernel_tick;
 }
 
 PRIVATE void ssh_poll_shell(struct ssh_connection *conn)

@@ -16,6 +16,7 @@ char* strncpy(char* dest, const char* src, unsigned int n);
 char* strchr(const char* s, int c);
 char* strrchr(const char* s, int c);
 void* memcpy(void* dest, void* src, unsigned int n);
+void* memmove(void* dest, const void* src, unsigned int n);
 void* memset(void* buf, int ch, unsigned int n);
 int memcmp(const void* s1, const void* s2, unsigned int n);
 
@@ -200,6 +201,25 @@ TEST(memcpy_returns_dest) {
     ASSERT(ret == dst);
 }
 
+/* === memmove === */
+
+TEST(memmove_overlap_forward) {
+    char buf[8] = "abcdef";
+    memmove(buf + 1, buf, 5);
+    ASSERT(buf[0] == 'a');
+    ASSERT(buf[1] == 'a');
+    ASSERT(buf[2] == 'b');
+    ASSERT(buf[5] == 'e');
+}
+
+TEST(memmove_overlap_backward) {
+    char buf[8] = "abcdef";
+    memmove(buf, buf + 1, 5);
+    ASSERT(buf[0] == 'b');
+    ASSERT(buf[1] == 'c');
+    ASSERT(buf[4] == 'f');
+}
+
 /* === memset === */
 
 TEST(memset_basic) {
@@ -315,6 +335,8 @@ int main(void)
 
     RUN_TEST(memcpy_basic);
     RUN_TEST(memcpy_returns_dest);
+    RUN_TEST(memmove_overlap_forward);
+    RUN_TEST(memmove_overlap_backward);
 
     RUN_TEST(memset_basic);
     RUN_TEST(memset_zero);

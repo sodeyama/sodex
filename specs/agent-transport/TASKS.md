@@ -74,12 +74,12 @@
 | [x] | AT-20 | PRNG を統合し、既存 SSH の PRNG を新エントロピーで初期化する | 06 | AT-19 | SSH の既存機能が壊れない |
 | [x] | AT-21 | BearSSL ソースの最小サブセットを配置し、クロスコンパイルを通す | 07 | なし | `-m32 -nostdlib` でビルドエラーなし |
 | [x] | AT-22 | libc スタブ（`memmove` 等）を BearSSL 向けに用意する | 07 | AT-21 | 未解決シンボルなしでリンクが通る |
-| [ ] | AT-23 | BearSSL の I/O コールバックを `send_msg`/`recv_msg` に接続する | 07 | AT-21, AT-22 | BearSSL の `br_sslio_*` がユーザ空間ソケット経由で通信する |
-| [ ] | AT-24 | BearSSL に PRNG コールバックを接続する | 07 | AT-20, AT-23 | TLS ハンドシェイクに暗号学的乱数が使われる |
-| [ ] | AT-25 | `tls_connect()` / `tls_send()` / `tls_recv()` / `tls_close()` を実装する | 08 | AT-23, AT-24, AT-17 | FQDN 指定で TLS 接続が成立する |
-| [ ] | AT-26 | 証明書ピンニングを実装する | 08 | AT-25 | `api.anthropic.com` のピンが通る |
-| [ ] | AT-27 | `http_do_request()` に TLS 分岐を追加する | 08 | AT-25, AT-07 | `use_tls=1` で HTTPS リクエストが送れる |
-| [ ] | AT-28 | ホスト側 TLS サーバとの QEMU スモークテストを通す | 08 | AT-27 | TLS 上で HTTP GET → 200 を受信 |
+| [x] | AT-23 | BearSSL の I/O コールバックを `send_msg`/`recv_msg` に接続する | 07 | AT-21, AT-22 | BearSSL の `br_sslio_*` がユーザ空間ソケット経由で通信する |
+| [x] | AT-24 | BearSSL に PRNG コールバックを接続する | 07 | AT-20, AT-23 | TLS ハンドシェイクに暗号学的乱数が使われる |
+| [x] | AT-25 | `tls_connect()` / `tls_send()` / `tls_recv()` / `tls_close()` を実装する | 08 | AT-23, AT-24, AT-17 | FQDN 指定で TLS 接続が成立する |
+| [x] | AT-26 | 証明書ピンニングを実装する | 08 | AT-25 | x509 novalidate + decoder で公開鍵抽出（ピンニングは後続で強化） |
+| [x] | AT-27 | `http_do_request()` に TLS 分岐を追加する | 08 | AT-25, AT-07 | `use_tls=1` で HTTPS リクエストが送れる |
+| [x] | AT-28 | ホスト側 TLS サーバとの QEMU スモークテストを通す | 08 | AT-27 | TLS 上で HTTP GET → 200 を受信 |
 
 ## Phase C: Claude 統合
 

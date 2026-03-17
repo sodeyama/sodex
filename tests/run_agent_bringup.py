@@ -24,6 +24,7 @@ from qemu_config import get_qemu_memory_mb
 
 DEFAULT_TIMEOUT = 120
 MOCK_PORT = 8080
+TLS_PORT = 4443
 
 
 def dump_file(path: pathlib.Path) -> None:
@@ -82,10 +83,11 @@ def main() -> int:
     serial_log = logdir / "agent_test_serial.log"
     qemu_log = logdir / "agent_test_qemu_debug.log"
     mock_log = logdir / "agent_test_mock.log"
+    tls_log = logdir / "agent_test_tls.log"
     monitor_log = logdir / "agent_test_monitor.log"
     monitor_sock = logdir / "agent_test_monitor.sock"
 
-    for p in (serial_log, qemu_log, mock_log, monitor_log, monitor_sock):
+    for p in (serial_log, qemu_log, mock_log, tls_log, monitor_log, monitor_sock):
         if p.exists():
             p.unlink()
 
@@ -143,6 +145,8 @@ def main() -> int:
     qemu_bin = os.environ.get("QEMU", "qemu-system-i386")
     qemu_memory_mb = get_qemu_memory_mb()
 
+    tls_server = repo_root / "tests" / "mock_tls_server.py"
+
     # Start mock HTTP server
     with mock_log.open("w") as mock_fp:
         mock_proc = subprocess.Popen(
@@ -160,6 +164,21 @@ def main() -> int:
                 dump_file(mock_log)
                 return 1
             print(f"Mock server listening on port {MOCK_PORT}")
+
+            # Start mock TLS server
+            tls_proc = None
+            with tls_log.open("w") as tls_fp:
+                tls_proc = subprocess.Popen(
+                    [sys.executable, str(tls_server), str(TLS_PORT)],
+                    cwd=repo_root,
+                    stdout=tls_fp,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+            if wait_for_port("127.0.0.1", TLS_PORT, timeout=5.0):
+                print(f"TLS server listening on port {TLS_PORT}")
+            else:
+                print(f"WARNING: TLS server failed to start (TLS tests will fail)")
 
             # QEMU: SLiRP maps guest 10.0.2.2 -> host 127.0.0.1
             qemu_args = [
@@ -229,13 +248,20 @@ def main() -> int:
                     qemu_proc.kill()
                     qemu_rc = qemu_proc.wait()
 
-            # Stop mock server
+            # Stop servers
             mock_proc.terminate()
             try:
                 mock_proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 mock_proc.kill()
                 mock_proc.wait()
+            if tls_proc and tls_proc.poll() is None:
+                tls_proc.terminate()
+                try:
+                    tls_proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    tls_proc.kill()
+                    tls_proc.wait()
 
             # Report results
             print("")
@@ -284,6 +310,9 @@ def main() -> int:
             if mock_proc.poll() is None:
                 mock_proc.kill()
                 mock_proc.wait()
+            if tls_proc and tls_proc.poll() is None:
+                tls_proc.kill()
+                tls_proc.wait()
 
 
 if __name__ == "__main__":

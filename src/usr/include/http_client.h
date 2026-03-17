@@ -33,6 +33,7 @@ struct http_request {
     const struct http_header *headers;/* NULL-terminated array */
     const char *body;                 /* NULL = no body */
     int         body_len;
+    int         use_tls;              /* 1 = HTTPS via TLS */
 };
 
 struct http_response {

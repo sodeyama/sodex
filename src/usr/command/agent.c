@@ -16,6 +16,7 @@
 #include <json.h>
 #include <dns.h>
 #include <entropy.h>
+#include <tls_client.h>
 
 #define HOST_IP     "10.0.2.2"
 #define HOST_PORT   8080
@@ -432,6 +433,42 @@ static void test_http_mock_claude_error(void)
     }
 }
 
+/* ---- HTTPS GET via TLS ---- */
+static void test_https_get(void)
+{
+    struct http_request req;
+    struct http_response resp;
+    char recv_buf[4096];
+    int ret;
+
+    memset(&req, 0, sizeof(req));
+    req.method = "GET";
+    req.host = "10.0.2.2";
+    req.path = "/healthz";
+    req.port = 4443;
+    req.use_tls = 1;
+
+    debug_printf("[AGENT-TEST] https_get 10.0.2.2:4443/healthz ...\n");
+    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
+    if (ret != HTTP_OK) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
+        /* TLS test is allowed to fail in some environments */
+        debug_printf("[AGENT-TEST] %s (TLS may not be available)\n", msg);
+        TEST_FAIL("https_get_healthz", msg);
+        return;
+    }
+
+    if (resp.status_code == 200) {
+        debug_printf("[AGENT-TEST] HTTPS 200, body=%d bytes\n", resp.body_len);
+        TEST_PASS("https_get_healthz");
+    } else {
+        char msg[32];
+        snprintf(msg, sizeof(msg), "status=%d", resp.status_code);
+        TEST_FAIL("https_get_healthz", msg);
+    }
+}
+
 /* ---- HTTP GET / → HTML ---- */
 static void test_http_get_html(void)
 {
@@ -743,6 +780,9 @@ int main(int argc, char *argv[])
     test_http_echo_json();
     test_http_mock_claude();
     test_http_mock_claude_error();
+
+    /* TLS/HTTPS test */
+    test_https_get();
 
     debug_printf("[AGENT-TEST] === RESULT: %d/%d passed ===\n",
                 passed, passed + failed);

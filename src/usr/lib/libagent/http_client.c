@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <tls_client.h>
 #else
 /* Stubs for host-side testing */
 static void debug_printf(const char *fmt, ...) { (void)fmt; }
@@ -244,9 +245,82 @@ int http_body_complete(const struct http_response *resp, int received_body_len)
 
 #ifndef TEST_BUILD
 
-int http_do_request(const struct http_request *req,
-                    char *recv_buf, int recv_cap,
-                    struct http_response *resp)
+/* ---- TLS version of http_do_request ---- */
+static int http_do_request_tls(const struct http_request *req,
+                               char *recv_buf, int recv_cap,
+                               struct http_response *resp)
+{
+    char send_buf[2048];
+    int send_len;
+    int ret;
+    int total_recv = 0;
+    int header_len = 0;
+    int body_received = 0;
+
+    /* Build request */
+    send_len = http_build_request(send_buf, sizeof(send_buf), req);
+    if (send_len < 0)
+        return send_len;
+
+    /* TLS connect (includes DNS + TCP + handshake) */
+    debug_printf("[HTTPS] connecting to %s:%d ...\n", req->host, req->port);
+    ret = tls_connect(req->host, req->port);
+    if (ret != TLS_OK) {
+        debug_printf("[HTTPS] connect failed: %d\n", ret);
+        return HTTP_ERR_CONNECT;
+    }
+
+    /* Send HTTP request over TLS */
+    ret = tls_send(send_buf, send_len);
+    if (ret < 0) {
+        debug_printf("[HTTPS] send failed: %d\n", ret);
+        tls_close();
+        return HTTP_ERR_SEND;
+    }
+    debug_printf("[HTTPS] sent %d bytes\n", ret);
+
+    /* Receive response over TLS */
+    total_recv = 0;
+    while (total_recv < recv_cap - 1) {
+        ret = tls_recv(recv_buf + total_recv, recv_cap - 1 - total_recv);
+        if (ret <= 0)
+            break;
+        total_recv += ret;
+        recv_buf[total_recv] = '\0';
+
+        if (header_len == 0) {
+            header_len = http_parse_response_headers(recv_buf, total_recv, resp);
+            if (header_len > 0) {
+                resp->body = recv_buf + header_len;
+                body_received = total_recv - header_len;
+                resp->body_len = body_received;
+                if (http_body_complete(resp, body_received))
+                    break;
+            }
+        } else {
+            body_received = total_recv - header_len;
+            resp->body_len = body_received;
+            if (http_body_complete(resp, body_received))
+                break;
+        }
+    }
+
+    tls_close();
+
+    if (header_len <= 0) {
+        debug_printf("[HTTPS] no valid response (received %d bytes)\n", total_recv);
+        return HTTP_ERR_RECV;
+    }
+
+    debug_printf("[HTTPS] %d %s, body=%d bytes\n",
+                resp->status_code, resp->status_text, resp->body_len);
+    return HTTP_OK;
+}
+
+/* ---- Plaintext version of http_do_request ---- */
+static int http_do_request_plain(const struct http_request *req,
+                                 char *recv_buf, int recv_cap,
+                                 struct http_response *resp)
 {
     char send_buf[2048];
     int send_len;
@@ -258,30 +332,24 @@ int http_do_request(const struct http_request *req,
     int body_received = 0;
     u_int32_t timeout;
 
-    if (!req || !recv_buf || !resp)
-        return HTTP_ERR_BUF_OVERFLOW;
-
     /* Build request */
     send_len = http_build_request(send_buf, sizeof(send_buf), req);
     if (send_len < 0)
         return send_len;
 
-    /* Create socket */
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
         debug_printf("[HTTP] socket() failed: %d\n", sockfd);
         return HTTP_ERR_CONNECT;
     }
 
-    /* Set recv timeout (5 seconds) */
     timeout = 5000;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-    /* Connect */
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(req->port);
-    inet_aton(req->host, &addr.sin_addr);  /* Fixed IP for Phase A */
+    inet_aton(req->host, &addr.sin_addr);
 
     debug_printf("[HTTP] connect %s:%d ...\n", req->host, req->port);
     ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
@@ -292,7 +360,6 @@ int http_do_request(const struct http_request *req,
     }
     debug_printf("[HTTP] connected\n");
 
-    /* Send request */
     ret = send_msg(sockfd, send_buf, send_len, 0);
     if (ret < 0) {
         debug_printf("[HTTP] send failed: %d\n", ret);
@@ -301,7 +368,6 @@ int http_do_request(const struct http_request *req,
     }
     debug_printf("[HTTP] sent %d bytes\n", ret);
 
-    /* Receive response */
     total_recv = 0;
     while (total_recv < recv_cap - 1) {
         ret = recv_msg(sockfd, recv_buf + total_recv, recv_cap - 1 - total_recv, 0);
@@ -310,7 +376,6 @@ int http_do_request(const struct http_request *req,
         total_recv += ret;
         recv_buf[total_recv] = '\0';
 
-        /* Try to parse headers if not done yet */
         if (header_len == 0) {
             header_len = http_parse_response_headers(recv_buf, total_recv, resp);
             if (header_len > 0) {
@@ -338,6 +403,19 @@ int http_do_request(const struct http_request *req,
     debug_printf("[HTTP] %d %s, body=%d bytes\n",
                 resp->status_code, resp->status_text, resp->body_len);
     return HTTP_OK;
+}
+
+int http_do_request(const struct http_request *req,
+                    char *recv_buf, int recv_cap,
+                    struct http_response *resp)
+{
+    if (!req || !recv_buf || !resp)
+        return HTTP_ERR_BUF_OVERFLOW;
+
+    if (req->use_tls)
+        return http_do_request_tls(req, recv_buf, recv_cap, resp);
+    else
+        return http_do_request_plain(req, recv_buf, recv_cap, resp);
 }
 
 #endif /* !TEST_BUILD */

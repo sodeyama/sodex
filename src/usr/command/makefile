@@ -52,6 +52,7 @@ AGENT   = ${USRDIR}/bin/agent
 DIG     = ${USRDIR}/bin/dig
 CURL    = ${USRDIR}/bin/curl
 CLAUDE  = ${USRDIR}/bin/claude
+ASK     = ${USRDIR}/bin/ask
 
 all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
@@ -87,6 +88,7 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/dig.o -o ${DIG} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/curl.o -o ${CURL} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/claude.o -o ${CLAUDE} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/ask.o -o ${ASK} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/sshd.o: sshd.c ../../include/ssh_server.h
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

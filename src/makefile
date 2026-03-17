@@ -363,6 +363,26 @@ test-claude-smoke:
 	@echo "=== Running Claude smoke test (Phase C) in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/tests/run_claude_smoke.py
 
+# === API key injection ===
+
+ENVFILE = $(BASEDIR)/.env.local
+CLAUDE_CONF = $(BASEDIR)/src/rootfs-overlay/etc/claude.conf
+
+.PHONY: inject-api-key
+inject-api-key:
+	@if [ ! -f "$(ENVFILE)" ]; then \
+		echo "ERROR: $(ENVFILE) not found."; \
+		echo "Create it with: echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env.local"; \
+		exit 1; \
+	fi
+	@API_KEY=$$(grep '^ANTHROPIC_API_KEY=' "$(ENVFILE)" | head -1 | cut -d= -f2-); \
+	if [ -z "$$API_KEY" ]; then \
+		echo "ERROR: ANTHROPIC_API_KEY not found in $(ENVFILE)"; \
+		exit 1; \
+	fi; \
+	echo "$$API_KEY" > "$(CLAUDE_CONF)"; \
+	echo "API key injected into rootfs overlay ($(CLAUDE_CONF))"
+
 # === Misc ===
 
 .PHONY: usb

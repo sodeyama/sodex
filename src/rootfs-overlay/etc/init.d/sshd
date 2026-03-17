@@ -1,7 +1,7 @@
 ### BEGIN INIT INFO
 # Provides: sshd
 # Required-Start:
-# Default-Start: server-headless
+# Default-Start: user server-headless
 ### END INIT INFO
 . /etc/init.d/rc.common
 echo AUDIT sshd_service $1

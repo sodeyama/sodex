@@ -64,6 +64,7 @@ PRIVATE void sys_console_clear(void);
 PRIVATE int sys_get_winsize(int fd, struct winsize *winsize);
 PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize);
 PRIVATE int sys_get_fb_info(struct fb_info *info);
+PRIVATE void sys_fb_flush(void);
 PRIVATE int sys_debug_write(const char *buf, size_t len);
 PRIVATE int sys_tcgetattr(int fd, struct termios *termios);
 PRIVATE int sys_tcsetattr(int fd, int optional_actions,
@@ -293,6 +294,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_GET_FB_INFO:
     ret = sys_get_fb_info((struct fb_info *)p1);
+    break;
+
+  case SYS_CALL_FB_FLUSH:
+    sys_fb_flush();
     break;
 
   case SYS_CALL_DEBUG_WRITE:
@@ -672,6 +677,11 @@ PRIVATE int sys_get_fb_info(struct fb_info *info)
   info->base = kernel_info->base;
   info->size = kernel_info->size;
   return 0;
+}
+
+PRIVATE void sys_fb_flush(void)
+{
+  fb_flush();
 }
 
 PRIVATE int sys_tcgetattr(int fd, struct termios *termios)

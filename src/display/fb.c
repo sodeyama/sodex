@@ -264,4 +264,7 @@ PUBLIC void fb_clear(u_int32_t color)
 
 PUBLIC void fb_flush(void)
 {
+  if (fb_is_available() == FALSE)
+    return;
+  bga_refresh();
 }

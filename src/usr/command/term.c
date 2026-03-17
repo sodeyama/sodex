@@ -499,6 +499,7 @@ PRIVATE void term_present(struct term_app *app, int scroll_delta)
     term_copy_back_to_front(app, 0, 0, app->fb.width, app->fb.height);
     app->metrics.present_copy_area +=
         (u_int32_t)(app->fb.width * app->fb.height);
+    fb_flush();
     return;
   }
 
@@ -515,6 +516,7 @@ PRIVATE void term_present(struct term_app *app, int scroll_delta)
                           app->present_top,
                           width, height);
   app->metrics.present_copy_area += (u_int32_t)(width * height);
+  fb_flush();
 }
 
 PRIVATE int sync_viewport(struct term_app *app)

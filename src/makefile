@@ -342,7 +342,15 @@ ktest-link: kernel-subdirs ${OBJS} ${ASMOBJS} $(KTEST_OBJS) ${BUILDDIR}/boot.ld
 	${LD} ${LFLAGS} ${OBJS} ${DRIVER_OBJS} ${KLIB_OBJS} ${NET_OBJS} ${DISPLAY_OBJS} ${TTY_OBJS} ${ASMOBJS} $(KTEST_OBJS) -o ${KERNEL}
 	$(MAKE) usr-build
 	$(MAKE) tools
-	$(MAKE) ${ACIENT} ${MIDDLE}
+	$(MAKE) ${MIDDLE}
+	@ksize=`${GETSIZE} ${KERNEL}`; \
+	if [ "$$ksize" -gt "${BOOT_KERNEL_MAX_SECTS}" ]; then \
+		echo "kernel.bin is too large ($$ksize > ${BOOT_KERNEL_MAX_SECTS} sectors)"; \
+		exit 1; \
+	fi
+	echo `${GETSIZE} ${KERNEL}`
+	${AS} ${ASFLAGS} --defsym KERNEL_SECTS=`${GETSIZE} ${KERNEL}` ${FIRST_BOOT_FILE} -o $(OBJDIR)/boota.o -a > ${LIST}/boota.lst
+	${LD} ${BOOTA_LFLAGS} $(OBJDIR)/boota.o -o ${ACIENT}
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2} ${ROOTFS_OVERLAY_ARG}

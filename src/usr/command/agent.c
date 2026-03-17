@@ -15,6 +15,7 @@
 #include <http_client.h>
 #include <json.h>
 #include <dns.h>
+#include <entropy.h>
 
 #define HOST_IP     "10.0.2.2"
 #define HOST_PORT   8080
@@ -475,6 +476,51 @@ static void test_http_get_html(void)
     }
 }
 
+/* ---- Entropy/PRNG tests ---- */
+static void test_entropy_prng(void)
+{
+    u_int8_t rand_buf[32];
+    int zero_count = 0;
+    int i;
+
+    /* Init and collect jitter entropy */
+    entropy_init();
+    entropy_collect_jitter(512);
+
+    if (!entropy_ready()) {
+        char msg[32];
+        snprintf(msg, sizeof(msg), "only %d bits", entropy_bits());
+        TEST_FAIL("entropy_collect", msg);
+        return;
+    }
+    TEST_PASS("entropy_collect");
+
+    /* Init PRNG */
+    if (prng_init() < 0) {
+        TEST_FAIL("prng_init", "init failed");
+        return;
+    }
+    TEST_PASS("prng_init");
+
+    /* Generate random bytes */
+    prng_bytes(rand_buf, 32);
+
+    /* Check not all zeros */
+    for (i = 0; i < 32; i++)
+        if (rand_buf[i] == 0)
+            zero_count++;
+
+    if (zero_count < 30) {
+        debug_printf("[PRNG] random: ");
+        for (i = 0; i < 16; i++)
+            debug_printf("%x ", rand_buf[i]);
+        debug_printf("...\n");
+        TEST_PASS("prng_generate");
+    } else {
+        TEST_FAIL("prng_generate", "all zeros");
+    }
+}
+
 /* ---- DNS resolve tests ---- */
 static void test_dns_resolve(void)
 {
@@ -682,6 +728,9 @@ int main(int argc, char *argv[])
     test_tcp_connect();
     test_tcp_cycle();
     test_tcp_error();
+
+    /* Entropy/PRNG tests */
+    test_entropy_prng();
 
     /* DNS tests */
     test_dns_resolve();

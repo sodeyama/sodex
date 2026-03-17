@@ -3,6 +3,7 @@
 `specs/agent-transport/README.md` の Plan 群を着手単位に分解したタスクリスト。
 
 **方針**: 全コンポーネントをユーザランドで構築する。
+**設計参考**: Claude Agent SDK のアーキテクチャ（`docs/research/claude_agent_sdk_integration_research_2026-03-17.md`）
 
 ## Phase 0: ユーザランド基盤整備
 
@@ -99,3 +100,116 @@
 | [x] | AT-40 | モック Claude サーバを TLS + SSE 対応に拡張する | 11 | AT-13 | TLS 自己署名 + SSE ストリーミングを返す |
 | [x] | AT-41 | `make test-claude-smoke` で結合テストを通す | 11 | AT-39, AT-40 | テキスト応答と tool_use 応答の 2 シナリオが PASS |
 | [x] | AT-42 | 全レイヤーの診断ログフォーマットを統一する | 11 | AT-41 | DNS/TCP/TLS/HTTP/SSE/CLAUDE の各段階がシリアルに出る |
+
+## Phase D: ツール実行 (Plan 12–13)
+
+### Plan 12: ツール実行エンジン
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [ ] | AT-43 | `tool_registry.h` にレジストリ API（登録、検索、列挙）を定義する | 12 | なし | ヘッダがコンパイルできる |
+| [ ] | AT-44 | `tool_registry.c` にレジストリ実装（固定配列ベース）を作成する | 12 | AT-43 | ツールの登録と名前検索が動作する |
+| [ ] | AT-45 | `tool_dispatch.h` / `tool_dispatch.c` にディスパッチャを実装する | 12 | AT-44 | tool_use ブロックから対応ハンドラが呼ばれる |
+| [ ] | AT-46 | `tool_read_file.c` を実装する（ext3fs からファイル読み取り） | 12 | AT-45 | JSON 入力のパスからファイル内容を tool_result に返せる |
+| [ ] | AT-47 | `tool_write_file.c` を実装する（ext3fs へのファイル書き込み） | 12 | AT-45 | JSON 入力のパスと内容でファイルを作成/上書きできる |
+| [ ] | AT-48 | `tool_list_dir.c` を実装する（ext3fs ディレクトリ一覧） | 12 | AT-45 | ディレクトリ内のファイル名とサイズを tool_result に返せる |
+| [ ] | AT-49 | `tool_get_system_info.c` を実装する（カーネル情報取得） | 12 | AT-45 | メモリ/プロセス/デバイス情報を JSON で tool_result に返せる |
+| [ ] | AT-50 | `tool_run_command.c` を実装する（execve + パイプキャプチャ） | 12 | AT-45 | コマンド実行結果の stdout を tool_result に返せる |
+| [ ] | AT-51 | `claude_build_request_with_tools()` を拡張してツール定義を送信する | 12 | AT-44 | tools 配列付きのリクエスト JSON が正しく生成される |
+| [ ] | AT-52 | 各ツールの JSON Schema 文字列をコンパイル時定数として定義する | 12 | AT-51 | 全ツールの input_schema が Claude API 仕様に準拠 |
+| [ ] | AT-53 | ツール実行の host 単体テスト (`test_tool_dispatch.c`) を書いて通す | 12 | AT-46〜50 | レジストリ、ディスパッチ、エラー処理の全テスト PASS |
+
+### Plan 13: マルチターン会話
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [ ] | AT-54 | `conversation.h` に会話データ構造（conv_turn, conv_block, conversation）を定義する | 13 | なし | ヘッダがコンパイルできる |
+| [ ] | AT-55 | `conversation.c` に `conv_init`, `conv_add_user_text`, `conv_add_assistant_response` を実装する | 13 | AT-54 | ユーザーとアシスタントのターンを追加できる |
+| [ ] | AT-56 | `conv_add_tool_results()` を実装する（複数 tool_result 対応） | 13 | AT-55 | 1 つの user ターンに複数の tool_result ブロックを追加できる |
+| [ ] | AT-57 | `conv_build_messages_json()` を実装する（全ターンの JSON 化） | 13 | AT-55, AT-56 | text, tool_use, tool_result の混在ターンを正しい JSON に変換 |
+| [ ] | AT-58 | `claude_send_conversation()` を `claude_client.c` に追加する | 13 | AT-57, AT-39 | 全会話履歴を含むリクエストで API 応答を受信できる |
+| [ ] | AT-59 | トークン追跡と閾値チェック（`conv_check_tokens`）を実装する | 13 | AT-58 | トークン使用量が加算され、閾値超過を検知できる |
+| [ ] | AT-60 | 古いターン切り捨てロジックを実装する | 13 | AT-59 | 閾値超過時に最古のターンから削除される |
+| [ ] | AT-61 | `chat` コマンドを実装する（対話型マルチターン） | 13 | AT-58 | ユーザー入力 → 応答 → 次の入力のループが動作する |
+| [ ] | AT-62 | マルチターン会話の host 単体テスト (`test_conversation.c`) を書いて通す | 13 | AT-57 | JSON 化、tool_result 統合、トークン管理のテスト PASS |
+| [ ] | AT-63 | モックサーバに tool_use → tool_result → 再応答のシナリオを追加する | 13 | AT-58 | 2 往復のマルチターンが QEMU で動作する |
+
+## Phase E: エージェントループ (Plan 14–15)
+
+### Plan 14: エージェントループ
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [ ] | AT-64 | `agent.h` にエージェント設定・状態・結果の構造体を定義する | 14 | なし | ヘッダがコンパイルできる |
+| [ ] | AT-65 | `agent.c` に `agent_run()` メインループを実装する | 14 | AT-64, AT-58, AT-45 | prompt → API → ツール実行 → API → ... → 最終応答のループ |
+| [ ] | AT-66 | `agent_step()` を切り出してテスタブルにする | 14 | AT-65 | 1 ステップ単位でテスト可能 |
+| [ ] | AT-67 | 停止条件を実装する: end_turn, max_steps, specific_tool, token_limit | 14 | AT-65 | 各停止条件で正しく停止する |
+| [ ] | AT-68 | エラーリカバリを実装する（API 再試行、ツールエラー時 is_error 返送） | 14 | AT-65 | ツールエラー時に Claude にフィードバックされ、エージェントは継続する |
+| [ ] | AT-69 | 診断ログの各ステップ出力を実装する | 14 | AT-65 | [AGENT] step N/M フォーマットでシリアルに出力される |
+| [ ] | AT-70 | `agent` コマンドに `agent run` サブコマンドを追加する | 14 | AT-65 | `agent run "タスク"` で自律実行が起動する |
+| [ ] | AT-71 | 統計サマリ（ステップ数、トークン、ツール呼び出し回数、実行時間）を実装する | 14 | AT-65 | エージェント終了時にサマリが出力される |
+| [ ] | AT-72 | エージェントループの host 単体テスト (`test_agent_loop.c`) を書いて通す | 14 | AT-66 | 1 ステップ完了、2 ステップ、max_steps、terminal_tool の 4 パターン PASS |
+| [ ] | AT-73 | モックサーバに 4 シナリオ（即完、1 ツール、2 連鎖、max_steps）を追加する | 14 | AT-65 | QEMU で 4 シナリオが PASS |
+
+### Plan 15: システムプロンプトとツール設計
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [ ] | AT-74 | `system_prompt.txt` にシステムプロンプト草案を作成する | 15 | なし | 4 セクション（ID, 能力, 制約, 行動指針）を含む |
+| [ ] | AT-75 | 全ツールの JSON Schema を最適化された description 付きで定義する | 15 | AT-52 | Claude が各ツールの用途を正しく理解できる |
+| [ ] | AT-76 | `tool_read_file.c` に offset/limit パラメータを追加する | 15 | AT-46 | 大きなファイルの部分読み取りができる |
+| [ ] | AT-77 | `tool_manage_process.c` を新規実装する（list, info, kill, nice） | 15 | AT-45 | プロセス管理の 4 アクションが動作する |
+| [ ] | AT-78 | `/etc/agent/` のファイル群を rootfs-overlay に配置する | 15 | AT-74 | ビルド時に system_prompt.txt と agent.conf が rootfs に含まれる |
+| [ ] | AT-79 | `agent_load_config()` でファイルからプロンプトと設定を読み込む | 15 | AT-78, AT-65 | /etc/agent/ から設定が読み込まれる |
+| [ ] | AT-80 | ツール統計のモニタリングと出力を実装する | 15 | AT-71 | ツール別の呼び出し回数、成功率、平均時間が出力される |
+
+## Phase F: 永続化と制御 (Plan 16–17)
+
+### Plan 16: セッション永続化
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [ ] | AT-81 | `session.h` にセッション管理 API を定義する | 16 | なし | ヘッダがコンパイルできる |
+| [ ] | AT-82 | `session_create()` — ID 生成とメタデータ行書き込みを実装する | 16 | AT-81 | `/var/agent/sessions/<id>.jsonl` が作成される |
+| [ ] | AT-83 | `session_append_turn()` — JSONL 形式での 1 行追記を実装する | 16 | AT-82 | 会話ターンが JSONL ファイルに追記される |
+| [ ] | AT-84 | `session_load()` — JSONL を読み込んで conversation に復元する | 16 | AT-83, AT-55 | 保存されたセッションから会話が正しく復元される |
+| [ ] | AT-85 | `session_list()` / `session_delete()` — 一覧と削除を実装する | 16 | AT-82 | セッションファイルの列挙と削除が動作する |
+| [ ] | AT-86 | `session_cleanup()` — 容量ベースの自動クリーンアップを実装する | 16 | AT-85 | 上限超過時に最古のセッションが削除される |
+| [ ] | AT-87 | `conversation.c` に `conv_start_session()` / `conv_resume_session()` を追加する | 16 | AT-84 | 会話の開始時に自動保存、resume で復元 |
+| [ ] | AT-88 | `agent.c` のループ内で各ターン後に `session_append_turn()` を追加する | 16 | AT-83, AT-65 | エージェント実行が自動的にセッションに保存される |
+| [ ] | AT-89 | `chat` / `agent` コマンドにセッション関連サブコマンドを追加する | 16 | AT-85 | `agent sessions`, `chat --resume <id>`, `agent sessions --delete <id>` が動作する |
+| [ ] | AT-90 | セッション永続化の host 単体テスト (`test_session.c`) を書いて通す | 16 | AT-84 | 作成、追記、読み込み、一覧、削除、クリーンアップの全テスト PASS |
+
+### Plan 17: フックと権限管理
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [ ] | AT-91 | `hooks.h` にフックシステム API を定義する | 17 | なし | ヘッダがコンパイルできる |
+| [ ] | AT-92 | `hooks.c` にフック登録・実行エンジンを実装する | 17 | AT-91 | PreToolUse / PostToolUse フックが発火する |
+| [ ] | AT-93 | `permissions.h` / `permissions.c` に権限チェックロジックを実装する | 17 | なし | ツール名とパスで許可/拒否を判定できる |
+| [ ] | AT-94 | `perm_load_policy()` — 設定ファイルパーサを実装する | 17 | AT-93 | `/etc/agent/permissions.conf` を読み込んでポリシーが適用される |
+| [ ] | AT-95 | `audit.h` / `audit.c` — 監査ログの書き込み・読み取りを実装する | 17 | なし | ツール実行が `/var/agent/audit.log` に記録される |
+| [ ] | AT-96 | `audit_rotate()` — ログローテーションを実装する | 17 | AT-95 | ログサイズ上限で古いエントリが削除される |
+| [ ] | AT-97 | `agent.c` の `agent_execute_tool()` にフック・権限チェックを統合する | 17 | AT-92, AT-93, AT-65 | ツール実行前に権限チェックとフックが呼ばれる |
+| [ ] | AT-98 | ビルトインフック（パス保護 `/boot/*`, `/etc/agent/*`）を登録する | 17 | AT-97 | 保護パスへの write_file がブロックされる |
+| [ ] | AT-99 | `/etc/agent/permissions.conf` のデフォルト設定を作成する | 17 | AT-94 | standard モードで読み取り許可、危険コマンド拒否 |
+| [ ] | AT-100 | `agent audit` サブコマンドで監査ログを閲覧できるようにする | 17 | AT-95 | 監査ログエントリが表示される |
+| [ ] | AT-101 | フック・権限の host 単体テスト (`test_hooks_permissions.c`) を書いて通す | 17 | AT-92, AT-93 | フックブロック、権限拒否、監査ログの全テスト PASS |
+
+## Phase G: 結合 (Plan 18)
+
+### Plan 18: エージェント結合テスト
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [ ] | AT-102 | `tests/run_agent_integration.py` テストオーケストレーターを作成する | 18 | なし | モック起動 → QEMU → 判定 → クリーンアップのフレームワーク |
+| [ ] | AT-103 | モックサーバに 5 シナリオのレスポンスパターンを追加する | 18 | AT-73 | ファイル探索、診断、作成、権限ブロック、セッション再開 |
+| [ ] | AT-104 | シナリオ 1（ファイル探索と報告）を実装・検証する | 18 | AT-65, AT-46, AT-48 | list_dir → read_file の連鎖で最終報告テキストが得られる |
+| [ ] | AT-105 | シナリオ 2（システム診断）を実装・検証する | 18 | AT-49 | get_system_info → 診断レポートが得られる |
+| [ ] | AT-106 | シナリオ 3（ファイル作成と検証）を実装・検証する | 18 | AT-47, AT-46 | write_file → read_file → 確認報告が得られる |
+| [ ] | AT-107 | シナリオ 4（権限ブロックとリカバリ）を実装・検証する | 18 | AT-98 | 保護パスへの書き込みがブロックされ、Claude が代替パスで成功する |
+| [ ] | AT-108 | シナリオ 5（セッション再開）を実装・検証する | 18 | AT-88, AT-84 | 1 回目で保存、2 回目で resume して前回の文脈を維持 |
+| [ ] | AT-109 | パフォーマンス計測と出力を実装する | 18 | AT-71 | シナリオ別のステップ数、時間、トークンが計測・表示される |
+| [ ] | AT-110 | `make test-agent-full` ターゲットを作成する | 18 | AT-102 | 1 コマンドで 5 シナリオの結合テストが実行される |
+| [ ] | AT-111 | 実 Claude API での手動デモを確認する | 18 | AT-110 | 実 API でエージェントが自律的にタスクを完了する |
+| [ ] | AT-112 | Phase A–C のリグレッションテストが PASS することを確認する | 18 | AT-110 | `make test-agent-bringup` と `make test-claude-smoke` が引き続き通る |

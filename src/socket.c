@@ -24,6 +24,17 @@ PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 
 PRIVATE u_int8_t icmp_sendbuf[1500];
 
+PRIVATE int socket_tcp_send_limit(struct kern_socket *sk)
+{
+  int limit = SOCK_TXBUF_SIZE;
+
+  if (sk != 0 && sk->tcp_conn != 0 &&
+      sk->tcp_conn->mss > 0 &&
+      sk->tcp_conn->mss < limit)
+    limit = sk->tcp_conn->mss;
+  return limit;
+}
+
 PRIVATE u_int16_t socket_debug_host_port(u_int16_t port)
 {
   return (u_int16_t)(((port & 0x00ffU) << 8) |
@@ -716,27 +727,30 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
 
   if (sk->type == SOCK_STREAM && sk->tcp_conn) {
     /* TCP send: split into MSS-sized chunks.
-     * Each chunk is queued as tx_pending and we poll until it's consumed
-     * by the uIP periodic handler before sending the next chunk. */
+     * uIP は 1 セグメントずつ ACK を待つ前提なので、
+     * 前回送信分の ACK が返るまでは tx_buf を再利用しない。 */
     u_int8_t *src = (u_int8_t *)buf;
     int total_sent = 0;
 
     while (total_sent < len) {
       int chunk = len - total_sent;
+      int send_limit;
       u_int32_t deadline;
 
-      if (chunk > SOCK_TXBUF_SIZE)
-        chunk = SOCK_TXBUF_SIZE;
+      send_limit = socket_tcp_send_limit(sk);
+      if (chunk > send_limit)
+        chunk = send_limit;
 
-      /* Wait for any previous pending transmit to complete */
+      /* 前回分が ACK 済みになるまで待つ。 */
       deadline = kernel_tick + sk->timeout_ticks;
-      while (sk->tx_pending) {
+      while (sk->tx_pending ||
+             (sk->tcp_conn != 0 && uip_outstanding(sk->tcp_conn))) {
         disableInterrupt();
         network_poll();
         enableInterrupt();
         if ((int)(kernel_tick - deadline) >= 0)
           return total_sent > 0 ? total_sent : SOCK_ERR_TIMEOUT;
-        if (sk->state == SOCK_STATE_CLOSED)
+        if (sk->state == SOCK_STATE_CLOSED || sk->tcp_conn == 0)
           return total_sent > 0 ? total_sent : SOCK_ERR_REFUSED;
       }
 
@@ -747,6 +761,22 @@ PUBLIC int kern_sendto(int sockfd, void *buf, int len, int flags,
       enableInterrupt();
 
       total_sent += chunk;
+    }
+
+    /* 最後のチャンクも ACK 済みになるまで待ってから返す。 */
+    {
+      u_int32_t deadline = kernel_tick + sk->timeout_ticks;
+
+      while (sk->tx_pending ||
+             (sk->tcp_conn != 0 && uip_outstanding(sk->tcp_conn))) {
+        disableInterrupt();
+        network_poll();
+        enableInterrupt();
+        if ((int)(kernel_tick - deadline) >= 0)
+          return total_sent > 0 ? total_sent : SOCK_ERR_TIMEOUT;
+        if (sk->state == SOCK_STATE_CLOSED || sk->tcp_conn == 0)
+          return total_sent > 0 ? total_sent : SOCK_ERR_REFUSED;
+      }
     }
     return total_sent;
   }

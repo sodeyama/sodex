@@ -11,6 +11,12 @@ Scenarios (via request body):
   - With tools in request: SSE stream with tool_use block
   - Special prompt "error_test": SSE stream with error event
 
+Agent Integration Scenarios (Plan 18):
+  - "test_immediate": immediate text completion (no tools)
+  - "test_one_tool": one read_file tool call, then text completion
+  - "test_two_tools": list_dir -> read_file -> text completion
+  - "test_max_steps": always returns tool_use (get_system_info)
+
 Usage:
   python3 tests/mock_claude_server.py [port] [--tls]
   Default port: 4443, TLS enabled by default
@@ -33,14 +39,14 @@ def sse_event(event_name, data):
     return f"event: {event_name}\ndata: {json.dumps(data)}\n\n"
 
 
-def text_response_stream():
+def text_response_stream(text="Hello from mock Claude!", msg_id="msg_mock_001"):
     """Generate SSE events for a simple text response."""
     events = []
 
     events.append(sse_event("message_start", {
         "type": "message_start",
         "message": {
-            "id": "msg_mock_001",
+            "id": msg_id,
             "type": "message",
             "role": "assistant",
             "content": [],
@@ -58,12 +64,14 @@ def text_response_stream():
 
     events.append(sse_event("ping", {"type": "ping"}))
 
-    # Send text in chunks
-    for word in ["Hello", " from", " mock", " Claude!"]:
+    # Send text in chunks (split into words)
+    words = text.split(" ")
+    for i, word in enumerate(words):
+        prefix = " " if i > 0 else ""
         events.append(sse_event("content_block_delta", {
             "type": "content_block_delta",
             "index": 0,
-            "delta": {"type": "text_delta", "text": word}
+            "delta": {"type": "text_delta", "text": prefix + word}
         }))
 
     events.append(sse_event("content_block_stop", {
@@ -82,14 +90,17 @@ def text_response_stream():
     return events
 
 
-def tool_use_response_stream():
+def tool_use_response_stream(tool_name="read_file", tool_id="toolu_mock_01",
+                              tool_input_json='{"path": "/etc/hostname"}',
+                              text_before="Let me use that tool.",
+                              msg_id="msg_mock_tool"):
     """Generate SSE events for a tool_use response."""
     events = []
 
     events.append(sse_event("message_start", {
         "type": "message_start",
         "message": {
-            "id": "msg_mock_tool",
+            "id": msg_id,
             "type": "message",
             "role": "assistant",
             "content": [],
@@ -109,7 +120,7 @@ def tool_use_response_stream():
     events.append(sse_event("content_block_delta", {
         "type": "content_block_delta",
         "index": 0,
-        "delta": {"type": "text_delta", "text": "Let me read that file."}
+        "delta": {"type": "text_delta", "text": text_before}
     }))
 
     events.append(sse_event("content_block_stop", {
@@ -123,8 +134,8 @@ def tool_use_response_stream():
         "index": 1,
         "content_block": {
             "type": "tool_use",
-            "id": "toolu_mock_01",
-            "name": "read_file",
+            "id": tool_id,
+            "name": tool_name,
             "input": {}
         }
     }))
@@ -134,16 +145,7 @@ def tool_use_response_stream():
         "index": 1,
         "delta": {
             "type": "input_json_delta",
-            "partial_json": '{"path": '
-        }
-    }))
-
-    events.append(sse_event("content_block_delta", {
-        "type": "content_block_delta",
-        "index": 1,
-        "delta": {
-            "type": "input_json_delta",
-            "partial_json": '"/etc/hostname"}'
+            "partial_json": tool_input_json
         }
     }))
 
@@ -191,6 +193,108 @@ def error_response_stream():
     return events
 
 
+# ---------------------------------------------------------------------------
+# Agent Integration Scenario helpers (Plan 18)
+# ---------------------------------------------------------------------------
+
+def _count_tool_results(messages):
+    """Count the number of tool_result blocks across all user messages."""
+    count = 0
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    count += 1
+    return count
+
+
+def _find_scenario_keyword(messages):
+    """Search all messages for a known scenario keyword.
+
+    Returns the keyword string if found, else None.
+    """
+    keywords = ("test_immediate", "test_one_tool", "test_two_tools",
+                "test_max_steps")
+    for msg in messages:
+        content = msg.get("content", "")
+        # content may be a plain string or a list of blocks
+        if isinstance(content, str):
+            for kw in keywords:
+                if kw in content:
+                    return kw
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    text = block.get("text", "")
+                    if isinstance(text, str):
+                        for kw in keywords:
+                            if kw in text:
+                                return kw
+                elif isinstance(block, str):
+                    for kw in keywords:
+                        if kw in block:
+                            return kw
+    return None
+
+
+def _agent_scenario_events(scenario, tool_results_count):
+    """Return SSE events for a given agent integration scenario."""
+
+    if scenario == "test_immediate":
+        # Always return text with end_turn
+        return text_response_stream(
+            text="Immediate completion done.",
+            msg_id="msg_integ_imm")
+
+    if scenario == "test_one_tool":
+        if tool_results_count == 0:
+            # First turn: request read_file
+            return tool_use_response_stream(
+                tool_name="read_file",
+                tool_id="toolu_integ_01",
+                tool_input_json='{"path": "/etc/hostname"}',
+                text_before="Reading file.",
+                msg_id="msg_integ_1t_a")
+        else:
+            # After tool result: complete
+            return text_response_stream(
+                text="File content received",
+                msg_id="msg_integ_1t_b")
+
+    if scenario == "test_two_tools":
+        if tool_results_count == 0:
+            return tool_use_response_stream(
+                tool_name="list_dir",
+                tool_id="toolu_integ_2a",
+                tool_input_json='{"path": "/"}',
+                text_before="Listing directory.",
+                msg_id="msg_integ_2t_a")
+        elif tool_results_count == 1:
+            return tool_use_response_stream(
+                tool_name="read_file",
+                tool_id="toolu_integ_2b",
+                tool_input_json='{"path": "/etc/hostname"}',
+                text_before="Now reading file.",
+                msg_id="msg_integ_2t_b")
+        else:
+            return text_response_stream(
+                text="Done",
+                msg_id="msg_integ_2t_c")
+
+    if scenario == "test_max_steps":
+        # Always return a tool_use so the agent never ends naturally
+        return tool_use_response_stream(
+            tool_name="get_system_info",
+            tool_id=f"toolu_integ_ms_{tool_results_count}",
+            tool_input_json='{}',
+            text_before="Getting info.",
+            msg_id=f"msg_integ_ms_{tool_results_count}")
+
+    # Fallback (should not happen)
+    return text_response_stream(text="Unknown scenario", msg_id="msg_integ_unk")
+
+
 class MockClaudeHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         sys.stderr.write("[mock-claude] %s\n" % (format % args))
@@ -231,15 +335,32 @@ class MockClaudeHandler(BaseHTTPRequestHandler):
 
         # Determine scenario
         messages = request.get("messages", [])
-        last_msg = messages[-1]["content"] if messages else ""
         has_tools = "tools" in request
 
-        if last_msg == "error_test":
-            events = error_response_stream()
-        elif has_tools:
-            events = tool_use_response_stream()
+        # --- Agent integration scenarios (Plan 18) ---
+        scenario = _find_scenario_keyword(messages)
+        if scenario is not None:
+            tool_results_count = _count_tool_results(messages)
+            sys.stderr.write(
+                f"[mock-claude] agent-integ scenario={scenario} "
+                f"tool_results={tool_results_count}\n")
+            events = _agent_scenario_events(scenario, tool_results_count)
         else:
-            events = text_response_stream()
+            # --- Legacy scenario detection ---
+            last_msg = messages[-1]["content"] if messages else ""
+            if isinstance(last_msg, list):
+                # Extract text from content blocks
+                last_msg = " ".join(
+                    b.get("text", "") for b in last_msg
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+
+            if last_msg == "error_test":
+                events = error_response_stream()
+            elif has_tools:
+                events = tool_use_response_stream()
+            else:
+                events = text_response_stream()
 
         if is_stream:
             # SSE streaming response
@@ -255,7 +376,7 @@ class MockClaudeHandler(BaseHTTPRequestHandler):
                 time.sleep(0.05)  # Simulate streaming delay
         else:
             # Non-streaming response
-            if "error" in last_msg:
+            if isinstance(last_msg, str) and "error" in last_msg:
                 resp = {
                     "type": "error",
                     "error": {"type": "overloaded_error", "message": "Overloaded"}

@@ -49,6 +49,7 @@ UTF8DEMO = ${USRDIR}/bin/utf8demo
 MEMGROW = ${USRDIR}/bin/memgrow
 FSLARGE = ${USRDIR}/bin/fslarge
 AGENT   = ${USRDIR}/bin/agent
+AGENT_INTEG = ${USRDIR}/bin/agent_integ
 DIG     = ${USRDIR}/bin/dig
 CURL    = ${USRDIR}/bin/curl
 CLAUDE  = ${USRDIR}/bin/claude
@@ -85,6 +86,7 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/memgrow.o -o ${MEMGROW} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/fslarge.o -o ${FSLARGE} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/agent.o -o ${AGENT} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/agent_integ.o -o ${AGENT_INTEG} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/dig.o -o ${DIG} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/curl.o -o ${CURL} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/claude.o -o ${CLAUDE} ${STATIC_LIBS}

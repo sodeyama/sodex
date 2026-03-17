@@ -95,3 +95,118 @@ char* strncpy(char* dest, const char* src, size_t n)
     dest[i] = '\0';
   return dest;
 }
+
+char* strstr(const char *haystack, const char *needle)
+{
+  size_t nlen;
+
+  if (*needle == '\0')
+    return (char *)haystack;
+  nlen = strlen(needle);
+  for (; *haystack; haystack++) {
+    if (*haystack == *needle && strncmp(haystack, needle, nlen) == 0)
+      return (char *)haystack;
+  }
+  return NULL;
+}
+
+static int to_lower(int c)
+{
+  if (c >= 'A' && c <= 'Z')
+    return c + ('a' - 'A');
+  return c;
+}
+
+int strncasecmp(const char *s1, const char *s2, size_t n)
+{
+  size_t i;
+
+  for (i = 0; i < n; i++) {
+    int c1 = to_lower((unsigned char)s1[i]);
+    int c2 = to_lower((unsigned char)s2[i]);
+    if (c1 != c2)
+      return c1 - c2;
+    if (c1 == 0)
+      return 0;
+  }
+  return 0;
+}
+
+char* strcat(char *dest, const char *src)
+{
+  char *p = dest;
+
+  while (*p)
+    p++;
+  while (*src)
+    *p++ = *src++;
+  *p = '\0';
+  return dest;
+}
+
+char* strncat(char *dest, const char *src, size_t n)
+{
+  char *p = dest;
+  size_t i;
+
+  while (*p)
+    p++;
+  for (i = 0; i < n && src[i] != '\0'; i++)
+    p[i] = src[i];
+  p[i] = '\0';
+  return dest;
+}
+
+long strtol(const char *nptr, char **endptr, int base)
+{
+  const char *p = nptr;
+  long result = 0;
+  int negative = 0;
+  int digit;
+
+  /* skip whitespace */
+  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+    p++;
+
+  /* sign */
+  if (*p == '-') {
+    negative = 1;
+    p++;
+  } else if (*p == '+') {
+    p++;
+  }
+
+  /* auto-detect base */
+  if (base == 0) {
+    if (*p == '0' && (p[1] == 'x' || p[1] == 'X')) {
+      base = 16;
+      p += 2;
+    } else if (*p == '0') {
+      base = 8;
+      p++;
+    } else {
+      base = 10;
+    }
+  } else if (base == 16 && *p == '0' && (p[1] == 'x' || p[1] == 'X')) {
+    p += 2;
+  }
+
+  while (*p) {
+    if (*p >= '0' && *p <= '9')
+      digit = *p - '0';
+    else if (*p >= 'a' && *p <= 'f')
+      digit = *p - 'a' + 10;
+    else if (*p >= 'A' && *p <= 'F')
+      digit = *p - 'A' + 10;
+    else
+      break;
+    if (digit >= base)
+      break;
+    result = result * base + digit;
+    p++;
+  }
+
+  if (endptr)
+    *endptr = (char *)p;
+  return negative ? -result : result;
+}

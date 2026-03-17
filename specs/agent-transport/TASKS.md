@@ -2,17 +2,56 @@
 
 `specs/agent-transport/README.md` の Plan 群を着手単位に分解したタスクリスト。
 
+**方針**: 全コンポーネントをユーザランドで構築する。
+
+## Phase 0: ユーザランド基盤整備
+
+### 00-A: libc 拡張
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [x] | AT-P00-01 | `printf` に `%d` と `%u` フォーマット指定子を追加する | 00 | なし | `printf("%d", -42)` で `-42` が出力される |
+| [x] | AT-P00-02 | `vsnprintf()` / `snprintf()` を実装する | 00 | AT-P00-01 | バッファに `%s`, `%d`, `%u`, `%x`, `%c` をフォーマット出力できる |
+| [x] | AT-P00-03 | `strstr()` を実装する | 00 | なし | `strstr("foo\r\n\r\nbar", "\r\n\r\n")` が正しい位置を返す |
+| [x] | AT-P00-04 | `strncasecmp()` を実装する | 00 | なし | `strncasecmp("Content-Length", "content-length", 14)` が 0 を返す |
+| [x] | AT-P00-05 | `strtol()` を実装する | 00 | なし | `strtol("12345", NULL, 10)` が 12345 を返す。16進数にも対応 |
+| [x] | AT-P00-06 | `strcat()` / `strncat()` を実装する | 00 | なし | 文字列連結が正しく動作する |
+| [x] | AT-P00-07 | `debug_printf()` を実装する（debug_write syscall 経由でシリアル出力） | 00 | AT-P00-02 | `debug_printf("tick=%d\n", 100)` がシリアルに出力される |
+| [x] | AT-P00-08 | libc 拡張の host 単体テストを書いて通す | 00 | AT-P00-01〜07 | snprintf, strstr, strncasecmp, strtol の全テストが PASS |
+
+### 00-B: カーネルソケット改修
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [x] | AT-P00-09 | ソケットエラーコードを `socket.h` に定義する | 00 | なし | SOCK_ERR_TIMEOUT, SOCK_ERR_REFUSED, SOCK_ERR_ARP_FAIL 等が定義される |
+| [x] | AT-P00-10 | `kern_connect()` のタイムアウトを PIT tick ベースに書き換える | 00 | AT-P00-09 | イテレーション数ではなく実時間（10秒）でタイムアウトする |
+| [x] | AT-P00-11 | `kern_connect()` でエラー種別（timeout/refused/ARP失敗）を区別する | 00 | AT-P00-09, AT-P00-10 | uIP の状態から適切なエラーコードが返る |
+| [x] | AT-P00-12 | `kern_recvfrom()` のタイムアウトを PIT tick ベースに書き換える | 00 | なし | `timeout_ticks` フィールドの値で実時間タイムアウトする |
+| [x] | AT-P00-13 | `kern_close_socket()` のクローズ待ちを PIT tick ベースにする | 00 | なし | イテレーション数ではなく実時間でクローズ待ちが終わる |
+| [x] | AT-P00-14 | `SOCK_RXBUF_SIZE` を 4096 → 8192 に拡張する | 00 | なし | 8KB のデータを 1 ソケットで受信できる |
+| [x] | AT-P00-15 | `kern_sendto()` (TCP) で MSS 超のデータを分割送信する | 00 | なし | 2000 バイトのデータを 1 回の kern_send() で送れる |
+
+### 00-C: setsockopt syscall
+
+| 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
+|---|---|---|---|---|---|
+| [x] | AT-P00-16 | カーネル側 `kern_setsockopt()` を実装する | 00 | AT-P00-12 | SO_RCVTIMEO でソケットの recv タイムアウトを設定できる |
+| [x] | AT-P00-17 | `SYS_CALL_SETSOCKOPT` (414) を syscalldef.h と syscall.c に登録する | 00 | AT-P00-16 | syscall テーブルに登録される |
+| [x] | AT-P00-18 | ユーザ空間の syscall ラッパー `setsockopt.S` を追加する | 00 | AT-P00-17 | ユーザ空間から `setsockopt()` が呼べる |
+| [x] | AT-P00-19 | `sys/socket.h` に `setsockopt()` 宣言と `SO_RCVTIMEO` を追加する | 00 | AT-P00-18 | ヘッダをインクルードしてコンパイルできる |
+| [ ] | AT-P00-20 | QEMU スモークテスト: connect/recv タイムアウト + setsockopt 動作確認 | 00 | AT-P00-10〜19 | 固定 IP への connect タイムアウト、setsockopt 後の recv タイムアウトが正しい |
+
 ## Phase A: 平文 HTTP + JSON
 
 | 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
 |---|---|---|---|---|---|
-| [ ] | AT-01 | `kern_connect()` のタイムアウトを PIT tick ベースに書き換える | 01 | なし | イテレーション数ではなく実時間でタイムアウトする |
-| [ ] | AT-02 | TCP 接続エラーを種別（timeout/refused/ARP 失敗）で区別する | 01 | AT-01 | エラーコードで切り分けできる |
-| [ ] | AT-03 | connect/close サイクルの安定性を確認する | 01 | AT-01, AT-02 | 3 回連続 connect/close が通る |
+| [ ] | AT-01 | ユーザランドから TCP connect/send/recv/close のサイクルを確認する | 01 | Phase 0 | ユーザ空間プロセスから `10.0.2.2:8080` に接続してデータ往復 |
+| [ ] | AT-02 | connect/close サイクルを 3 回繰り返して安定性を確認する | 01 | AT-01 | socket リークなし |
+| [ ] | AT-03 | 接続エラー時にエラーコードで切り分けできることを確認する | 01 | AT-01 | timeout/refused がユーザランドで判別できる |
 | [ ] | AT-04 | `http_client.h` にリクエスト/レスポンス構造体とエラーコードを定義する | 02 | なし | ヘッダがコンパイルできる |
-| [ ] | AT-05 | `http_build_request()` を実装する | 02 | AT-04 | GET/POST リクエスト文字列を正しく生成 |
-| [ ] | AT-06 | `http_parse_response_headers()` を実装する | 02 | AT-04 | ステータス行と Content-Length/Content-Type をパース |
-| [ ] | AT-07 | `http_do_request()` を実装する（平文 TCP 版） | 02 | AT-03, AT-05, AT-06 | connect → send → recv → close が 1 関数で回る |
+| [ ] | AT-05 | `http_build_request()` を実装する | 02 | AT-04, AT-P00-02 | GET/POST リクエスト文字列を正しく生成 |
+| [ ] | AT-06 | `http_parse_response_headers()` を実装する | 02 | AT-04, AT-P00-04, AT-P00-05 | ステータス行と Content-Length/Content-Type をパース |
+| [ ] | AT-07 | `http_do_request()` を実装する（平文 TCP 版） | 02 | AT-01, AT-05, AT-06 | connect → send → recv → close が 1 関数で回る |
 | [ ] | AT-08 | JSON トークナイザとツリービルダを実装する | 03 | なし | 6 型をパースしてトークン配列に格納 |
 | [ ] | AT-09 | JSON アクセサ（`json_find_key`, `json_array_get` 等）を実装する | 03 | AT-08 | ネスト構造のフィールドアクセスができる |
 | [ ] | AT-10 | JSON ライター（`jw_*` 系）を実装する | 03 | なし | Claude API リクエストボディを生成できる |
@@ -33,7 +72,7 @@
 | [ ] | AT-20 | PRNG を統合し、既存 SSH の PRNG を新エントロピーで初期化する | 06 | AT-19 | SSH の既存機能が壊れない |
 | [ ] | AT-21 | BearSSL ソースの最小サブセットを配置し、クロスコンパイルを通す | 07 | なし | `-m32 -nostdlib` でビルドエラーなし |
 | [ ] | AT-22 | libc スタブ（`memmove` 等）を BearSSL 向けに用意する | 07 | AT-21 | 未解決シンボルなしでリンクが通る |
-| [ ] | AT-23 | BearSSL の I/O コールバックを `kern_send`/`kern_recv` に接続する | 07 | AT-21, AT-22 | BearSSL の `br_sslio_*` が uIP ソケット経由で通信する |
+| [ ] | AT-23 | BearSSL の I/O コールバックを `send_msg`/`recv_msg` に接続する | 07 | AT-21, AT-22 | BearSSL の `br_sslio_*` がユーザ空間ソケット経由で通信する |
 | [ ] | AT-24 | BearSSL に PRNG コールバックを接続する | 07 | AT-20, AT-23 | TLS ハンドシェイクに暗号学的乱数が使われる |
 | [ ] | AT-25 | `tls_connect()` / `tls_send()` / `tls_recv()` / `tls_close()` を実装する | 08 | AT-23, AT-24, AT-17 | FQDN 指定で TLS 接続が成立する |
 | [ ] | AT-26 | 証明書ピンニングを実装する | 08 | AT-25 | `api.anthropic.com` のピンが通る |

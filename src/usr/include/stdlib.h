@@ -40,6 +40,6 @@ extern int kill(pid_t pid, int sig);
 
 int atoi(const char* nptr);
 int is_number(const char* nptr);
-
+long strtol(const char *nptr, char **endptr, int base);
 
 #endif /* _STDLIB_H */

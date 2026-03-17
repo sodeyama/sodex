@@ -114,6 +114,8 @@ PRIVATE void term_draw_cell(struct term_app *app,
                             int col, int row,
                             const struct term_cell *cell,
                             int cursor);
+PRIVATE void term_copy_back_to_front(struct term_app *app,
+                                     int x, int y, int width, int height);
 PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta);
 PRIVATE void term_present(struct term_app *app, int scroll_delta);
 PRIVATE char render_color(const struct term_cell *cell);
@@ -443,27 +445,61 @@ PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta)
          (size_t)(pixel_rows * app->fb.pitch));
 }
 
+PRIVATE void term_copy_back_to_front(struct term_app *app,
+                                     int x, int y, int width, int height)
+{
+  int row;
+  int col;
+
+  if (app == NULL || app->use_framebuffer == 0 ||
+      app->back_buffer == NULL || app->fb.base == NULL)
+    return;
+  if (width <= 0 || height <= 0)
+    return;
+
+  if (x < 0) {
+    width += x;
+    x = 0;
+  }
+  if (y < 0) {
+    height += y;
+    y = 0;
+  }
+  if (x >= app->fb.width || y >= app->fb.height)
+    return;
+  if (x + width > app->fb.width)
+    width = app->fb.width - x;
+  if (y + height > app->fb.height)
+    height = app->fb.height - y;
+  if (width <= 0 || height <= 0)
+    return;
+
+  for (row = 0; row < height; row++) {
+    volatile u_int32_t *dst =
+        (volatile u_int32_t *)((u_int8_t *)app->fb.base +
+                               (y + row) * app->fb.pitch + x * 4);
+    const u_int32_t *src =
+        (const u_int32_t *)(app->back_buffer +
+                            (y + row) * app->fb.pitch + x * 4);
+
+    for (col = 0; col < width; col++)
+      dst[col] = src[col];
+  }
+}
+
 PRIVATE void term_present(struct term_app *app, int scroll_delta)
 {
   int width;
   int height;
-  int row;
 
   if (app == NULL || app->use_framebuffer == 0 || app->back_buffer == NULL)
     return;
 
   if (scroll_delta > 0 && scroll_delta < app->surface.rows) {
-    int pixel_rows = scroll_delta * term_cell_height(app);
-    int copy_bytes;
-
-    if (pixel_rows > 0 && pixel_rows < app->fb.height) {
-      copy_bytes = (app->fb.height - pixel_rows) * app->fb.pitch;
-      memmove(app->fb.base,
-              (u_int8_t *)app->fb.base + pixel_rows * app->fb.pitch,
-              (size_t)copy_bytes);
-      app->metrics.present_copy_area +=
-          (u_int32_t)(app->fb.width * (app->fb.height - pixel_rows));
-    }
+    term_copy_back_to_front(app, 0, 0, app->fb.width, app->fb.height);
+    app->metrics.present_copy_area +=
+        (u_int32_t)(app->fb.width * app->fb.height);
+    return;
   }
 
   if (app->present_valid == 0)
@@ -474,16 +510,10 @@ PRIVATE void term_present(struct term_app *app, int scroll_delta)
   if (width <= 0 || height <= 0)
     return;
 
-  for (row = 0; row < height; row++) {
-    void *dst = (u_int8_t *)app->fb.base +
-                (app->present_top + row) * app->fb.pitch +
-                app->present_left * 4;
-    void *src = app->back_buffer +
-                (app->present_top + row) * app->fb.pitch +
-                app->present_left * 4;
-
-    memcpy(dst, src, (size_t)(width * 4));
-  }
+  term_copy_back_to_front(app,
+                          app->present_left,
+                          app->present_top,
+                          width, height);
   app->metrics.present_copy_area += (u_int32_t)(width * height);
 }
 

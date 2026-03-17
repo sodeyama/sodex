@@ -95,10 +95,12 @@ PUBLIC void start_kernel()
   _kputs(" KERNEL: SETUP PIT\n");
   init_mem();
   _kputs(" KERNEL: SETUP KERNEL MEMORY\n");
-  init_paging();
-  _kputs(" KERNEL: SETUP PAGING\n");
 
 #ifdef KTEST_BUILD
+  /* ktest needs PSE paging before network tests to avoid boot page
+   * table fragility with large BSS.  Normal boot delays init_paging()
+   * until after DMA/PCI so VGA memory mapping is set up correctly. */
+  init_paging();
   run_kernel_tests();
   /* not reached */
 #endif
@@ -114,6 +116,8 @@ PUBLIC void start_kernel()
   init_fdc();
   _kputs(" KERNEL: SETUP FDC\n");
 #endif
+  init_paging();
+  _kputs(" KERNEL: SETUP PAGING\n");
   _kputs(" KERNEL: SETUP PCI\n");
   init_pci();
   font_registry_init();

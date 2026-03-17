@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include <cell_renderer.h>
 #include <font16x16.h>
+#include <string.h>
 
 TEST(init_computes_grid_size) {
     struct cell_renderer renderer;
@@ -127,6 +128,38 @@ TEST(draws_wide_utf8_glyph_from_font_pack) {
     ASSERT(saw_fg);
 }
 
+TEST(present_copies_back_buffer_into_front_buffer) {
+    struct cell_renderer renderer;
+    struct fb_info info;
+    struct term_cell cell;
+    u_int32_t front_pixels[24 * 48];
+    u_int32_t back_pixels[24 * 48];
+
+    memset(front_pixels, 0, sizeof(front_pixels));
+    memset(back_pixels, 0, sizeof(back_pixels));
+    info.available = 1;
+    info.width = font_default_cell_width();
+    info.height = font_default_cell_height();
+    info.pitch = info.width * 4;
+    info.bpp = 32;
+    info.size = sizeof(front_pixels);
+    info.base = front_pixels;
+
+    ASSERT_EQ(cell_renderer_init(&renderer, &info), 0);
+    ASSERT_EQ(cell_renderer_set_back_buffer(&renderer, back_pixels, sizeof(back_pixels)), 0);
+
+    cell.ch = 'A';
+    cell.fg = TERM_COLOR_GREEN;
+    cell.bg = TERM_COLOR_BLACK;
+    cell.attr = 0;
+    cell.width = 1;
+    cell_renderer_draw_cell(&renderer, 0, 0, &cell, 0);
+    ASSERT_EQ(front_pixels[0], 0x000000);
+
+    cell_renderer_present(&renderer, 0, 0, info.width, info.height);
+    ASSERT(front_pixels[0] == back_pixels[0]);
+}
+
 int main(void)
 {
     printf("=== cell renderer tests ===\n");
@@ -135,6 +168,7 @@ int main(void)
     RUN_TEST(draw_cell_paints_foreground_and_background);
     RUN_TEST(cursor_swaps_foreground_and_background);
     RUN_TEST(draws_wide_utf8_glyph_from_font_pack);
+    RUN_TEST(present_copies_back_buffer_into_front_buffer);
 
     TEST_REPORT();
 }

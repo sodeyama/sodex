@@ -127,6 +127,7 @@ static pid_t init_spawn_command(const char *command)
     set_foreground_pid(STDIN_FILENO, 0);
     return -1;
   }
+  init_debug_value("AUDIT init_spawned=", argv[0]);
   set_foreground_pid(STDIN_FILENO, pid);
   return pid;
 }
@@ -198,6 +199,7 @@ int main(int argc, char **argv)
       sleep_ticks(1);
       continue;
     }
+    init_debug_log("AUDIT init_child_reaped\n");
     if (pid == foreground_pid) {
       set_foreground_pid(STDIN_FILENO, 0);
       foreground_pid = init_spawn_command(respawn);

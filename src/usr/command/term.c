@@ -44,6 +44,8 @@ struct term_metrics {
   u_int32_t present_copy_area;
   u_int32_t scroll_fast_path_count;
   u_int32_t scroll_full_fallback_count;
+  u_int32_t render_start_tick;
+  u_int32_t render_end_tick;
 };
 
 enum term_ime_action {
@@ -69,7 +71,14 @@ struct term_app {
   int last_ime_overlay_width;
   int last_ime_overlay_start_col;
   int last_scroll_count;
+  int present_left;
+  int present_top;
+  int present_right;
+  int present_bottom;
+  int present_valid;
   u_int32_t long_output_base;
+  u_int8_t *back_buffer;
+  u_int32_t back_buffer_size;
   struct fb_info fb;
   struct cell_renderer renderer;
   struct terminal_surface surface;
@@ -80,17 +89,11 @@ struct term_app {
   int scroll_len;
   struct ime_state ime;
   struct term_cell last_ime_overlay_cells[TERM_IME_OVERLAY_MAX_CELLS];
-  u_int8_t *back_buffer;
-  u_int32_t back_buffer_size;
-  int present_left;
-  int present_top;
-  int present_right;
-  int present_bottom;
-  int present_valid;
-  struct cell_renderer *active_renderer;
 };
 
 PRIVATE struct term_app term_state;
+
+PRIVATE void term_audit_log(const char *text);
 
 PRIVATE int term_init(struct term_app *app);
 PRIVATE int term_current_viewport(struct term_app *app, int *cols, int *rows);
@@ -114,8 +117,6 @@ PRIVATE void term_draw_cell(struct term_app *app,
                             int col, int row,
                             const struct term_cell *cell,
                             int cursor);
-PRIVATE void term_copy_back_to_front(struct term_app *app,
-                                     int x, int y, int width, int height);
 PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta);
 PRIVATE void term_present(struct term_app *app, int scroll_delta);
 PRIVATE char render_color(const struct term_cell *cell);
@@ -160,6 +161,8 @@ PRIVATE int append_overlay_codepoint(struct term_cell *cells, int len, int cap,
                                      unsigned char bg,
                                      unsigned char attr);
 
+u_int32_t get_kernel_tick(void);
+
 int main(int argc, char** argv)
 {
   struct term_app *app = &term_state;
@@ -171,16 +174,22 @@ int main(int argc, char** argv)
 
   app->master_fd = openpty();
   if (app->master_fd < 0) {
+    term_audit_log("AUDIT term_openpty_failed\n");
     write(1, "term: openpty failed\n", 21);
     return execve("/usr/bin/eshell", 0, 0);
   }
 
   set_input_mode(INPUT_MODE_RAW);
   if (term_init(app) < 0) {
+    term_audit_log("AUDIT term_init_failed\n");
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: console init failed\n", 26);
     return execve("/usr/bin/eshell", 0, 0);
   }
+  if (app->use_framebuffer != 0)
+    term_audit_log("AUDIT term_mode=framebuffer\n");
+  else
+    term_audit_log("AUDIT term_mode=console\n");
 
   if (app->use_framebuffer == 0)
     console_clear();
@@ -195,6 +204,7 @@ int main(int argc, char** argv)
   shell_argv[0] = "eshell";
   shell_argv[1] = NULL;
   if (execve_pty("/usr/bin/eshell", shell_argv, app->master_fd) < 0) {
+    term_audit_log("AUDIT term_execve_pty_failed\n");
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: fallback to eshell\n", 25);
     return execve("/usr/bin/eshell", 0, 0);
@@ -216,6 +226,13 @@ int main(int argc, char** argv)
   }
 
   return 0;
+}
+
+PRIVATE void term_audit_log(const char *text)
+{
+  if (text == NULL)
+    return;
+  debug_write(text, strlen(text));
 }
 
 PRIVATE int term_init(struct term_app *app)
@@ -262,27 +279,29 @@ PRIVATE void term_release_back_buffer(struct term_app *app)
     free(app->back_buffer);
   app->back_buffer = NULL;
   app->back_buffer_size = 0;
+  cell_renderer_set_back_buffer(&app->renderer, NULL, 0);
 }
 
 PRIVATE int term_prepare_back_buffer(struct term_app *app)
 {
-  u_int8_t *next;
-
-  if (app == NULL || app->use_framebuffer == 0 ||
-      app->fb.available == 0 || app->fb.base == NULL || app->fb.size == 0)
-    return -1;
-  if (app->back_buffer != NULL && app->back_buffer_size == app->fb.size)
-    return 0;
-
-  next = (u_int8_t *)malloc((size_t)app->fb.size);
-  if (next == NULL)
+  if (app == NULL || app->fb.available == 0 || app->fb.base == NULL ||
+      app->fb.size == 0)
     return -1;
 
-  if (app->back_buffer != NULL)
-    free(app->back_buffer);
-  app->back_buffer = next;
-  app->back_buffer_size = app->fb.size;
-  return 0;
+  if (app->back_buffer == NULL || app->back_buffer_size != app->fb.size) {
+    u_int8_t *next = (u_int8_t *)malloc((size_t)app->fb.size);
+
+    if (next == NULL)
+      return -1;
+    if (app->back_buffer != NULL)
+      free(app->back_buffer);
+    app->back_buffer = next;
+    app->back_buffer_size = app->fb.size;
+  }
+
+  return cell_renderer_set_back_buffer(&app->renderer,
+                                       app->back_buffer,
+                                       app->back_buffer_size);
 }
 
 PRIVATE int term_cell_width(const struct term_app *app)
@@ -320,8 +339,8 @@ PRIVATE int term_current_viewport(struct term_app *app, int *cols, int *rows)
     return 0;
   }
 
-  app->use_framebuffer = 0;
   term_release_back_buffer(app);
+  app->use_framebuffer = 0;
   *cols = console_cols();
   *rows = console_rows();
   return 0;
@@ -344,7 +363,7 @@ PRIVATE void term_mark_present_rect(struct term_app *app,
   int right;
   int bottom;
 
-  if (app == NULL || app->use_framebuffer == 0 || width <= 0 || height <= 0)
+  if (app == NULL || width <= 0 || height <= 0 || app->use_framebuffer == 0)
     return;
   if (x < 0) {
     width += x;
@@ -409,20 +428,14 @@ PRIVATE void term_draw_cell(struct term_app *app,
                             const struct term_cell *cell,
                             int cursor)
 {
-  struct cell_renderer *renderer;
   int width_cells = 1;
 
   if (app == NULL)
     return;
-  renderer = app->active_renderer != NULL ? app->active_renderer : &app->renderer;
-  if (cell != NULL &&
-      (cell->attr & TERM_ATTR_CONTINUATION) == 0 &&
-      cell->width > 0) {
+  if (cell != NULL && cell->width > 0 && (cell->attr & TERM_ATTR_CONTINUATION) == 0)
     width_cells = cell->width;
-  }
-  cell_renderer_draw_cell(renderer, col, row, cell, cursor);
-  if (app->back_buffer != NULL)
-    term_mark_cell_rect(app, col, row, width_cells);
+  cell_renderer_draw_cell(&app->renderer, col, row, cell, cursor);
+  term_mark_cell_rect(app, col, row, width_cells);
 }
 
 PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta)
@@ -445,76 +458,48 @@ PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta)
          (size_t)(pixel_rows * app->fb.pitch));
 }
 
-PRIVATE void term_copy_back_to_front(struct term_app *app,
-                                     int x, int y, int width, int height)
-{
-  int row;
-  int col;
-
-  if (app == NULL || app->use_framebuffer == 0 ||
-      app->back_buffer == NULL || app->fb.base == NULL)
-    return;
-  if (width <= 0 || height <= 0)
-    return;
-
-  if (x < 0) {
-    width += x;
-    x = 0;
-  }
-  if (y < 0) {
-    height += y;
-    y = 0;
-  }
-  if (x >= app->fb.width || y >= app->fb.height)
-    return;
-  if (x + width > app->fb.width)
-    width = app->fb.width - x;
-  if (y + height > app->fb.height)
-    height = app->fb.height - y;
-  if (width <= 0 || height <= 0)
-    return;
-
-  for (row = 0; row < height; row++) {
-    volatile u_int32_t *dst =
-        (volatile u_int32_t *)((u_int8_t *)app->fb.base +
-                               (y + row) * app->fb.pitch + x * 4);
-    const u_int32_t *src =
-        (const u_int32_t *)(app->back_buffer +
-                            (y + row) * app->fb.pitch + x * 4);
-
-    for (col = 0; col < width; col++)
-      dst[col] = src[col];
-  }
-}
-
 PRIVATE void term_present(struct term_app *app, int scroll_delta)
 {
   int width;
   int height;
+  int pixel_rows = 0;
+  int flush_needed = FALSE;
 
-  if (app == NULL || app->use_framebuffer == 0 || app->back_buffer == NULL)
+  if (app == NULL || app->use_framebuffer == 0)
     return;
 
   if (scroll_delta > 0 && scroll_delta < app->surface.rows) {
-    term_copy_back_to_front(app, 0, 0, app->fb.width, app->fb.height);
-    app->metrics.present_copy_area +=
-        (u_int32_t)(app->fb.width * app->fb.height);
-    fb_flush();
+    pixel_rows = scroll_delta * term_cell_height(app);
+    if (pixel_rows > 0 && pixel_rows < app->fb.height) {
+      int copy_bytes = (app->fb.height - pixel_rows) * app->fb.pitch;
+
+      memmove(app->fb.base,
+              (u_int8_t *)app->fb.base + pixel_rows * app->fb.pitch,
+              (size_t)copy_bytes);
+      app->metrics.present_copy_area +=
+          (u_int32_t)(app->fb.width * (app->fb.height - pixel_rows));
+      flush_needed = TRUE;
+    }
+  }
+
+  if (app->present_valid == 0) {
+    if (flush_needed != FALSE)
+      fb_flush();
     return;
   }
 
-  if (app->present_valid == 0)
-    return;
-
   width = app->present_right - app->present_left;
   height = app->present_bottom - app->present_top;
-  if (width <= 0 || height <= 0)
+  if (width <= 0 || height <= 0) {
+    if (flush_needed != FALSE)
+      fb_flush();
     return;
-
-  term_copy_back_to_front(app,
-                          app->present_left,
-                          app->present_top,
-                          width, height);
+  }
+  cell_renderer_present(&app->renderer,
+                        app->present_left,
+                        app->present_top,
+                        width,
+                        height);
   app->metrics.present_copy_area += (u_int32_t)(width * height);
   fb_flush();
 }
@@ -543,9 +528,9 @@ PRIVATE int sync_viewport(struct term_app *app)
   app->last_ime_overlay_start_col = 0;
   if (app->use_framebuffer == 0)
     console_clear();
-  else
-    term_prepare_back_buffer(app);
   replay_scrollback(app);
+  if (app->use_framebuffer != 0)
+    term_prepare_back_buffer(app);
   winsize.cols = cols;
   winsize.rows = rows;
   set_winsize(app->master_fd, &winsize);
@@ -763,40 +748,30 @@ PRIVATE void render_surface(struct term_app *app, int force)
   int row;
   int col;
 
+  app->metrics.render_start_tick = get_kernel_tick();
   if (dirty_before > (int)app->metrics.max_dirty_cells)
     app->metrics.max_dirty_cells = (u_int32_t)dirty_before;
   scroll_delta = app->surface.scroll_count - app->last_scroll_count;
 
   if (app->use_framebuffer != 0) {
-    struct cell_renderer back_renderer;
-    struct cell_renderer *draw_renderer = &app->renderer;
     const struct term_cell *cell;
 
     term_reset_present_bounds(app);
-    if (app->back_buffer != NULL) {
-      back_renderer = app->renderer;
-      back_renderer.fb.base = app->back_buffer;
-      back_renderer.fb.size = app->back_buffer_size;
-      draw_renderer = &back_renderer;
-    }
-    app->active_renderer = draw_renderer;
-
     if (force != FALSE) {
-      cell_renderer_clear(draw_renderer, 0x000000);
-      if (app->back_buffer != NULL)
-        term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);
-    } else if (scroll_delta > 0 && app->back_buffer != NULL) {
-      if (scroll_delta < app->surface.rows) {
-        term_scroll_back_buffer(app, scroll_delta);
-        app->metrics.scroll_fast_path_count++;
-        apply_scroll_fast_path = TRUE;
-      } else {
-        cell_renderer_clear(draw_renderer, 0x000000);
-        term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);
-        app->metrics.scroll_full_fallback_count++;
-        force = TRUE;
-        dirty_before = total_cells;
-      }
+      cell_renderer_clear(&app->renderer, 0x000000);
+      term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);
+    } else if (scroll_delta > 0 &&
+               scroll_delta < app->surface.rows &&
+               app->back_buffer != NULL) {
+      term_scroll_back_buffer(app, scroll_delta);
+      app->metrics.scroll_fast_path_count++;
+      apply_scroll_fast_path = TRUE;
+    } else if (scroll_delta > 0) {
+      cell_renderer_clear(&app->renderer, 0x000000);
+      term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);
+      app->metrics.scroll_full_fallback_count++;
+      force = TRUE;
+      dirty_before = total_cells;
     }
 
     for (row = 0; row < app->surface.rows; row++) {
@@ -854,9 +829,8 @@ PRIVATE void render_surface(struct term_app *app, int force)
     app->last_cursor_row = app->surface.cursor_row;
     app->cursor_valid = 1;
     render_ime_overlay(app, force);
-    if (app->back_buffer != NULL)
-      term_present(app, apply_scroll_fast_path != FALSE ? scroll_delta : 0);
-    app->active_renderer = NULL;
+    term_present(app, apply_scroll_fast_path != FALSE ? scroll_delta : 0);
+    app->metrics.render_end_tick = get_kernel_tick();
     app->metrics.render_cells += rendered;
     if (force != FALSE || dirty_before == total_cells)
       app->metrics.full_redraws++;
@@ -896,6 +870,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
   }
 
   app->metrics.render_cells += rendered;
+  app->metrics.render_end_tick = get_kernel_tick();
   if (force != FALSE || dirty_before == total_cells)
     app->metrics.full_redraws++;
   else
@@ -1050,6 +1025,10 @@ PRIVATE void emit_metric(struct term_app *app, const char *point,
   p = metric_append_uint(p, app->metrics.scroll_fast_path_count);
   p = metric_append_text(p, " scroll_full_fallback=");
   p = metric_append_uint(p, app->metrics.scroll_full_fallback_count);
+  p = metric_append_text(p, " render_start=");
+  p = metric_append_uint(p, app->metrics.render_start_tick);
+  p = metric_append_text(p, " render_end=");
+  p = metric_append_uint(p, app->metrics.render_end_tick);
   p = metric_append_text(p, " last_bytes=");
   p = metric_append_uint(p, last_bytes);
   p = metric_append_text(p, " last_cells=");

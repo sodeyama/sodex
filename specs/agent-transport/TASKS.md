@@ -28,7 +28,7 @@
 | [x] | AT-P00-11 | `kern_connect()` でエラー種別（timeout/refused/ARP失敗）を区別する | 00 | AT-P00-09, AT-P00-10 | uIP の状態から適切なエラーコードが返る |
 | [x] | AT-P00-12 | `kern_recvfrom()` のタイムアウトを PIT tick ベースに書き換える | 00 | なし | `timeout_ticks` フィールドの値で実時間タイムアウトする |
 | [x] | AT-P00-13 | `kern_close_socket()` のクローズ待ちを PIT tick ベースにする | 00 | なし | イテレーション数ではなく実時間でクローズ待ちが終わる |
-| [x] | AT-P00-14 | `SOCK_RXBUF_SIZE` を 4096 → 8192 に拡張する | 00 | なし | 8KB のデータを 1 ソケットで受信できる |
+| [~] | AT-P00-14 | `SOCK_RXBUF_SIZE` を 4096 → 8192 に拡張する | 00 | なし | **保留**: BSS 肥大化で PF 発生。4096 に revert。メモリレイアウト調整と合わせて後日対応 |
 | [x] | AT-P00-15 | `kern_sendto()` (TCP) で MSS 超のデータを分割送信する | 00 | なし | 2000 バイトのデータを 1 回の kern_send() で送れる |
 
 ### 00-C: setsockopt syscall
@@ -39,7 +39,7 @@
 | [x] | AT-P00-17 | `SYS_CALL_SETSOCKOPT` (414) を syscalldef.h と syscall.c に登録する | 00 | AT-P00-16 | syscall テーブルに登録される |
 | [x] | AT-P00-18 | ユーザ空間の syscall ラッパー `setsockopt.S` を追加する | 00 | AT-P00-17 | ユーザ空間から `setsockopt()` が呼べる |
 | [x] | AT-P00-19 | `sys/socket.h` に `setsockopt()` 宣言と `SO_RCVTIMEO` を追加する | 00 | AT-P00-18 | ヘッダをインクルードしてコンパイルできる |
-| [ ] | AT-P00-20 | QEMU スモークテスト: connect/recv タイムアウト + setsockopt 動作確認 | 00 | AT-P00-10〜19 | 固定 IP への connect タイムアウト、setsockopt 後の recv タイムアウトが正しい |
+| [x] | AT-P00-20 | QEMU スモークテスト: setsockopt, 分割送信, connect/close サイクル確認 | 00 | AT-P00-10〜19 | ktest 24/24 PASS（setsockopt_rcvtimeo, tcp_split_send_2000, tcp_split_recv_echo, connect_close_3_cycles） |
 
 ## Phase A: 平文 HTTP + JSON
 

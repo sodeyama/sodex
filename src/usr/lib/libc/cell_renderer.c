@@ -3,6 +3,8 @@
 #include <string.h>
 
 static u_int32_t renderer_palette_color(unsigned char index);
+static struct fb_info *renderer_target_fb(struct cell_renderer *renderer);
+static const struct fb_info *renderer_target_fb_const(const struct cell_renderer *renderer);
 static void renderer_resolve_colors(const struct term_cell *cell,
                                     int cursor,
                                     u_int32_t *fg,
@@ -30,11 +32,30 @@ static u_int32_t renderer_palette_color(unsigned char index)
   return renderer_palette[index & 0x0f];
 }
 
+static struct fb_info *renderer_target_fb(struct cell_renderer *renderer)
+{
+  if (renderer == 0)
+    return 0;
+  if (renderer->back_fb.base != 0)
+    return &renderer->back_fb;
+  return &renderer->front_fb;
+}
+
+static const struct fb_info *renderer_target_fb_const(const struct cell_renderer *renderer)
+{
+  if (renderer == 0)
+    return 0;
+  if (renderer->back_fb.base != 0)
+    return &renderer->back_fb;
+  return &renderer->front_fb;
+}
+
 static u_int32_t *renderer_row_ptr(struct cell_renderer *renderer,
                                    int x, int y)
 {
-  return (u_int32_t *)((u_int8_t *)renderer->fb.base +
-                       y * renderer->fb.pitch + x * 4);
+  struct fb_info *fb = renderer_target_fb(renderer);
+
+  return (u_int32_t *)((u_int8_t *)fb->base + y * fb->pitch + x * 4);
 }
 
 static void renderer_resolve_colors(const struct term_cell *cell,
@@ -74,13 +95,14 @@ static void renderer_putpixel(struct cell_renderer *renderer,
                               int x, int y, u_int32_t color)
 {
   u_int8_t *pixel;
+  const struct fb_info *fb = renderer_target_fb_const(renderer);
 
-  if (renderer == 0 || renderer->fb.base == 0)
+  if (renderer == 0 || fb == 0 || fb->base == 0)
     return;
-  if (x < 0 || y < 0 || x >= renderer->fb.width || y >= renderer->fb.height)
+  if (x < 0 || y < 0 || x >= fb->width || y >= fb->height)
     return;
 
-  pixel = (u_int8_t *)renderer->fb.base + y * renderer->fb.pitch + x * 4;
+  pixel = (u_int8_t *)fb->base + y * fb->pitch + x * 4;
   *(u_int32_t *)pixel = color;
 }
 
@@ -90,8 +112,9 @@ static void renderer_fill_rect(struct cell_renderer *renderer,
 {
   int py;
   int px;
+  const struct fb_info *fb = renderer_target_fb_const(renderer);
 
-  if (renderer == 0 || renderer->fb.base == 0 || width <= 0 || height <= 0)
+  if (renderer == 0 || fb == 0 || fb->base == 0 || width <= 0 || height <= 0)
     return;
   if (x < 0) {
     width += x;
@@ -101,12 +124,12 @@ static void renderer_fill_rect(struct cell_renderer *renderer,
     height += y;
     y = 0;
   }
-  if (x >= renderer->fb.width || y >= renderer->fb.height)
+  if (x >= fb->width || y >= fb->height)
     return;
-  if (x + width > renderer->fb.width)
-    width = renderer->fb.width - x;
-  if (y + height > renderer->fb.height)
-    height = renderer->fb.height - y;
+  if (x + width > fb->width)
+    width = fb->width - x;
+  if (y + height > fb->height)
+    height = fb->height - y;
   if (width <= 0 || height <= 0)
     return;
 
@@ -146,13 +169,13 @@ int cell_renderer_init(struct cell_renderer *renderer,
     return -1;
 
   memset(renderer, 0, sizeof(*renderer));
-  renderer->fb.available = info->available;
-  renderer->fb.width = info->width;
-  renderer->fb.height = info->height;
-  renderer->fb.pitch = info->pitch;
-  renderer->fb.bpp = info->bpp;
-  renderer->fb.base = info->base;
-  renderer->fb.size = info->size;
+  renderer->front_fb.available = info->available;
+  renderer->front_fb.width = info->width;
+  renderer->front_fb.height = info->height;
+  renderer->front_fb.pitch = info->pitch;
+  renderer->front_fb.bpp = info->bpp;
+  renderer->front_fb.base = info->base;
+  renderer->front_fb.size = info->size;
   renderer->cols = info->width / font_default_cell_width();
   renderer->rows = info->height / font_default_cell_height();
   if (renderer->cols <= 0 || renderer->rows <= 0)
@@ -161,18 +184,77 @@ int cell_renderer_init(struct cell_renderer *renderer,
   return 0;
 }
 
+int cell_renderer_set_back_buffer(struct cell_renderer *renderer,
+                                  void *base, u_int32_t size)
+{
+  if (renderer == 0)
+    return -1;
+  if (base == 0) {
+    memset(&renderer->back_fb, 0, sizeof(renderer->back_fb));
+    return 0;
+  }
+  if (size < renderer->front_fb.size)
+    return -1;
+
+  renderer->back_fb = renderer->front_fb;
+  renderer->back_fb.base = base;
+  renderer->back_fb.size = size;
+  return 0;
+}
+
+void cell_renderer_present(struct cell_renderer *renderer,
+                           int x, int y, int width, int height)
+{
+  const struct fb_info *front;
+  const struct fb_info *back;
+  int row;
+  int row_width;
+
+  if (renderer == 0)
+    return;
+  front = &renderer->front_fb;
+  back = &renderer->back_fb;
+  if (front->base == 0 || back->base == 0 || width <= 0 || height <= 0)
+    return;
+  if (x < 0) {
+    width += x;
+    x = 0;
+  }
+  if (y < 0) {
+    height += y;
+    y = 0;
+  }
+  if (x >= front->width || y >= front->height)
+    return;
+  if (x + width > front->width)
+    width = front->width - x;
+  if (y + height > front->height)
+    height = front->height - y;
+  if (width <= 0 || height <= 0)
+    return;
+
+  row_width = width * 4;
+  for (row = 0; row < height; row++) {
+    void *dst = (u_int8_t *)front->base + (y + row) * front->pitch + x * 4;
+    void *src = (u_int8_t *)back->base + (y + row) * back->pitch + x * 4;
+
+    memcpy(dst, src, (size_t)row_width);
+  }
+}
+
 void cell_renderer_clear(struct cell_renderer *renderer, u_int32_t color)
 {
   int y;
   int x;
+  const struct fb_info *fb = renderer_target_fb_const(renderer);
 
-  if (renderer == 0 || renderer->fb.base == 0)
+  if (renderer == 0 || fb == 0 || fb->base == 0)
     return;
 
-  for (y = 0; y < renderer->fb.height; y++) {
+  for (y = 0; y < fb->height; y++) {
     u_int32_t *row = renderer_row_ptr(renderer, 0, y);
 
-    for (x = 0; x < renderer->fb.width; x++)
+    for (x = 0; x < fb->width; x++)
       row[x] = color;
   }
 }
@@ -197,8 +279,9 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
   int pixel_width;
   int draw_width;
   int draw_height;
+  const struct fb_info *fb = renderer_target_fb_const(renderer);
 
-  if (renderer == 0 || renderer->fb.base == 0)
+  if (renderer == 0 || fb == 0 || fb->base == 0)
     return;
   if (col < 0 || row < 0 || col >= renderer->cols || row >= renderer->rows)
     return;
@@ -233,10 +316,10 @@ void cell_renderer_draw_cell(struct cell_renderer *renderer,
   pixel_width = font_default_pixels_for_cells(width);
   draw_width = pixel_width;
   draw_height = cell_height;
-  if (cell_x + draw_width > renderer->fb.width)
-    draw_width = renderer->fb.width - cell_x;
-  if (cell_y + draw_height > renderer->fb.height)
-    draw_height = renderer->fb.height - cell_y;
+  if (cell_x + draw_width > fb->width)
+    draw_width = fb->width - cell_x;
+  if (cell_y + draw_height > fb->height)
+    draw_height = fb->height - cell_y;
   if (draw_width <= 0 || draw_height <= 0)
     return;
 

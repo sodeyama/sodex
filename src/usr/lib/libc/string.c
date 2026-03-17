@@ -1,6 +1,40 @@
 #include <sodex/const.h>
 #include <string.h>
 
+void *memmove(void *dest, const void *src, size_t n)
+{
+  unsigned char *dst = (unsigned char *)dest;
+  const unsigned char *from = (const unsigned char *)src;
+  size_t i;
+
+  if (dst == from || n == 0)
+    return dest;
+
+  if (dst < from) {
+    for (i = 0; i < n; i++)
+      dst[i] = from[i];
+  } else {
+    for (i = n; i > 0; i--)
+      dst[i - 1] = from[i - 1];
+  }
+
+  return dest;
+}
+
+int memcmp(const void *s1, const void *s2, size_t n)
+{
+  const unsigned char *left = (const unsigned char *)s1;
+  const unsigned char *right = (const unsigned char *)s2;
+  size_t i;
+
+  for (i = 0; i < n; i++) {
+    if (left[i] != right[i])
+      return (int)left[i] - (int)right[i];
+  }
+
+  return 0;
+}
+
 size_t strlen(const char* s)
 {
   const char* str = s;

@@ -41,6 +41,11 @@ struct term_metrics {
   u_int32_t render_cells;
   u_int32_t max_dirty_cells;
   u_int32_t long_output_marks;
+  u_int32_t present_copy_area;
+  u_int32_t scroll_fast_path_count;
+  u_int32_t scroll_full_fallback_count;
+  u_int32_t render_start_tick;
+  u_int32_t render_end_tick;
 };
 
 enum term_ime_action {
@@ -66,7 +71,14 @@ struct term_app {
   int last_ime_overlay_width;
   int last_ime_overlay_start_col;
   int last_scroll_count;
+  int present_left;
+  int present_top;
+  int present_right;
+  int present_bottom;
+  int present_valid;
   u_int32_t long_output_base;
+  u_int8_t *back_buffer;
+  u_int32_t back_buffer_size;
   struct fb_info fb;
   struct cell_renderer renderer;
   struct terminal_surface surface;
@@ -81,14 +93,32 @@ struct term_app {
 
 PRIVATE struct term_app term_state;
 
+PRIVATE void term_audit_log(const char *text);
+
 PRIVATE int term_init(struct term_app *app);
 PRIVATE int term_current_viewport(struct term_app *app, int *cols, int *rows);
 PRIVATE int sync_viewport(struct term_app *app);
+PRIVATE void term_release_back_buffer(struct term_app *app);
+PRIVATE int term_prepare_back_buffer(struct term_app *app);
+PRIVATE int term_cell_width(const struct term_app *app);
+PRIVATE int term_cell_height(const struct term_app *app);
+PRIVATE int term_pixels_for_cells(const struct term_app *app, int cells);
 PRIVATE int pump_master(struct term_app *app);
 PRIVATE int pump_keys(struct term_app *app);
 PRIVATE int translate_key(struct term_app *app, struct key_event *event,
                           char *buf, int *needs_redraw);
 PRIVATE void render_surface(struct term_app *app, int force);
+PRIVATE void term_reset_present_bounds(struct term_app *app);
+PRIVATE void term_mark_present_rect(struct term_app *app,
+                                    int x, int y, int width, int height);
+PRIVATE void term_mark_cell_rect(struct term_app *app,
+                                 int col, int row, int width_cells);
+PRIVATE void term_draw_cell(struct term_app *app,
+                            int col, int row,
+                            const struct term_cell *cell,
+                            int cursor);
+PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta);
+PRIVATE void term_present(struct term_app *app, int scroll_delta);
 PRIVATE char render_color(const struct term_cell *cell);
 PRIVATE char render_char(const struct term_cell *cell);
 PRIVATE void reset_surface(struct term_app *app);
@@ -131,6 +161,8 @@ PRIVATE int append_overlay_codepoint(struct term_cell *cells, int len, int cap,
                                      unsigned char bg,
                                      unsigned char attr);
 
+u_int32_t get_kernel_tick(void);
+
 int main(int argc, char** argv)
 {
   struct term_app *app = &term_state;
@@ -142,16 +174,22 @@ int main(int argc, char** argv)
 
   app->master_fd = openpty();
   if (app->master_fd < 0) {
+    term_audit_log("AUDIT term_openpty_failed\n");
     write(1, "term: openpty failed\n", 21);
     return execve("/usr/bin/eshell", 0, 0);
   }
 
   set_input_mode(INPUT_MODE_RAW);
   if (term_init(app) < 0) {
+    term_audit_log("AUDIT term_init_failed\n");
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: console init failed\n", 26);
     return execve("/usr/bin/eshell", 0, 0);
   }
+  if (app->use_framebuffer != 0)
+    term_audit_log("AUDIT term_mode=framebuffer\n");
+  else
+    term_audit_log("AUDIT term_mode=console\n");
 
   if (app->use_framebuffer == 0)
     console_clear();
@@ -166,6 +204,7 @@ int main(int argc, char** argv)
   shell_argv[0] = "eshell";
   shell_argv[1] = NULL;
   if (execve_pty("/usr/bin/eshell", shell_argv, app->master_fd) < 0) {
+    term_audit_log("AUDIT term_execve_pty_failed\n");
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: fallback to eshell\n", 25);
     return execve("/usr/bin/eshell", 0, 0);
@@ -187,6 +226,13 @@ int main(int argc, char** argv)
   }
 
   return 0;
+}
+
+PRIVATE void term_audit_log(const char *text)
+{
+  if (text == NULL)
+    return;
+  debug_write(text, strlen(text));
 }
 
 PRIVATE int term_init(struct term_app *app)
@@ -220,7 +266,63 @@ PRIVATE int term_init(struct term_app *app)
   blank.ch = ' ';
   terminal_surface_reset(&app->surface, &blank);
   terminal_surface_mark_all_dirty(&app->surface);
+  if (app->use_framebuffer != 0)
+    term_prepare_back_buffer(app);
   return 0;
+}
+
+PRIVATE void term_release_back_buffer(struct term_app *app)
+{
+  if (app == NULL)
+    return;
+  if (app->back_buffer != NULL)
+    free(app->back_buffer);
+  app->back_buffer = NULL;
+  app->back_buffer_size = 0;
+  cell_renderer_set_back_buffer(&app->renderer, NULL, 0);
+}
+
+PRIVATE int term_prepare_back_buffer(struct term_app *app)
+{
+  if (app == NULL || app->fb.available == 0 || app->fb.base == NULL ||
+      app->fb.size == 0)
+    return -1;
+
+  if (app->back_buffer == NULL || app->back_buffer_size != app->fb.size) {
+    u_int8_t *next = (u_int8_t *)malloc((size_t)app->fb.size);
+
+    if (next == NULL)
+      return -1;
+    if (app->back_buffer != NULL)
+      free(app->back_buffer);
+    app->back_buffer = next;
+    app->back_buffer_size = app->fb.size;
+  }
+
+  return cell_renderer_set_back_buffer(&app->renderer,
+                                       app->back_buffer,
+                                       app->back_buffer_size);
+}
+
+PRIVATE int term_cell_width(const struct term_app *app)
+{
+  if (app == NULL || app->renderer.cols <= 0 || app->fb.width <= 0)
+    return 0;
+  return app->fb.width / app->renderer.cols;
+}
+
+PRIVATE int term_cell_height(const struct term_app *app)
+{
+  if (app == NULL || app->renderer.rows <= 0 || app->fb.height <= 0)
+    return 0;
+  return app->fb.height / app->renderer.rows;
+}
+
+PRIVATE int term_pixels_for_cells(const struct term_app *app, int cells)
+{
+  if (cells <= 0)
+    cells = 1;
+  return term_cell_width(app) * cells;
 }
 
 PRIVATE int term_current_viewport(struct term_app *app, int *cols, int *rows)
@@ -237,10 +339,160 @@ PRIVATE int term_current_viewport(struct term_app *app, int *cols, int *rows)
     return 0;
   }
 
+  term_release_back_buffer(app);
   app->use_framebuffer = 0;
   *cols = console_cols();
   *rows = console_rows();
   return 0;
+}
+
+PRIVATE void term_reset_present_bounds(struct term_app *app)
+{
+  if (app == NULL)
+    return;
+  app->present_left = 0;
+  app->present_top = 0;
+  app->present_right = 0;
+  app->present_bottom = 0;
+  app->present_valid = 0;
+}
+
+PRIVATE void term_mark_present_rect(struct term_app *app,
+                                    int x, int y, int width, int height)
+{
+  int right;
+  int bottom;
+
+  if (app == NULL || width <= 0 || height <= 0 || app->use_framebuffer == 0)
+    return;
+  if (x < 0) {
+    width += x;
+    x = 0;
+  }
+  if (y < 0) {
+    height += y;
+    y = 0;
+  }
+  if (x >= app->fb.width || y >= app->fb.height)
+    return;
+  if (x + width > app->fb.width)
+    width = app->fb.width - x;
+  if (y + height > app->fb.height)
+    height = app->fb.height - y;
+  if (width <= 0 || height <= 0)
+    return;
+
+  right = x + width;
+  bottom = y + height;
+  if (app->present_valid == 0) {
+    app->present_left = x;
+    app->present_top = y;
+    app->present_right = right;
+    app->present_bottom = bottom;
+    app->present_valid = 1;
+    return;
+  }
+  if (x < app->present_left)
+    app->present_left = x;
+  if (y < app->present_top)
+    app->present_top = y;
+  if (right > app->present_right)
+    app->present_right = right;
+  if (bottom > app->present_bottom)
+    app->present_bottom = bottom;
+}
+
+PRIVATE void term_mark_cell_rect(struct term_app *app,
+                                 int col, int row, int width_cells)
+{
+  int cell_width;
+  int cell_height;
+  int pixel_width;
+
+  if (width_cells <= 0)
+    width_cells = 1;
+  cell_width = term_cell_width(app);
+  cell_height = term_cell_height(app);
+  pixel_width = term_pixels_for_cells(app, width_cells);
+  if (cell_width <= 0 || cell_height <= 0 || pixel_width <= 0)
+    return;
+  term_mark_present_rect(app,
+                         col * cell_width,
+                         row * cell_height,
+                         pixel_width,
+                         cell_height);
+}
+
+PRIVATE void term_draw_cell(struct term_app *app,
+                            int col, int row,
+                            const struct term_cell *cell,
+                            int cursor)
+{
+  int width_cells = 1;
+
+  if (app == NULL)
+    return;
+  if (cell != NULL && cell->width > 0 && (cell->attr & TERM_ATTR_CONTINUATION) == 0)
+    width_cells = cell->width;
+  cell_renderer_draw_cell(&app->renderer, col, row, cell, cursor);
+  term_mark_cell_rect(app, col, row, width_cells);
+}
+
+PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta)
+{
+  int pixel_rows;
+  int copy_bytes;
+
+  if (app == NULL || app->back_buffer == NULL || scroll_delta <= 0)
+    return;
+
+  pixel_rows = scroll_delta * term_cell_height(app);
+  if (pixel_rows <= 0 || pixel_rows >= app->fb.height)
+    return;
+
+  copy_bytes = (app->fb.height - pixel_rows) * app->fb.pitch;
+  memmove(app->back_buffer,
+          app->back_buffer + pixel_rows * app->fb.pitch,
+          (size_t)copy_bytes);
+  memset(app->back_buffer + copy_bytes, 0,
+         (size_t)(pixel_rows * app->fb.pitch));
+}
+
+PRIVATE void term_present(struct term_app *app, int scroll_delta)
+{
+  int width;
+  int height;
+  int pixel_rows = 0;
+
+  if (app == NULL || app->use_framebuffer == 0)
+    return;
+
+  if (scroll_delta > 0 && scroll_delta < app->surface.rows) {
+    pixel_rows = scroll_delta * term_cell_height(app);
+    if (pixel_rows > 0 && pixel_rows < app->fb.height) {
+      int copy_bytes = (app->fb.height - pixel_rows) * app->fb.pitch;
+
+      memmove(app->fb.base,
+              (u_int8_t *)app->fb.base + pixel_rows * app->fb.pitch,
+              (size_t)copy_bytes);
+      app->metrics.present_copy_area +=
+          (u_int32_t)(app->fb.width * (app->fb.height - pixel_rows));
+    }
+  }
+
+  if (app->present_valid == 0)
+    return;
+
+  width = app->present_right - app->present_left;
+  height = app->present_bottom - app->present_top;
+  if (width <= 0 || height <= 0)
+    return;
+  cell_renderer_present(&app->renderer,
+                        app->present_left,
+                        app->present_top,
+                        width,
+                        height);
+  app->metrics.present_copy_area += (u_int32_t)(width * height);
 }
 
 PRIVATE int sync_viewport(struct term_app *app)
@@ -268,6 +520,8 @@ PRIVATE int sync_viewport(struct term_app *app)
   if (app->use_framebuffer == 0)
     console_clear();
   replay_scrollback(app);
+  if (app->use_framebuffer != 0)
+    term_prepare_back_buffer(app);
   winsize.cols = cols;
   winsize.rows = rows;
   set_winsize(app->master_fd, &winsize);
@@ -481,17 +735,35 @@ PRIVATE void render_surface(struct term_app *app, int force)
   int dirty_before = force != FALSE ? total_cells : app->surface.dirty_count;
   u_int32_t rendered = 0;
   int scroll_delta;
+  int apply_scroll_fast_path = FALSE;
   int row;
   int col;
 
+  app->metrics.render_start_tick = get_kernel_tick();
   if (dirty_before > (int)app->metrics.max_dirty_cells)
     app->metrics.max_dirty_cells = (u_int32_t)dirty_before;
+  scroll_delta = app->surface.scroll_count - app->last_scroll_count;
 
   if (app->use_framebuffer != 0) {
     const struct term_cell *cell;
 
-    if (force != FALSE)
+    term_reset_present_bounds(app);
+    if (force != FALSE) {
       cell_renderer_clear(&app->renderer, 0x000000);
+      term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);
+    } else if (scroll_delta > 0 &&
+               scroll_delta < app->surface.rows &&
+               app->back_buffer != NULL) {
+      term_scroll_back_buffer(app, scroll_delta);
+      app->metrics.scroll_fast_path_count++;
+      apply_scroll_fast_path = TRUE;
+    } else if (scroll_delta > 0) {
+      cell_renderer_clear(&app->renderer, 0x000000);
+      term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);
+      app->metrics.scroll_full_fallback_count++;
+      force = TRUE;
+      dirty_before = total_cells;
+    }
 
     for (row = 0; row < app->surface.rows; row++) {
       for (col = 0; col < app->surface.cols; col++) {
@@ -508,12 +780,12 @@ PRIVATE void render_surface(struct term_app *app, int force)
           if (lead != NULL &&
               (lead->attr & TERM_ATTR_CONTINUATION) == 0 &&
               lead->width > 1) {
-            cell_renderer_draw_cell(&app->renderer, col - 1, row, lead, FALSE);
+            term_draw_cell(app, col - 1, row, lead, FALSE);
             rendered++;
             continue;
           }
         }
-        cell_renderer_draw_cell(&app->renderer, col, row, cell, FALSE);
+        term_draw_cell(app, col, row, cell, FALSE);
         rendered++;
       }
     }
@@ -525,10 +797,10 @@ PRIVATE void render_surface(struct term_app *app, int force)
                                    app->last_cursor_col,
                                    app->last_cursor_row);
       if (cell != NULL) {
-        cell_renderer_draw_cell(&app->renderer,
-                                app->last_cursor_col,
-                                app->last_cursor_row,
-                                cell, FALSE);
+        term_draw_cell(app,
+                       app->last_cursor_col,
+                       app->last_cursor_row,
+                       cell, FALSE);
         rendered++;
       }
     }
@@ -538,22 +810,23 @@ PRIVATE void render_surface(struct term_app *app, int force)
                                  app->surface.cursor_row);
     render_conversion_target(app);
     if (cell != NULL) {
-      cell_renderer_draw_cell(&app->renderer,
-                              app->surface.cursor_col,
-                              app->surface.cursor_row,
-                              cell, TRUE);
+      term_draw_cell(app,
+                     app->surface.cursor_col,
+                     app->surface.cursor_row,
+                     cell, TRUE);
       rendered++;
     }
     app->last_cursor_col = app->surface.cursor_col;
     app->last_cursor_row = app->surface.cursor_row;
     app->cursor_valid = 1;
     render_ime_overlay(app, force);
+    term_present(app, apply_scroll_fast_path != FALSE ? scroll_delta : 0);
+    app->metrics.render_end_tick = get_kernel_tick();
     app->metrics.render_cells += rendered;
     if (force != FALSE || dirty_before == total_cells)
       app->metrics.full_redraws++;
     else
       app->metrics.partial_redraws++;
-    scroll_delta = app->surface.scroll_count - app->last_scroll_count;
     if (scroll_delta > 0) {
       app->metrics.scroll_events++;
       app->metrics.scroll_lines += (u_int32_t)scroll_delta;
@@ -588,6 +861,7 @@ PRIVATE void render_surface(struct term_app *app, int force)
   }
 
   app->metrics.render_cells += rendered;
+  app->metrics.render_end_tick = get_kernel_tick();
   if (force != FALSE || dirty_before == total_cells)
     app->metrics.full_redraws++;
   else
@@ -712,7 +986,7 @@ PRIVATE char *metric_append_uint(char *dst, u_int32_t value)
 PRIVATE void emit_metric(struct term_app *app, const char *point,
                          u_int32_t last_bytes, u_int32_t last_cells)
 {
-  char buf[256];
+  char buf[384];
   char *p = buf;
 
   if (app->use_framebuffer == 0)
@@ -736,6 +1010,16 @@ PRIVATE void emit_metric(struct term_app *app, const char *point,
   p = metric_append_uint(p, app->metrics.max_dirty_cells);
   p = metric_append_text(p, " long_output_marks=");
   p = metric_append_uint(p, app->metrics.long_output_marks);
+  p = metric_append_text(p, " present_copy_area=");
+  p = metric_append_uint(p, app->metrics.present_copy_area);
+  p = metric_append_text(p, " scroll_fast_path=");
+  p = metric_append_uint(p, app->metrics.scroll_fast_path_count);
+  p = metric_append_text(p, " scroll_full_fallback=");
+  p = metric_append_uint(p, app->metrics.scroll_full_fallback_count);
+  p = metric_append_text(p, " render_start=");
+  p = metric_append_uint(p, app->metrics.render_start_tick);
+  p = metric_append_text(p, " render_end=");
+  p = metric_append_uint(p, app->metrics.render_end_tick);
   p = metric_append_text(p, " last_bytes=");
   p = metric_append_uint(p, last_bytes);
   p = metric_append_text(p, " last_cells=");
@@ -905,14 +1189,12 @@ PRIVATE void render_ime_overlay(struct term_app *app, int force)
     if (needs_redraw == 0)
       return;
     for (i = 0; i < clear_width; i++) {
-      cell_renderer_draw_cell(&app->renderer, clear_start_col + i, 0,
-                              &cell, FALSE);
+      term_draw_cell(app, clear_start_col + i, 0, &cell, FALSE);
     }
     for (i = 0; i < overlay_width && i < cell_len; i++) {
       if ((cells[i].attr & TERM_ATTR_CONTINUATION) != 0)
         continue;
-      cell_renderer_draw_cell(&app->renderer, overlay_start_col + i, 0,
-                              &cells[i], FALSE);
+      term_draw_cell(app, overlay_start_col + i, 0, &cells[i], FALSE);
     }
     memcpy(app->last_ime_overlay_cells, cells,
            sizeof(struct term_cell) * (size_t)overlay_width);
@@ -1032,7 +1314,7 @@ PRIVATE void render_conversion_target(struct term_app *app)
     marked.attr &= ~TERM_ATTR_REVERSE;
 
     if (app->use_framebuffer != 0)
-      cell_renderer_draw_cell(&app->renderer, col, row, &marked, FALSE);
+      term_draw_cell(app, col, row, &marked, FALSE);
     else
       console_putc_at(col, row, render_color(&marked), render_char(&marked));
 

@@ -28,7 +28,9 @@
 | [x] | AT-P00-11 | `kern_connect()` でエラー種別（timeout/refused/ARP失敗）を区別する | 00 | AT-P00-09, AT-P00-10 | uIP の状態から適切なエラーコードが返る |
 | [x] | AT-P00-12 | `kern_recvfrom()` のタイムアウトを PIT tick ベースに書き換える | 00 | なし | `timeout_ticks` フィールドの値で実時間タイムアウトする |
 | [x] | AT-P00-13 | `kern_close_socket()` のクローズ待ちを PIT tick ベースにする | 00 | なし | イテレーション数ではなく実時間でクローズ待ちが終わる |
-| [~] | AT-P00-14 | `SOCK_RXBUF_SIZE` を 4096 → 8192 に拡張する | 00 | なし | **保留**: BSS 肥大化で PF 発生。4096 に revert。メモリレイアウト調整と合わせて後日対応 |
+| [~] | AT-P00-14 | `SOCK_RXBUF_SIZE` を 4096 → 8192 に拡張する | 00 | AT-P00-14a | **保留**: BSS レイアウト変更で NE2000 ドライバに PF 発生（CR2=C03A5404, ne2000_rx_pending+4）。4096 に revert。下記 14a/14b で対応 |
+| [ ] | AT-P00-14a | NE2000 ドライバの `ne2000_rx_pending` 周辺の PF を修正する | 00 | なし | eip=C001081A の命令を特定し、配列境界/未初期化ポインタを修正。RXBUF=8192 で PF が出ない |
+| [ ] | AT-P00-14b | (保険) startup.S に `first_pg_tbl3` を追加し初期マップを 12MB に拡張する | 00 | なし | BSS が 8MB を超えても起動時 PF にならない。現時点では任意 |
 | [x] | AT-P00-15 | `kern_sendto()` (TCP) で MSS 超のデータを分割送信する | 00 | なし | 2000 バイトのデータを 1 回の kern_send() で送れる |
 
 ### 00-C: setsockopt syscall

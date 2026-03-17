@@ -236,3 +236,105 @@ int kern_setsockopt(int sockfd, int level, int optname,
 
 - 依存: なし（最初に着手する Plan）
 - 後続: Plan 01〜11 の全 Plan がこの基盤に依存
+
+---
+
+## 技術調査結果: SOCK_RXBUF_SIZE 拡張と Page Fault
+
+### 現象
+
+`SOCK_RXBUF_SIZE` を 4096 → 8192 に拡張すると、QEMU 上で NE2000 ドライバ初期化後に
+Page Fault が発生する (`CR2=C03A5404`)。4096 に戻すと正常動作する。
+
+### 調査結果
+
+#### カーネルメモリレイアウト
+
+| 項目 | RXBUF=4096 | RXBUF=8192 |
+|------|-----------|-----------|
+| `__bss_start` | `0xC0100000` (物理 1MB) | `0xC0100000` (物理 1MB) |
+| `__bss_end` | `0xC05B1DE8` (物理 5.7MB) | `0xC061DBB8` (物理 6.1MB) |
+| BSS サイズ | 約 4.9MB | 約 5.3MB |
+| `socket_table` | `0x16BC0` (約 93KB) | 約 158KB |
+
+#### 起動時ページテーブル (startup.S)
+
+- `first_pg_tbl1` + `first_pg_tbl2` = 4KB ページ × 1024 × 2 = **8MB マップ**
+- BSS は 5.7MB〜6.1MB で、いずれも 8MB 以内 → **初期マップ範囲内**
+
+#### 本ページング (page.c: init_paging)
+
+- PSE（4MB Page Size Extension）で PDE 768〜831 = 最大 256MB マップ
+- `init_paging()` は `start_kernel()` 内で `init_mem()` 後に呼ばれる
+- 呼ばれた時点で初期 8MB マップ → PSE ベースのフルマップに切り替わる
+
+#### PF の原因: BSS レイアウト変更による NE2000 ドライバへの影響
+
+- `CR2=C03A5404` = `ne2000_rx_pending` (`0xC03A5400`) + 4 バイト
+- NE2000 ドライバの BSS 内のアクセスで PF 発生
+- **初期マップの範囲外アクセスではない**（3.6MB は 8MB 以内）
+- RXBUF 拡張で `socket_table` が +65KB 増 → BSS 全体のレイアウトがシフト
+- レイアウト変更により、NE2000 ドライバの変数が異なるページ境界に配置され、
+  既存の潜在バグ（配列外アクセス or 未初期化ポインタ）が顕在化した可能性
+
+### 対応方針
+
+PF の根本原因は SOCK_RXBUF_SIZE ではなく、BSS レイアウト依存の NE2000 ドライババグ。
+対応は 2 段階:
+
+#### Phase 1: NE2000 ドライバの PF 修正（優先）
+
+1. `ne2000_rx_pending` 周辺のコードを精査
+2. PF 発生時の `eip=C001081A` をリンカマップで特定し、問題の命令を確認
+3. 配列境界チェック、未初期化ポインタ、アライメントの問題を修正
+4. 修正後に RXBUF=8192 で再テスト
+
+#### Phase 2: 初期ページテーブル拡張（将来のための保険）
+
+現在の 8MB マップは BSS 6MB で余裕が 2MB しかない。
+Agent Transport のユーザランドコード（BearSSL 等）を追加するとカーネル BSS がさらに増える可能性。
+
+**選択肢 A: startup.S で初期ページテーブルを 3 つに増やす（12MB マップ）**
+
+```asm
+# 現在: first_pg_tbl1 (0-4MB) + first_pg_tbl2 (4-8MB)
+# 追加: first_pg_tbl3 (8-12MB)
+
+.section ".bss.page_aligned","aw",@nobits
+first_pg_tbl3:
+  .space 1024*4
+
+# startup.S の初期化ループを 1024*3-1 に変更
+# ページディレクトリに 3 エントリ設定
+```
+
+- メリット: 単純、確実
+- デメリット: BSS に 4KB 追加（無視できるレベル）
+
+**選択肢 B: startup.S で PSE を使い 4MB ページを 2 エントリ設定（8MB マップ、ページテーブル不要）**
+
+```asm
+# CR4 で PSE を有効化
+movl %cr4, %eax
+orl  $0x10, %eax   # PSE bit
+movl %eax, %cr4
+
+# ページディレクトリに直接 4MB ページを設定
+# PDE[0]   = 0x00000083  (0-4MB, PS=1, RW=1, P=1)
+# PDE[1]   = 0x00400083  (4-8MB)
+# PDE[768] = 0x00000083  (higher half mirror)
+# PDE[769] = 0x00400083
+```
+
+- メリット: ページテーブル不要、PDE 追加だけで 4MB 単位で拡張可能
+- デメリット: PSE を起動時から使うので page.c との整合性を確認する必要がある
+
+**推奨**: 選択肢 A（ページテーブル追加）が最も安全。PSE は init_paging() で有効化済みなので、
+起動時は従来の 4KB ページテーブル方式を維持する方がデバッグしやすい。
+
+### 参考資料
+
+- [Higher Half x86 Bare Bones - OSDev Wiki](https://wiki.osdev.org/Higher_Half_x86_Bare_Bones)
+- [Kernel size considerations when initializing paging - OSDev Forum](https://forum.osdev.org/viewtopic.php?t=29134)
+- [PSE discussion - OSDev Forum](https://forum.osdev.org/viewtopic.php?f=1&t=29745)
+- [Paging - OSDev Wiki](https://wiki.osdev.org/Paging)

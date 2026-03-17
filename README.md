@@ -102,6 +102,9 @@ server runtime を headless で起動したい場合:
 bin/start.sh server-headless
 ```
 
+`server` / `server-headless` は既定で SSH port forward も有効にします。
+無効にしたいときは `--no-ssh` を付けてください。
+
 Docker 上で server runtime を常駐させたい場合:
 
 ```sh
@@ -110,6 +113,7 @@ mkdir -p build/log/server-runtime
 docker run --rm \
   -p 18080:18080 \
   -p 10023:10023 \
+  -p 10022:10022 \
   -v "$(pwd)/build/log/server-runtime:/var/log/sodex" \
   sodex-server-runtime
 ```
@@ -123,6 +127,8 @@ allowlist を変えるときは `SODEX_ADMIN_ALLOW_IP=...` を指定してくだ
 
 ready 条件は container の serial/stdout に `AUDIT server_runtime_ready ...` が出た時点です。
 `qemu_debug.log` と `monitor.sock` は mount した `/var/log/sodex` 配下に出ます。
+entrypoint は bind mount した log dir の owner で build / 起動するので、
+`mkdir -p build/log/server-runtime` のように先に作っておけば root 所有物を減らせます。
 
 `/dev/kvm` を使える Linux なら、`--device /dev/kvm -e SODEX_QEMU_ACCEL=kvm` を追加できます。
 
@@ -196,7 +202,7 @@ host 側ポートを変えたいときは `SODEX_HOST_SSH_PORT=11022 make test-q
 手で試すときは、まず overlay を含めて guest を SSH 付きで作り直して起動します。
 
 ```sh
-bin/restart.sh server-headless --ssh
+bin/restart.sh server-headless
 ```
 
 その後、別ターミナルから接続します。
@@ -212,6 +218,7 @@ ssh -tt -F /dev/null \
 ```
 
 既定 password は `root-secret` です。`SODEX_SSH_PASSWORD` を export している場合はその値で上書きされます。
+password 認証は 1 接続あたり 3 回失敗すると切断されます。
 login 後は `sodex />` prompt が出るので、`ls` / `pwd` / `cat` を実行でき、
 `Backspace`, `Ctrl-C`, `exit` も通ります。
 

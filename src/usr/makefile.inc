@@ -7,6 +7,6 @@ LIBAOBJ     = ${USR_OBJDIR}/lib/libc/libc.a
 
 STATIC_LIBS = ${CRTOBJ} ${STDLIB} ${LIBAOBJ}
 
-CFLAGS  = -m32 -nostdlib -ffreestanding -fno-builtin -fno-pie -fno-pic -Wall -Wno-int-conversion -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -fno-stack-protector
+CFLAGS  = -m32 -march=i486 -nostdlib -ffreestanding -fno-builtin -fno-pie -fno-pic -Wall -Wno-int-conversion -Wno-implicit-function-declaration -Wno-incompatible-pointer-types -fno-stack-protector -mno-mmx -mno-sse -mno-sse2
 ASFLAGS = --32
 LFLAGS  = -m elf_i386 -nostdlib

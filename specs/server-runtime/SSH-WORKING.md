@@ -54,6 +54,7 @@
 ### client 側
 
 - 現在の login は `password` auth 前提
+- 1 接続あたり password auth 3 回失敗で切断する
 - host 側に user の秘密鍵を置く前提ではない
 - README の手順でも `PubkeyAuthentication=no` を明示している
 
@@ -89,15 +90,17 @@
 
 ### 通常
 
-- `bin/start.sh --ssh`
-- QEMU の `hostfwd` だけを追加する
-- 既に SSH overlay を焼いた image を起動し直す用途向けで、fresh build の手順ではない
+- `bin/start.sh server` / `bin/start.sh server-headless` は既定で SSH を有効にする
+- 明示的に止めたいときだけ `--no-ssh` を付ける
+- `user` mode では必要なら `--ssh` を付ける
+- `bin/start.sh` は QEMU の `hostfwd` を足して、既に SSH overlay を焼いた image を起動し直す用途向け
+- fresh build の手順ではない
 
 ### overlay を含めて作り直す経路
 
-- `bin/restart.sh --ssh`
+- `bin/restart.sh server` / `bin/restart.sh server-headless` は既定で SSH overlay を生成する
 - `sodex-admin.conf` を生成して build し直してから起動する
-- 手動確認の既定手順は `bin/restart.sh server-headless --ssh` を使う
+- 手動確認の既定手順は `bin/restart.sh server-headless` を使う
 
 ### smoke
 
@@ -109,6 +112,12 @@
 - `ssh_signer_port` が設定されると、署名と curve25519 計算を host 側 signer に逃がせる構造がある
 - 既定経路では `ssh_signer_port=0` なので、通常は guest 側に注入した seed/material を使う
 - 補助実装は `tests/ssh_signer.c`
+
+## Docker 運用メモ
+
+- `docker/server-runtime/entrypoint.sh` は bind mount した log dir の owner を見て、その uid/gid で build / 起動する
+- 必要なら `SODEX_CONTAINER_UID` / `SODEX_CONTAINER_GID` で明示指定できる
+- これにより `build/log/server-runtime` 配下の log や `monitor.sock` が root 専用になりにくい
 
 ## 関連ファイル
 
@@ -136,6 +145,6 @@
 
 - server runtime の管理用途としては、まず HTTP / admin protocol が主
 - SSH は「最小 remote shell が通る」段階まで来ている
-- signer-less 既定で `make -C src test-qemu-ssh` と `bin/restart.sh server-headless --ssh` + README 手順の login は確認済み
+- signer-less 既定で `make -C src test-qemu-ssh` と `bin/restart.sh server-headless` + README 手順の login は確認済み
 - ただし運用面では fingerprint 固定と retry 制限がまだ弱い
 - そのため、現時点では完成済みの汎用 `sshd` と見なさず、最小機能の検証実装として扱うのが妥当

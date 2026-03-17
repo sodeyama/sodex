@@ -38,7 +38,7 @@ PRIVATE void fb_backend_put_cell(struct display_backend *backend,
                                  int x, int y, char color, char c)
 {
   const struct font_face *font;
-  const unsigned char *glyph;
+  const unsigned int *glyph;
   u_int32_t fg;
   u_int32_t bg;
   int px;

@@ -32,20 +32,46 @@ REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")" || {
 BUILD_ROOT="${SODEX_BUILD_ROOT:-$REPO_ROOT/build}"
 LOG_DIR="${SODEX_LOG_DIR:-$BUILD_ROOT/log}"
 SSH_OVERLAY_DIR="${SODEX_SSH_OVERLAY_DIR:-$LOG_DIR/ssh-rootfs-overlay}"
-ENABLE_SSH=0
+MODE="user"
+SSH_SELECTION="auto"
 SSH_GUEST_PORT="${SODEX_SSH_PORT:-10022}"
 
 for arg in "$@"; do
   case "$arg" in
+    user|server|server-headless|net)
+      MODE="$arg"
+      ;;
     --ssh|--ssh-host-port=*)
-      ENABLE_SSH=1
+      SSH_SELECTION="on"
       ;;
     --ssh-guest-port=*)
-      ENABLE_SSH=1
+      SSH_SELECTION="on"
       SSH_GUEST_PORT="${arg#*=}"
+      ;;
+    --no-ssh)
+      SSH_SELECTION="off"
       ;;
   esac
 done
+
+case "$SSH_SELECTION" in
+  on)
+    ENABLE_SSH=1
+    ;;
+  off)
+    ENABLE_SSH=0
+    ;;
+  *)
+    case "$MODE" in
+      server|server-headless)
+        ENABLE_SSH=1
+        ;;
+      *)
+        ENABLE_SSH=0
+        ;;
+    esac
+    ;;
+esac
 
 if [ "$ENABLE_SSH" -eq 1 ]; then
   if ! is_valid_port "$SSH_GUEST_PORT"; then

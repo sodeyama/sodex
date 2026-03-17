@@ -95,6 +95,8 @@ PUBLIC void start_kernel()
   _kputs(" KERNEL: SETUP PIT\n");
   init_mem();
   _kputs(" KERNEL: SETUP KERNEL MEMORY\n");
+  init_paging();
+  _kputs(" KERNEL: SETUP PAGING\n");
 
 #ifdef KTEST_BUILD
   run_kernel_tests();
@@ -112,8 +114,6 @@ PUBLIC void start_kernel()
   init_fdc();
   _kputs(" KERNEL: SETUP FDC\n");
 #endif
-  init_paging();
-  _kputs(" KERNEL: SETUP PAGING\n");
   _kputs(" KERNEL: SETUP PCI\n");
   init_pci();
   font_registry_init();

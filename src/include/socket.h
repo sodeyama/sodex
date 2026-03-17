@@ -43,7 +43,7 @@ struct wait_queue;
 #define TCP_CLOSE_TIMEOUT_TICKS     500   /* 5s at HZ=100 */
 
 #define SOCK_ACCEPT_BACKLOG_SIZE 4
-#define SOCK_RXBUF_SIZE  4096
+#define SOCK_RXBUF_SIZE  8192
 #define SOCK_TXBUF_SIZE  1460  /* Max TCP segment payload (MSS) */
 
 struct sockaddr_in {

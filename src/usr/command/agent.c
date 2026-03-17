@@ -430,6 +430,50 @@ static void test_http_mock_claude_error(void)
     }
 }
 
+/* ---- HTTP GET / → HTML ---- */
+static void test_http_get_html(void)
+{
+    struct http_request req;
+    struct http_response resp;
+    char recv_buf[4096];
+    int ret;
+
+    memset(&req, 0, sizeof(req));
+    req.method = "GET";
+    req.host = HOST_IP;
+    req.path = "/";
+    req.port = HOST_PORT;
+
+    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
+    if (ret != HTTP_OK) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
+        TEST_FAIL("http_get_html", msg);
+        return;
+    }
+
+    if (resp.status_code != 200) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "status=%d", resp.status_code);
+        TEST_FAIL("http_get_html", msg);
+        return;
+    }
+
+    /* Check that we got HTML back */
+    if (strstr(resp.content_type, "text/html") != (char *)0 &&
+        strstr(resp.body, "<html>") != (char *)0) {
+        /* Print the HTML to VGA console */
+        printf("\n--- Fetched HTML (%d bytes) ---\n", resp.body_len);
+        write(1, resp.body, resp.body_len);
+        printf("\n--- End HTML ---\n");
+        TEST_PASS("http_get_html");
+    } else {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "ct=%s", resp.content_type);
+        TEST_FAIL("http_get_html", msg);
+    }
+}
+
 /* ---- JSON standalone tests ---- */
 static void test_json_parser(void)
 {
@@ -572,6 +616,7 @@ int main(int argc, char *argv[])
 
     /* HTTP + JSON integration tests */
     test_http_healthz();
+    test_http_get_html();
     test_http_echo_json();
     test_http_mock_claude();
     test_http_mock_claude_error();

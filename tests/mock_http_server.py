@@ -63,7 +63,19 @@ class MockHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path == "/healthz":
+        if self.path == "/":
+            html = (
+                "<html><head><title>Sodex Mock</title></head>"
+                "<body><h1>Hello from Sodex HTTP Client!</h1>"
+                "<p>If you can read this, your OS just fetched HTML over TCP/IP.</p>"
+                "</body></html>"
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+        elif self.path == "/healthz":
             self._send_json(200, {"status": "ok"})
         else:
             self._send_json(404, {"error": "not found"})

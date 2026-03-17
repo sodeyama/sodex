@@ -87,6 +87,78 @@ int tool_dispatch_all(const struct claude_response *resp,
     return executed;
 }
 
+/* ---- Tool statistics ---- */
+
+void tool_stats_reset(struct tool_stats *stats)
+{
+    if (!stats)
+        return;
+    memset(stats, 0, sizeof(*stats));
+}
+
+void tool_stats_record(struct tool_stats *stats,
+                       const char *tool_name,
+                       int is_error, int elapsed_ticks)
+{
+    int i;
+    struct tool_stat *entry;
+
+    if (!stats || !tool_name)
+        return;
+
+    /* Find existing entry */
+    entry = (struct tool_stat *)0;
+    for (i = 0; i < stats->count; i++) {
+        if (strcmp(stats->entries[i].name, tool_name) == 0) {
+            entry = &stats->entries[i];
+            break;
+        }
+    }
+
+    /* Create new entry if not found */
+    if (!entry) {
+        if (stats->count >= TOOL_STATS_MAX)
+            return;
+        entry = &stats->entries[stats->count];
+        memset(entry, 0, sizeof(*entry));
+        strncpy(entry->name, tool_name, sizeof(entry->name) - 1);
+        entry->name[sizeof(entry->name) - 1] = '\0';
+        stats->count++;
+    }
+
+    entry->call_count++;
+    if (is_error)
+        entry->error_count++;
+    else
+        entry->success_count++;
+    if (elapsed_ticks > 0)
+        entry->total_ticks += elapsed_ticks;
+}
+
+void tool_stats_print(const struct tool_stats *stats)
+{
+    int i;
+
+    if (!stats || stats->count == 0) {
+        debug_printf("[TOOL-STATS] no tool calls recorded\n");
+        return;
+    }
+
+    debug_printf("[TOOL-STATS] ---- Tool Statistics ----\n");
+    for (i = 0; i < stats->count; i++) {
+        const struct tool_stat *e = &stats->entries[i];
+        int avg_ticks = 0;
+
+        if (e->call_count > 0)
+            avg_ticks = e->total_ticks / e->call_count;
+
+        debug_printf("[TOOL-STATS] %s: calls=%d ok=%d err=%d avg_ticks=%d\n",
+                     e->name, e->call_count, e->success_count,
+                     e->error_count, avg_ticks);
+    }
+    debug_printf("[TOOL-STATS] ---- End ----\n");
+}
+
 int tool_build_definitions(struct json_writer *jw)
 {
     const struct tool_def *tools[TOOL_MAX_TOOLS];

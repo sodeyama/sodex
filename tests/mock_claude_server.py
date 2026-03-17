@@ -215,7 +215,7 @@ def _find_scenario_keyword(messages):
     Returns the keyword string if found, else None.
     """
     keywords = ("test_immediate", "test_one_tool", "test_two_tools",
-                "test_max_steps",
+                "test_max_steps", "test_perm_blocked",
                 "test_session_resume_b", "test_session_resume_a",
                 "test_repl_turn2", "test_repl_turn1")
     for msg in reversed(messages):
@@ -305,6 +305,32 @@ def _agent_scenario_events(scenario, tool_results_count, messages):
             tool_input_json='{}',
             text_before="Getting info.",
             msg_id=f"msg_integ_ms_{tool_results_count}")
+
+    if scenario == "test_perm_blocked":
+        # Step 1: Try to write to /boot/ (will be blocked by permissions)
+        # Step 2: After getting error, try /tmp/ (will succeed)
+        # Step 3: Complete
+        has_perm_error = _messages_contain_text(messages, "permission denied")
+        if tool_results_count == 0 and not has_perm_error:
+            # First attempt: write to protected path
+            return tool_use_response_stream(
+                tool_name="write_file",
+                tool_id="toolu_integ_perm_1",
+                tool_input_json='{"path": "/boot/blocked.txt", "content": "test"}',
+                text_before="Writing to boot.",
+                msg_id="msg_integ_perm_1")
+        elif has_perm_error and tool_results_count <= 1:
+            # After permission error: try alternative path
+            return tool_use_response_stream(
+                tool_name="write_file",
+                tool_id="toolu_integ_perm_2",
+                tool_input_json='{"path": "/tmp/allowed.txt", "content": "test"}',
+                text_before="Trying alternative path.",
+                msg_id="msg_integ_perm_2")
+        else:
+            return text_response_stream(
+                text="Permission recovery succeeded.",
+                msg_id="msg_integ_perm_done")
 
     if scenario == "test_repl_turn1":
         return text_response_stream(

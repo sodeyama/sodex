@@ -4,7 +4,11 @@
 #ifndef _AGENT_AUDIT_H
 #define _AGENT_AUDIT_H
 
+#ifdef TEST_BUILD
+#define AUDIT_LOG_PATH  "/tmp/agent_test_audit/audit.log"
+#else
 #define AUDIT_LOG_PATH  "/var/agent/audit.log"
+#endif
 #define AUDIT_MAX_ENTRY 512
 
 struct audit_entry {

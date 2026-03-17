@@ -8,9 +8,12 @@
 #include <agent/permissions.h>
 #include <string.h>
 #include <stdio.h>
-#include <fs.h>
 
-#ifndef TEST_BUILD
+#ifdef TEST_BUILD
+#include <fcntl.h>
+#include <unistd.h>
+#else
+#include <fs.h>
 #include <debug.h>
 #endif
 

@@ -13,6 +13,9 @@
 #include <agent/llm_provider.h>
 #include <agent/memory_store.h>
 #include <agent/tool_registry.h>
+#include <agent/hooks.h>
+#include <agent/permissions.h>
+#include <agent/audit.h>
 #include <json.h>
 #include <string.h>
 #include <stdio.h>
@@ -469,6 +472,35 @@ void agent_state_init(struct agent_state *state,
         conv_init(&state->conv, DEFAULT_SYSTEM_PROMPT);
 }
 
+/* AT-98: Builtin hook: block writes to protected paths */
+static int builtin_path_protection(const struct hook_context *ctx,
+                                    struct hook_response *response)
+{
+    if (!ctx || !response)
+        return -1;
+
+    /* Only check write_file tool */
+    if (!ctx->tool_name || strcmp(ctx->tool_name, "write_file") != 0)
+        return 0;
+
+    if (ctx->tool_input_json && ctx->tool_input_len > 0) {
+        /* Check for protected paths: /boot/ and /etc/agent/ */
+        if (strstr(ctx->tool_input_json, "\"/boot/") ||
+            strstr(ctx->tool_input_json, "\"/etc/agent/")) {
+            response->decision = HOOK_BLOCK;
+            snprintf(response->message, sizeof(response->message),
+                     "write to protected path is not allowed");
+            return 0;
+        }
+    }
+    return 0;
+}
+
+static void agent_register_builtin_hooks(void)
+{
+    hooks_register(HOOK_PRE_TOOL_USE, builtin_path_protection);
+}
+
 static int agent_run_loop(
     const struct agent_config *config,
     struct agent_state *state,
@@ -484,6 +516,8 @@ static int agent_run_loop(
 
     memset(result, 0, sizeof(*result));
     tool_init();
+    hooks_init();
+    agent_register_builtin_hooks();
 
     /* Main loop */
     for (step = 0; step < config->max_steps; step++) {
@@ -554,6 +588,65 @@ static int agent_run_loop(
                 debug_printf("[AGENT] executing tool: %s\n",
                             resp.blocks[i].tool_use.name);
 
+                /* AT-97: Permission check */
+                {
+                    static struct permission_policy s_policy;
+                    static int s_policy_init = 0;
+                    if (!s_policy_init) {
+                        perm_set_default(&s_policy);
+                        s_policy_init = 1;
+                    }
+                    if (!perm_check_tool(&s_policy,
+                                         resp.blocks[i].tool_use.name,
+                                         resp.blocks[i].tool_use.input_json,
+                                         resp.blocks[i].tool_use.input_json_len)) {
+                        /* Tool blocked by permissions */
+                        debug_printf("[AGENT] tool '%s' blocked by permissions\n",
+                                    resp.blocks[i].tool_use.name);
+                        snprintf(tool_results[tool_count_exec].result_json, TOOL_RESULT_BUF,
+                                 "{\"error\":\"permission denied: tool '%s' is not allowed for this input\"}",
+                                 resp.blocks[i].tool_use.name);
+                        tool_results[tool_count_exec].result_len =
+                            strlen(tool_results[tool_count_exec].result_json);
+                        strncpy(tool_results[tool_count_exec].tool_use_id,
+                                resp.blocks[i].tool_use.id, 63);
+                        tool_results[tool_count_exec].is_error = 1;
+                        state->total_errors++;
+                        tool_count_exec++;
+                        if (tool_count_exec >= CLAUDE_MAX_BLOCKS) break;
+                        continue;
+                    }
+                }
+
+                /* AT-97: Pre-tool-use hook */
+                {
+                    struct hook_context hctx;
+                    struct hook_response hresp;
+                    memset(&hctx, 0, sizeof(hctx));
+                    hctx.event = HOOK_PRE_TOOL_USE;
+                    hctx.tool_name = resp.blocks[i].tool_use.name;
+                    hctx.tool_input_json = resp.blocks[i].tool_use.input_json;
+                    hctx.tool_input_len = resp.blocks[i].tool_use.input_json_len;
+                    hctx.step_number = step;
+                    if (hooks_fire(&hctx, &hresp) > 0) {
+                        /* Blocked by hook */
+                        debug_printf("[AGENT] tool '%s' blocked by hook: %s\n",
+                                    resp.blocks[i].tool_use.name, hresp.message);
+                        snprintf(tool_results[tool_count_exec].result_json, TOOL_RESULT_BUF,
+                                 "{\"error\":\"blocked by policy: %s\"}",
+                                 hresp.message[0] ? hresp.message : "operation not permitted");
+                        tool_results[tool_count_exec].result_len =
+                            strlen(tool_results[tool_count_exec].result_json);
+                        strncpy(tool_results[tool_count_exec].tool_use_id,
+                                resp.blocks[i].tool_use.id, 63);
+                        tool_results[tool_count_exec].is_error = 1;
+                        state->total_errors++;
+                        tool_count_exec++;
+                        if (tool_count_exec >= CLAUDE_MAX_BLOCKS) break;
+                        continue;
+                    }
+                }
+
                 tool_dispatch(&resp.blocks[i].tool_use,
                               &tool_results[tool_count_exec]);
 
@@ -565,6 +658,19 @@ static int agent_run_loop(
 
                 state->total_tool_executions++;
                 tool_count_exec++;
+
+                /* AT-97: Audit log */
+                {
+                    struct audit_entry ae;
+                    memset(&ae, 0, sizeof(ae));
+                    ae.step = step;
+                    strncpy(ae.tool_name, resp.blocks[i].tool_use.name, 63);
+                    if (tool_results[tool_count_exec - 1].is_error)
+                        strncpy(ae.action, "error", 15);
+                    else
+                        strncpy(ae.action, "execute", 15);
+                    audit_log(&ae);
+                }
 
                 debug_printf("[AGENT] tool result: %d bytes, is_error=%d\n",
                             tool_results[tool_count_exec - 1].result_len,

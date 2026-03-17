@@ -44,5 +44,10 @@ void tool_init(void)
                   TOOL_SCHEMA_RUN_COMMAND,
                   tool_run_command);
 
+    tool_register("manage_process",
+                  "List, inspect, or kill processes",
+                  TOOL_SCHEMA_MANAGE_PROCESS,
+                  tool_manage_process);
+
     debug_printf("[TOOL] initialized %d built-in tools\n", tool_count());
 }

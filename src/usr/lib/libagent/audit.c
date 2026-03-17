@@ -9,9 +9,14 @@
 #include <agent/audit.h>
 #include <string.h>
 #include <stdio.h>
-#include <fs.h>
+#include <stdlib.h>
 
-#ifndef TEST_BUILD
+#ifdef TEST_BUILD
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#else
+#include <fs.h>
 #include <debug.h>
 #endif
 

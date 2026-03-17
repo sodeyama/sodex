@@ -14,6 +14,7 @@
 #include <fs.h>
 #include <json.h>
 #include <agent/agent.h>
+#include <agent/audit.h>
 #include <agent/claude_client.h>
 #include <agent/memory_store.h>
 #include <agent/tool_handlers.h>
@@ -35,6 +36,7 @@ enum agent_cli_mode {
     AGENT_MODE_RESUME,
     AGENT_MODE_SESSIONS,
     AGENT_MODE_MEMORY,
+    AGENT_MODE_AUDIT,
 };
 
 static struct agent_config s_config;
@@ -124,6 +126,7 @@ static void print_usage(void)
     printf("  agent sessions [--delete <session-id>]\n");
     printf("  agent memory\n");
     printf("  agent memory add \"メモ\"\n");
+    printf("  agent audit\n");
     printf("\nOptions:\n");
     printf("  -s <N>   Max steps\n");
     printf("  -p       単発モード\n");
@@ -565,6 +568,31 @@ static int handle_shell_shortcut(struct agent_state *state,
     return 0;
 }
 
+static void print_audit(int max_entries)
+{
+    struct audit_entry entries[32];
+    int count = 0;
+    int i;
+
+    if (max_entries <= 0 || max_entries > 32)
+        max_entries = 20;
+
+    if (audit_read_last(entries, max_entries, &count) < 0 || count == 0) {
+        printf("No audit entries.\n");
+        return;
+    }
+
+    printf("Audit log (last %d entries):\n", count);
+    for (i = 0; i < count; i++) {
+        printf("[%d] step=%d %-8s %-20s %s\n",
+               entries[i].timestamp,
+               entries[i].step,
+               entries[i].action,
+               entries[i].tool_name,
+               entries[i].detail);
+    }
+}
+
 static void print_help(void)
 {
     printf("/help /clear /compact [/focus] /memory [/add ...] /permissions /resume [id]\n");
@@ -811,6 +839,9 @@ int main(int argc, char *argv[])
                 safe_copy(delete_id, sizeof(delete_id), argv[i + 2]);
             }
             break;
+        } else if (strcmp(argv[i], "audit") == 0) {
+            mode = AGENT_MODE_AUDIT;
+            break;
         } else if (strcmp(argv[i], "memory") == 0) {
             mode = AGENT_MODE_MEMORY;
             if (i + 2 < argc && strcmp(argv[i + 1], "add") == 0) {
@@ -821,6 +852,11 @@ int main(int argc, char *argv[])
             prompt_start = i;
             break;
         }
+    }
+
+    if (mode == AGENT_MODE_AUDIT) {
+        print_audit(20);
+        return 0;
     }
 
     if (mode == AGENT_MODE_SESSIONS) {

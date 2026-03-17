@@ -29,4 +29,32 @@ int tool_dispatch_all(const struct claude_response *resp,
  * Writes the "tools" array content into the json_writer. */
 int tool_build_definitions(struct json_writer *jw);
 
+/* ---- Tool statistics ---- */
+
+#define TOOL_STATS_MAX  16
+
+struct tool_stat {
+    char name[64];
+    int  call_count;
+    int  success_count;
+    int  error_count;
+    int  total_ticks;     /* cumulative execution time in PIT ticks */
+};
+
+struct tool_stats {
+    struct tool_stat entries[TOOL_STATS_MAX];
+    int count;
+};
+
+/* Reset all tool statistics */
+void tool_stats_reset(struct tool_stats *stats);
+
+/* Record a tool execution */
+void tool_stats_record(struct tool_stats *stats,
+                       const char *tool_name,
+                       int is_error, int elapsed_ticks);
+
+/* Print tool statistics summary to serial */
+void tool_stats_print(const struct tool_stats *stats);
+
 #endif /* _AGENT_TOOL_DISPATCH_H */

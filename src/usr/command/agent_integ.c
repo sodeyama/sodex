@@ -460,6 +460,45 @@ static void test_scenario_continue_and_compact(void)
     TEST_PASS("scenario_8_continue_and_compact");
 }
 
+/* ----- Scenario 9: permission block and recovery ----- */
+static void test_scenario_perm_blocked(void)
+{
+    int ret;
+
+    agent_config_init(&s_config);
+    s_config.max_steps = 5;
+    s_config.api_key = "test-key-mock";
+    s_config.provider = &mock_prov;
+
+    debug_printf("[AGENT-INTEG] scenario 9: permission block and recovery\n");
+    printf("[AGENT-INTEG] scenario 9: permission block and recovery\n");
+
+    ret = agent_run(&s_config, "test_perm_blocked", &s_result);
+
+    if (ret == 0 && s_result.stop_reason == AGENT_STOP_END_TURN) {
+        /* Should have: 1 blocked write + 1 allowed write + final text = 3 steps,
+         * but the blocked tool also counts as a tool_call + the retry.
+         * total_errors >= 1 means at least one tool was blocked */
+        if (s_result.final_text_len > 0 &&
+            strstr(s_result.final_text, "recovery succeeded") != 0) {
+            TEST_PASS("scenario_9_perm_blocked");
+        } else {
+            char msg[256];
+            snprintf(msg, sizeof(msg),
+                     "steps=%d tools=%d errors=%d text=%.80s",
+                     s_result.steps_executed,
+                     s_result.total_tool_calls,
+                     0, /* errors not directly in result, just check final text */
+                     s_result.final_text);
+            TEST_FAIL("scenario_9_perm_blocked", msg);
+        }
+    } else {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "ret=%d, stop=%d", ret, s_result.stop_reason);
+        TEST_FAIL("scenario_9_perm_blocked", msg);
+    }
+}
+
 /* ---- Main ---- */
 int main(int argc, char *argv[])
 {
@@ -492,6 +531,7 @@ int main(int argc, char *argv[])
     test_scenario_session_resume();
     test_scenario_memory_loader();
     test_scenario_continue_and_compact();
+    test_scenario_perm_blocked();
 
     /* Summary */
     debug_printf("[AGENT-INTEG] === RESULT: %d/%d passed ===\n",

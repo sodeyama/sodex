@@ -9,7 +9,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_session_restore_full test_memory_loader test_compaction test_bounded_output
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_conversation test_hooks_permissions
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -507,6 +507,42 @@ test_bounded_output_bounded_output.o: $(SRC)/usr/lib/libagent/bounded_output.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_bounded_output_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Tool dispatch tests (Phase D)
+test_tool_dispatch: test_tool_dispatch.c test_tool_dispatch_registry.o test_tool_dispatch_dispatch.o test_tool_dispatch_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_tool_dispatch.c test_tool_dispatch_registry.o test_tool_dispatch_dispatch.o test_tool_dispatch_json.o
+
+test_tool_dispatch_registry.o: $(SRC)/usr/lib/libagent/tool_registry.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_dispatch_dispatch.o: $(SRC)/usr/lib/libagent/tool_dispatch.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_dispatch_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Conversation management tests
+test_conversation: test_conversation.c test_conversation_conv.o test_conversation_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_conversation.c test_conversation_conv.o test_conversation_json.o
+
+test_conversation_conv.o: $(SRC)/usr/lib/libagent/conversation.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_conversation_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Hook, permission, and audit tests (Phase F)
+test_hooks_permissions: test_hooks_permissions.c test_hooks_permissions_hooks.o test_hooks_permissions_permissions.o test_hooks_permissions_audit.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_hooks_permissions.c test_hooks_permissions_hooks.o test_hooks_permissions_permissions.o test_hooks_permissions_audit.o
+
+test_hooks_permissions_hooks.o: $(SRC)/usr/lib/libagent/hooks.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_hooks_permissions_permissions.o: $(SRC)/usr/lib/libagent/permissions.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_hooks_permissions_audit.o: $(SRC)/usr/lib/libagent/audit.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:

@@ -67,12 +67,29 @@ void agent_config_init(struct agent_config *config);
 /* Load system prompt from /etc/agent/system_prompt.txt (fallback to hardcoded) */
 int agent_load_config(struct agent_config *config);
 
+/* 会話状態を初期化する */
+void agent_state_init(struct agent_state *state,
+                       const struct agent_config *config);
+
+/* 既存会話にユーザー入力を足して 1 ターン分進める */
+int agent_run_turn(
+    const struct agent_config *config,
+    struct agent_state *state,
+    const char *user_prompt,
+    struct agent_result *result
+);
+
 /* Main agent loop: prompt -> API -> tools -> repeat until done */
 int agent_run(
     const struct agent_config *config,
     const char *initial_prompt,
     struct agent_result *result
 );
+
+/* 指定 cwd の直近セッションを解決する */
+int agent_resume_latest_for_cwd(const char *cwd,
+                                char *session_id_out,
+                                int session_id_cap);
 
 /* Single step (for testing) */
 int agent_step(

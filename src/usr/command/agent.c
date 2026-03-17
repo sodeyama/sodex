@@ -1,799 +1,905 @@
 /*
- * agent.c - Agent bringup test command (Phase A)
+ * agent.c - Interactive agent CLI
  *
- * Runs TCP connection tests, HTTP POST/GET, and JSON parse/write
- * against a mock HTTP server on the host (10.0.2.2:8080).
+ * 既定は REPL とし、-p / run / --continue / --resume を提供する。
+ * セッションは /var/agent/sessions に保存し、workspace memory は
+ * /var/agent/memory/<cwd-hash>.md に保存する。
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <debug.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <http_client.h>
-#include <json.h>
-#include <dns.h>
 #include <entropy.h>
-#include <tls_client.h>
+#include <fs.h>
+#include <json.h>
+#include <agent/agent.h>
+#include <agent/claude_client.h>
+#include <agent/memory_store.h>
+#include <agent/tool_handlers.h>
+#include <agent/session.h>
 
-#define HOST_IP     "10.0.2.2"
-#define HOST_PORT   8080
+#define API_KEY_PATH       "/etc/claude.conf"
+#define API_KEY_MAX        256
+#define PROMPT_MAX         2048
+#define AGENT_PATH_MAX     PATHNAME_MAX
+#define REPL_PROMPT_MAX    384
+#define COMPACT_KEEP_TURNS 8
+#define COMPACT_SUMMARY_MAX 1024
 
-#define TEST_PASS(name) do { \
-    debug_printf("[AGENT-TEST] %s ... PASS\n", name); \
-    printf("[AGENT-TEST] %s ... PASS\n", name); \
-    passed++; \
-} while(0)
+enum agent_cli_mode {
+    AGENT_MODE_REPL = 0,
+    AGENT_MODE_ONESHOT,
+    AGENT_MODE_RUN,
+    AGENT_MODE_CONTINUE,
+    AGENT_MODE_RESUME,
+    AGENT_MODE_SESSIONS,
+    AGENT_MODE_MEMORY,
+};
 
-#define TEST_FAIL(name, reason) do { \
-    debug_printf("[AGENT-TEST] %s ... FAIL (%s)\n", name, reason); \
-    printf("[AGENT-TEST] %s ... FAIL (%s)\n", name, reason); \
-    failed++; \
-} while(0)
+static struct agent_config s_config;
+static struct agent_result s_result;
+static struct agent_state s_state;
+static struct session_meta s_session;
+static char s_api_key[API_KEY_MAX];
+static char s_input_line[PROMPT_MAX];
+static int s_streamed_chars = 0;
 
-static int passed = 0;
-static int failed = 0;
-
-/* ---- AT-01: TCP connect/send/recv/close ---- */
-static void test_tcp_connect(void)
+static void repl_stream_text(const char *text, int text_len, void *userdata)
 {
-    int sockfd;
-    struct sockaddr_in addr;
-    int ret;
-    char send_data[] = "GET /healthz HTTP/1.1\r\nHost: 10.0.2.2\r\n\r\n";
-    char recv_data[2048];
-    u_int32_t timeout;
+    (void)userdata;
 
-    debug_printf("[AGENT-TEST] tcp_connect %s:%d ...\n", HOST_IP, HOST_PORT);
-
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        TEST_FAIL("tcp_connect", "socket() failed");
+    if (!text || text_len <= 0)
         return;
-    }
-
-    timeout = 5000;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(HOST_PORT);
-    inet_aton(HOST_IP, &addr.sin_addr);
-
-    ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
-    if (ret < 0) {
-        TEST_FAIL("tcp_connect", "connect() failed");
-        closesocket(sockfd);
-        return;
-    }
-
-    ret = send_msg(sockfd, send_data, strlen(send_data), 0);
-    if (ret < 0) {
-        TEST_FAIL("tcp_connect", "send() failed");
-        closesocket(sockfd);
-        return;
-    }
-
-    ret = recv_msg(sockfd, recv_data, sizeof(recv_data) - 1, 0);
-    if (ret <= 0) {
-        TEST_FAIL("tcp_connect", "recv() failed");
-        closesocket(sockfd);
-        return;
-    }
-    recv_data[ret] = '\0';
-
-    closesocket(sockfd);
-
-    /* Verify we got an HTTP response */
-    if (strstr(recv_data, "HTTP/1.") != (char *)0)
-        TEST_PASS("tcp_connect");
-    else
-        TEST_FAIL("tcp_connect", "no HTTP response");
+    write(STDOUT_FILENO, text, (size_t)text_len);
+    s_streamed_chars += text_len;
 }
 
-/* ---- AT-02: connect/close cycle x3 ---- */
-static void test_tcp_cycle(void)
+static int read_api_key(char *buf, int cap)
 {
-    int i;
-    int sockfd;
-    struct sockaddr_in addr;
-    int ret;
-    u_int32_t timeout;
-
-    for (i = 0; i < 3; i++) {
-        sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            TEST_FAIL("tcp_cycle_3x", "socket() failed");
-            return;
-        }
-
-        timeout = 5000;
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(HOST_PORT);
-        inet_aton(HOST_IP, &addr.sin_addr);
-
-        ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
-        if (ret < 0) {
-            char msg[32];
-            snprintf(msg, sizeof(msg), "connect() failed iter %d", i);
-            TEST_FAIL("tcp_cycle_3x", msg);
-            closesocket(sockfd);
-            return;
-        }
-
-        closesocket(sockfd);
-        debug_printf("[AGENT-TEST] tcp_cycle iter %d OK\n", i);
-    }
-    TEST_PASS("tcp_cycle_3x");
-}
-
-/* ---- AT-03: connect error handling ---- */
-static void test_tcp_error(void)
-{
-    int sockfd;
-    struct sockaddr_in addr;
-    int ret;
-    u_int32_t timeout;
-
-    /* Try connecting to a port that should not be listening */
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        TEST_FAIL("tcp_error_refused", "socket() failed");
-        return;
-    }
-
-    timeout = 3000;  /* 3 second timeout */
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(9999);  /* Unlikely to be listening */
-    inet_aton(HOST_IP, &addr.sin_addr);
-
-    ret = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
-    closesocket(sockfd);
-
-    if (ret < 0) {
-        debug_printf("[AGENT-TEST] tcp_error: connect returned %d (expected negative)\n", ret);
-        TEST_PASS("tcp_error_refused");
-    } else {
-        TEST_FAIL("tcp_error_refused", "expected connect failure");
-    }
-}
-
-/* ---- AT-05/06/07: HTTP GET /healthz ---- */
-static void test_http_healthz(void)
-{
-    struct http_request req;
-    struct http_response resp;
-    char recv_buf[4096];
-    int ret;
-
-    memset(&req, 0, sizeof(req));
-    req.method = "GET";
-    req.host = HOST_IP;
-    req.path = "/healthz";
-    req.port = HOST_PORT;
-    req.headers = (const struct http_header *)0;
-    req.body = (const char *)0;
-    req.body_len = 0;
-
-    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
-    if (ret != HTTP_OK) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
-        TEST_FAIL("http_get_healthz", msg);
-        return;
-    }
-
-    if (resp.status_code == 200)
-        TEST_PASS("http_get_healthz");
-    else {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "status=%d", resp.status_code);
-        TEST_FAIL("http_get_healthz", msg);
-    }
-}
-
-/* ---- HTTP POST /echo + JSON parse ---- */
-static void test_http_echo_json(void)
-{
-    struct http_request req;
-    struct http_response resp;
-    char recv_buf[4096];
-    char json_body[256];
-    struct json_writer jw;
-    struct http_header hdrs[2];
-    int ret;
-    struct json_parser jp;
-    struct json_token tokens[64];
-    int ntokens;
-    int status_tok;
-    char status_val[32];
-
-    /* Build JSON body */
-    jw_init(&jw, json_body, sizeof(json_body));
-    jw_object_start(&jw);
-    jw_key(&jw, "status");
-    jw_string(&jw, "ok");
-    jw_key(&jw, "count");
-    jw_int(&jw, 42);
-    jw_object_end(&jw);
-    jw_finish(&jw);
-
-    hdrs[0].name = "Content-Type";
-    hdrs[0].value = "application/json";
-    hdrs[1].name = (const char *)0;
-    hdrs[1].value = (const char *)0;
-
-    memset(&req, 0, sizeof(req));
-    req.method = "POST";
-    req.host = HOST_IP;
-    req.path = "/echo";
-    req.port = HOST_PORT;
-    req.headers = hdrs;
-    req.body = json_body;
-    req.body_len = strlen(json_body);
-
-    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
-    if (ret != HTTP_OK) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
-        TEST_FAIL("http_post_echo", msg);
-        return;
-    }
-
-    if (resp.status_code != 200) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "status=%d", resp.status_code);
-        TEST_FAIL("http_post_echo", msg);
-        return;
-    }
-
-    /* Parse the echoed JSON body */
-    json_init(&jp);
-    ntokens = json_parse(&jp, resp.body, resp.body_len, tokens, 64);
-    if (ntokens < 0) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "json_parse failed: %d", ntokens);
-        TEST_FAIL("http_post_echo_json", msg);
-        return;
-    }
-
-    status_tok = json_find_key(resp.body, tokens, ntokens, 0, "status");
-    if (status_tok < 0) {
-        TEST_FAIL("http_post_echo_json", "key 'status' not found");
-        return;
-    }
-
-    json_token_str(resp.body, &tokens[status_tok], status_val, sizeof(status_val));
-    if (strcmp(status_val, "ok") == 0) {
-        TEST_PASS("http_post_echo_json");
-    } else {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "status='%s'", status_val);
-        TEST_FAIL("http_post_echo_json", msg);
-    }
-}
-
-/* ---- HTTP POST /mock/claude ---- */
-static void test_http_mock_claude(void)
-{
-    struct http_request req;
-    struct http_response resp;
-    char recv_buf[4096];
-    char json_body[512];
-    struct json_writer jw;
-    struct http_header hdrs[2];
-    int ret;
-    struct json_parser jp;
-    struct json_token tokens[128];
-    int ntokens;
-    int content_tok, first_elem, type_tok, text_tok;
-    char type_val[32];
-    char text_val[256];
-
-    /* Build Claude API-like request */
-    jw_init(&jw, json_body, sizeof(json_body));
-    jw_object_start(&jw);
-    jw_key(&jw, "model");
-    jw_string(&jw, "claude-sonnet-4-20250514");
-    jw_key(&jw, "max_tokens");
-    jw_int(&jw, 1024);
-    jw_key(&jw, "messages");
-    jw_array_start(&jw);
-    jw_object_start(&jw);
-    jw_key(&jw, "role");
-    jw_string(&jw, "user");
-    jw_key(&jw, "content");
-    jw_string(&jw, "Hello");
-    jw_object_end(&jw);
-    jw_array_end(&jw);
-    jw_object_end(&jw);
-    jw_finish(&jw);
-
-    hdrs[0].name = "Content-Type";
-    hdrs[0].value = "application/json";
-    hdrs[1].name = (const char *)0;
-    hdrs[1].value = (const char *)0;
-
-    memset(&req, 0, sizeof(req));
-    req.method = "POST";
-    req.host = HOST_IP;
-    req.path = "/mock/claude";
-    req.port = HOST_PORT;
-    req.headers = hdrs;
-    req.body = json_body;
-    req.body_len = strlen(json_body);
-
-    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
-    if (ret != HTTP_OK) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
-        TEST_FAIL("http_mock_claude", msg);
-        return;
-    }
-
-    if (resp.status_code != 200) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "status=%d", resp.status_code);
-        TEST_FAIL("http_mock_claude", msg);
-        return;
-    }
-
-    /* Parse response JSON */
-    json_init(&jp);
-    ntokens = json_parse(&jp, resp.body, resp.body_len, tokens, 128);
-    if (ntokens < 0) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "json_parse failed: %d", ntokens);
-        TEST_FAIL("http_mock_claude_parse", msg);
-        return;
-    }
-
-    /* Navigate: content[0].type == "text" */
-    content_tok = json_find_key(resp.body, tokens, ntokens, 0, "content");
-    if (content_tok < 0) {
-        TEST_FAIL("http_mock_claude_parse", "key 'content' not found");
-        return;
-    }
-    first_elem = json_array_get(tokens, ntokens, content_tok, 0);
-    if (first_elem < 0) {
-        TEST_FAIL("http_mock_claude_parse", "content[0] not found");
-        return;
-    }
-    type_tok = json_find_key(resp.body, tokens, ntokens, first_elem, "type");
-    if (type_tok < 0) {
-        TEST_FAIL("http_mock_claude_parse", "content[0].type not found");
-        return;
-    }
-    json_token_str(resp.body, &tokens[type_tok], type_val, sizeof(type_val));
-
-    text_tok = json_find_key(resp.body, tokens, ntokens, first_elem, "text");
-    if (text_tok >= 0) {
-        json_token_str(resp.body, &tokens[text_tok], text_val, sizeof(text_val));
-    } else {
-        text_val[0] = '\0';
-    }
-
-    if (strcmp(type_val, "text") == 0) {
-        debug_printf("[AGENT-TEST] content[0].type=\"text\", text=\"%s\"\n", text_val);
-        TEST_PASS("http_mock_claude_parse");
-    } else {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "type='%s'", type_val);
-        TEST_FAIL("http_mock_claude_parse", msg);
-    }
-}
-
-/* ---- HTTP POST /mock/claude/error → 429 ---- */
-static void test_http_mock_claude_error(void)
-{
-    struct http_request req;
-    struct http_response resp;
-    char recv_buf[4096];
-    struct http_header hdrs[2];
-    int ret;
-
-    hdrs[0].name = "Content-Type";
-    hdrs[0].value = "application/json";
-    hdrs[1].name = (const char *)0;
-    hdrs[1].value = (const char *)0;
-
-    memset(&req, 0, sizeof(req));
-    req.method = "POST";
-    req.host = HOST_IP;
-    req.path = "/mock/claude/error";
-    req.port = HOST_PORT;
-    req.headers = hdrs;
-    req.body = "{}";
-    req.body_len = 2;
-
-    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
-    if (ret != HTTP_OK) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
-        TEST_FAIL("http_mock_claude_429", msg);
-        return;
-    }
-
-    if (resp.status_code == 429 && resp.retry_after > 0) {
-        debug_printf("[AGENT-TEST] 429 retry_after=%d\n", resp.retry_after);
-        TEST_PASS("http_mock_claude_429");
-    } else {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "status=%d, retry_after=%d",
-                resp.status_code, resp.retry_after);
-        TEST_FAIL("http_mock_claude_429", msg);
-    }
-}
-
-/* ---- HTTPS GET via TLS ---- */
-static void test_https_get(void)
-{
-    struct http_request req;
-    struct http_response resp;
-    char recv_buf[4096];
-    int ret;
-
-    memset(&req, 0, sizeof(req));
-    req.method = "GET";
-    req.host = "10.0.2.2";
-    req.path = "/healthz";
-    req.port = 4443;
-    req.use_tls = 1;
-
-    debug_printf("[AGENT-TEST] https_get 10.0.2.2:4443/healthz ...\n");
-    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
-    if (ret != HTTP_OK) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
-        /* TLS test is allowed to fail in some environments */
-        debug_printf("[AGENT-TEST] %s (TLS may not be available)\n", msg);
-        TEST_FAIL("https_get_healthz", msg);
-        return;
-    }
-
-    if (resp.status_code == 200) {
-        debug_printf("[AGENT-TEST] HTTPS 200, body=%d bytes\n", resp.body_len);
-        TEST_PASS("https_get_healthz");
-    } else {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "status=%d", resp.status_code);
-        TEST_FAIL("https_get_healthz", msg);
-    }
-}
-
-/* ---- HTTP GET / → HTML ---- */
-static void test_http_get_html(void)
-{
-    struct http_request req;
-    struct http_response resp;
-    char recv_buf[4096];
-    int ret;
-
-    memset(&req, 0, sizeof(req));
-    req.method = "GET";
-    req.host = HOST_IP;
-    req.path = "/";
-    req.port = HOST_PORT;
-
-    ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
-    if (ret != HTTP_OK) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "http_do_request failed: %d", ret);
-        TEST_FAIL("http_get_html", msg);
-        return;
-    }
-
-    if (resp.status_code != 200) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "status=%d", resp.status_code);
-        TEST_FAIL("http_get_html", msg);
-        return;
-    }
-
-    /* Check that we got HTML back */
-    if (strstr(resp.content_type, "text/html") != (char *)0 &&
-        strstr(resp.body, "<html>") != (char *)0) {
-        /* Print the HTML to VGA console */
-        printf("\n--- Fetched HTML (%d bytes) ---\n", resp.body_len);
-        write(1, resp.body, resp.body_len);
-        printf("\n--- End HTML ---\n");
-        TEST_PASS("http_get_html");
-    } else {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "ct=%s", resp.content_type);
-        TEST_FAIL("http_get_html", msg);
-    }
-}
-
-/* ---- Entropy/PRNG tests ---- */
-static void test_entropy_prng(void)
-{
-    u_int8_t rand_buf[32];
-    int zero_count = 0;
-    int i;
-
-    /* Init and collect jitter entropy */
-    entropy_init();
-    entropy_collect_jitter(512);
-
-    if (!entropy_ready()) {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "only %d bits", entropy_bits());
-        TEST_FAIL("entropy_collect", msg);
-        return;
-    }
-    TEST_PASS("entropy_collect");
-
-    /* Init PRNG */
-    if (prng_init() < 0) {
-        TEST_FAIL("prng_init", "init failed");
-        return;
-    }
-    TEST_PASS("prng_init");
-
-    /* Generate random bytes */
-    prng_bytes(rand_buf, 32);
-
-    /* Check not all zeros */
-    for (i = 0; i < 32; i++)
-        if (rand_buf[i] == 0)
-            zero_count++;
-
-    if (zero_count < 30) {
-        debug_printf("[PRNG] random: ");
-        for (i = 0; i < 16; i++)
-            debug_printf("%x ", rand_buf[i]);
-        debug_printf("...\n");
-        TEST_PASS("prng_generate");
-    } else {
-        TEST_FAIL("prng_generate", "all zeros");
-    }
-}
-
-/* ---- DNS resolve tests ---- */
-static void test_dns_resolve(void)
-{
-    struct dns_result result;
-    int ret;
-
-    debug_printf("[AGENT-TEST] dns_resolve api.anthropic.com ...\n");
-    ret = dns_resolve("api.anthropic.com", &result);
-    if (ret == DNS_OK) {
-        debug_printf("[AGENT-TEST] resolved: %d.%d.%d.%d\n",
-                    result.addr[0], result.addr[1],
-                    result.addr[2], result.addr[3]);
-        /* Any valid IP is good enough */
-        if (result.addr[0] != 0)
-            TEST_PASS("dns_resolve_anthropic");
-        else
-            TEST_FAIL("dns_resolve_anthropic", "got 0.x.x.x");
-    } else {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "err=%d", ret);
-        TEST_FAIL("dns_resolve_anthropic", msg);
-    }
-}
-
-static void test_dns_cache(void)
-{
-    struct dns_result r1, r2;
-    int ret;
-
-    /* First resolve should query */
-    ret = dns_resolve("api.anthropic.com", &r1);
-    if (ret != DNS_OK) {
-        TEST_FAIL("dns_cache", "first resolve failed");
-        return;
-    }
-
-    /* Second resolve should hit cache (no UDP) */
-    ret = dns_resolve("api.anthropic.com", &r2);
-    if (ret != DNS_OK) {
-        TEST_FAIL("dns_cache", "cached resolve failed");
-        return;
-    }
-
-    if (memcmp(r1.addr, r2.addr, 4) == 0)
-        TEST_PASS("dns_cache");
-    else
-        TEST_FAIL("dns_cache", "addresses differ");
-}
-
-static void test_dns_nxdomain(void)
-{
-    struct dns_result result;
-    int ret;
-
-    ret = dns_resolve("this-does-not-exist-12345.invalid", &result);
-    if (ret == DNS_ERR_NXDOMAIN)
-        TEST_PASS("dns_nxdomain");
-    else {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "ret=%d", ret);
-        /* Some DNS servers redirect NXDOMAIN, accept timeout too */
-        if (ret == DNS_ERR_TIMEOUT)
-            TEST_PASS("dns_nxdomain");
-        else
-            TEST_FAIL("dns_nxdomain", msg);
-    }
-}
-
-/* ---- JSON standalone tests ---- */
-static void test_json_parser(void)
-{
-    const char *js = "{\"name\":\"Jack\",\"age\":27,\"items\":[1,2,3],\"active\":true,\"data\":null}";
-    struct json_parser jp;
-    struct json_token tokens[32];
+    int fd;
     int n;
-    int tok;
-    char str_val[32];
-    int int_val;
-    int bool_val;
+    int i;
 
-    json_init(&jp);
-    n = json_parse(&jp, js, strlen(js), tokens, 32);
-    if (n < 0) {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "parse err %d", n);
-        TEST_FAIL("json_parse_basic", msg);
+    fd = open(API_KEY_PATH, O_RDONLY, 0);
+    if (fd < 0) {
+        printf("agent: cannot open %s\n", API_KEY_PATH);
+        printf("  Create .env.local with ANTHROPIC_API_KEY=sk-ant-...\n");
+        printf("  then run: make inject-api-key\n");
+        return -1;
+    }
+
+    n = read(fd, buf, (size_t)(cap - 1));
+    close(fd);
+    if (n <= 0) {
+        printf("agent: %s is empty\n", API_KEY_PATH);
+        return -1;
+    }
+
+    buf[n] = '\0';
+    for (i = n - 1; i >= 0; i--) {
+        if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == ' ')
+            buf[i] = '\0';
+        else
+            break;
+    }
+
+    n = strlen(buf);
+    if (n < 10) {
+        printf("agent: API key too short (%d chars)\n", n);
+        return -1;
+    }
+    return n;
+}
+
+static int build_prompt(int argc, char *argv[], int start,
+                        char *buf, int cap)
+{
+    int pos = 0;
+    int i;
+
+    for (i = start; i < argc; i++) {
+        int len = strlen(argv[i]);
+
+        if (pos + len + 1 >= cap)
+            break;
+        if (pos > 0)
+            buf[pos++] = ' ';
+        memcpy(buf + pos, argv[i], (size_t)len);
+        pos += len;
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+static void print_usage(void)
+{
+    printf("Usage:\n");
+    printf("  agent\n");
+    printf("  agent \"質問\"\n");
+    printf("  agent -p \"1 回だけ実行\"\n");
+    printf("  agent run \"自律タスク\"\n");
+    printf("  agent --continue\n");
+    printf("  agent --resume [session-id]\n");
+    printf("  agent sessions [--delete <session-id>]\n");
+    printf("  agent memory\n");
+    printf("  agent memory add \"メモ\"\n");
+    printf("\nOptions:\n");
+    printf("  -s <N>   Max steps\n");
+    printf("  -p       単発モード\n");
+}
+
+static int safe_copy(char *dst, int cap, const char *src)
+{
+    int len;
+
+    if (!dst || cap <= 0)
+        return 0;
+    if (!src) {
+        dst[0] = '\0';
+        return 0;
+    }
+
+    len = strlen(src);
+    if (len >= cap)
+        len = cap - 1;
+    memcpy(dst, src, (size_t)len);
+    dst[len] = '\0';
+    return len;
+}
+
+static int build_dentry_path(ext3_dentry *dentry, char *buf, int cap)
+{
+    int pos;
+    int name_len;
+
+    if (!dentry || !buf || cap <= 1)
+        return -1;
+
+    if (dentry->d_parent == 0 ||
+        (dentry->d_namelen == 1 && dentry->d_name[0] == '/')) {
+        buf[0] = '/';
+        buf[1] = '\0';
+        return 1;
+    }
+
+    pos = build_dentry_path(dentry->d_parent, buf, cap);
+    if (pos < 0)
+        return -1;
+
+    if (pos > 1) {
+        if (pos >= cap - 1)
+            return -1;
+        buf[pos++] = '/';
+        buf[pos] = '\0';
+    }
+
+    name_len = dentry->d_namelen;
+    if (name_len <= 0)
+        return pos;
+    if (pos + name_len >= cap)
+        name_len = cap - pos - 1;
+    if (name_len <= 0)
+        return -1;
+
+    memcpy(buf + pos, dentry->d_name, (size_t)name_len);
+    pos += name_len;
+    buf[pos] = '\0';
+    return pos;
+}
+
+static int build_current_path(char *buf, int cap)
+{
+    ext3_dentry *dentry;
+
+    if (!buf || cap <= 1)
+        return -1;
+    dentry = (ext3_dentry *)getdentry();
+    if (!dentry)
+        return -1;
+    return build_dentry_path(dentry, buf, cap);
+}
+
+static int read_text_file(const char *path, char *buf, int cap)
+{
+    int fd;
+    int n;
+
+    if (!path || !buf || cap <= 1)
+        return -1;
+
+    fd = open(path, O_RDONLY, 0);
+    if (fd < 0)
+        return -1;
+    n = read(fd, buf, (size_t)(cap - 1));
+    close(fd);
+    if (n <= 0)
+        return -1;
+
+    buf[n] = '\0';
+    while (n > 0 &&
+           (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' '))
+        buf[--n] = '\0';
+    return n;
+}
+
+static void ensure_memory_dirs(void)
+{
+#ifndef TEST_BUILD
+    mkdir("/var", 0755);
+    mkdir("/var/agent", 0755);
+#endif
+    mkdir(AGENT_MEMORY_DIR, 0755);
+}
+
+static int prepare_agent_config(int custom_steps)
+{
+    if (read_api_key(s_api_key, sizeof(s_api_key)) < 0)
+        return -1;
+
+    agent_config_init(&s_config);
+    agent_load_config(&s_config);
+    s_config.api_key = s_api_key;
+
+    if (custom_steps > 0)
+        s_config.max_steps = custom_steps;
+    return 0;
+}
+
+static int read_line_stdin(char *buf, int cap)
+{
+    int n;
+
+    if (!buf || cap <= 1)
+        return -1;
+
+    n = read(STDIN_FILENO, buf, (size_t)(cap - 1));
+    if (n <= 0)
+        return -1;
+
+    buf[n] = '\0';
+    while (n > 0 &&
+           (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == '\0')) {
+        buf[--n] = '\0';
+    }
+    return n;
+}
+
+static void print_result(const struct agent_result *result)
+{
+    if (!result)
+        return;
+
+    if (result->final_text_len > 0) {
+        write(STDOUT_FILENO, result->final_text, (size_t)result->final_text_len);
+        if (result->final_text[result->final_text_len - 1] != '\n')
+            printf("\n");
         return;
     }
 
-    /* Find "name" -> "Jack" */
-    tok = json_find_key(js, tokens, n, 0, "name");
-    if (tok < 0) { TEST_FAIL("json_parse_basic", "key 'name' not found"); return; }
-    json_token_str(js, &tokens[tok], str_val, sizeof(str_val));
-    if (strcmp(str_val, "Jack") != 0) { TEST_FAIL("json_parse_basic", "name mismatch"); return; }
-
-    /* Find "age" -> 27 */
-    tok = json_find_key(js, tokens, n, 0, "age");
-    if (tok < 0) { TEST_FAIL("json_parse_basic", "key 'age' not found"); return; }
-    json_token_int(js, &tokens[tok], &int_val);
-    if (int_val != 27) { TEST_FAIL("json_parse_basic", "age mismatch"); return; }
-
-    /* Find "items" -> array, items[1] = 2 */
-    tok = json_find_key(js, tokens, n, 0, "items");
-    if (tok < 0) { TEST_FAIL("json_parse_basic", "key 'items' not found"); return; }
-    {
-        int elem = json_array_get(tokens, n, tok, 1);
-        if (elem < 0) { TEST_FAIL("json_parse_basic", "items[1] not found"); return; }
-        json_token_int(js, &tokens[elem], &int_val);
-        if (int_val != 2) { TEST_FAIL("json_parse_basic", "items[1] mismatch"); return; }
+    switch (result->stop_reason) {
+    case AGENT_STOP_MAX_STEPS:
+        printf("[stopped: max_steps]\n");
+        break;
+    case AGENT_STOP_TOKEN_LIMIT:
+        printf("[stopped: token_limit]\n");
+        break;
+    case AGENT_STOP_ERROR:
+        printf("[stopped: error]\n");
+        break;
+    default:
+        break;
     }
-
-    /* Find "active" -> true */
-    tok = json_find_key(js, tokens, n, 0, "active");
-    if (tok < 0) { TEST_FAIL("json_parse_basic", "key 'active' not found"); return; }
-    json_token_bool(js, &tokens[tok], &bool_val);
-    if (bool_val != 1) { TEST_FAIL("json_parse_basic", "active mismatch"); return; }
-
-    /* Find "data" -> null */
-    tok = json_find_key(js, tokens, n, 0, "data");
-    if (tok < 0) { TEST_FAIL("json_parse_basic", "key 'data' not found"); return; }
-    if (tokens[tok].type != JSON_NULL) { TEST_FAIL("json_parse_basic", "data not null"); return; }
-
-    TEST_PASS("json_parse_basic");
 }
 
-static void test_json_writer(void)
+static int persist_new_turns(const char *session_id,
+                             const struct agent_state *state,
+                             int start_turn,
+                             const struct agent_result *result)
 {
+    int i;
+    int last_assistant = -1;
+
+    if (!session_id || !state || !result)
+        return -1;
+
+    for (i = start_turn; i < state->conv.turn_count; i++) {
+        if (state->conv.turns[i].role &&
+            strcmp(state->conv.turns[i].role, "assistant") == 0) {
+            last_assistant = i;
+        }
+    }
+
+    for (i = start_turn; i < state->conv.turn_count; i++) {
+        int in_tok = 0;
+        int out_tok = 0;
+
+        if (i == last_assistant) {
+            in_tok = result->total_input_tokens;
+            out_tok = result->total_output_tokens;
+        }
+        if (session_append_turn(session_id,
+                                &state->conv.turns[i],
+                                in_tok, out_tok) < 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static void print_sessions(void)
+{
+    struct session_index index;
+    int i;
+
+    if (session_list(&index) != 0 || index.count == 0) {
+        printf("No sessions.\n");
+        return;
+    }
+
+    for (i = 0; i < index.count; i++) {
+        printf("%d. %s  %s  %s\n",
+               i + 1,
+               index.entries[i].id,
+               index.entries[i].name[0] ? index.entries[i].name : "main",
+               index.entries[i].cwd[0] ? index.entries[i].cwd : "/");
+    }
+}
+
+static int resolve_continue_session(char *session_id, int cap)
+{
+    char cwd[AGENT_PATH_MAX];
+
+    if (!session_id || cap <= 0)
+        return -1;
+    if (build_current_path(cwd, sizeof(cwd)) < 0)
+        safe_copy(cwd, sizeof(cwd), "/");
+    return agent_resume_latest_for_cwd(cwd, session_id, cap);
+}
+
+static int pick_resume_session(char *session_id, int cap)
+{
+    struct session_index index;
+    char line[64];
+    int n;
+    int choice;
+
+    if (!session_id || cap <= 0)
+        return -1;
+    if (session_list(&index) != 0 || index.count == 0)
+        return -1;
+
+    print_sessions();
+    printf("resume> ");
+    n = read_line_stdin(line, sizeof(line));
+    if (n <= 0)
+        return -1;
+
+    choice = atoi(line);
+    if (choice >= 1 && choice <= index.count) {
+        safe_copy(session_id, cap, index.entries[choice - 1].id);
+        return 0;
+    }
+
+    safe_copy(session_id, cap, line);
+    return 0;
+}
+
+static int start_new_session(struct agent_state *state,
+                             struct session_meta *session)
+{
+    char cwd[AGENT_PATH_MAX];
+
+    if (!state || !session)
+        return -1;
+    if (build_current_path(cwd, sizeof(cwd)) < 0)
+        safe_copy(cwd, sizeof(cwd), "/");
+
+    agent_state_init(state, &s_config);
+    return session_create(session, s_config.model, cwd);
+}
+
+static int resume_session(const char *session_id,
+                          struct agent_state *state,
+                          struct session_meta *session)
+{
+    if (!session_id || !state || !session)
+        return -1;
+
+    agent_state_init(state, &s_config);
+    if (session_load(session_id, &state->conv) < 0)
+        return -1;
+    if (session_read_meta(session_id, session) < 0) {
+        memset(session, 0, sizeof(*session));
+        safe_copy(session->id, sizeof(session->id), session_id);
+    }
+    return 0;
+}
+
+static void print_status(const struct agent_state *state,
+                         const struct session_meta *session)
+{
+    int total_tokens;
+    int ctx_percent;
+
+    total_tokens = conv_total_tokens(&state->conv);
+    ctx_percent = (total_tokens * 100) / CONV_TOKEN_LIMIT;
+    if (ctx_percent < 0)
+        ctx_percent = 0;
+
+    printf("session=%s name=%s turns=%d tokens=%d ctx=%d%% max=%d\n",
+           session->id[0] ? session->id : "-",
+           session->name[0] ? session->name : "main",
+           state->conv.turn_count,
+           total_tokens,
+           ctx_percent,
+           s_config.max_steps);
+}
+
+static void print_memory_sources(void)
+{
+    struct agent_memory_source sources[AGENT_MEMORY_SOURCE_MAX];
+    char cwd[AGENT_PATH_MAX];
     char buf[512];
-    struct json_writer jw;
-    const char *expected = "{\"model\":\"claude-sonnet-4-20250514\",\"max_tokens\":1024,\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}";
+    int count;
+    int i;
 
-    jw_init(&jw, buf, sizeof(buf));
-    jw_object_start(&jw);
-    jw_key(&jw, "model");
-    jw_string(&jw, "claude-sonnet-4-20250514");
-    jw_key(&jw, "max_tokens");
-    jw_int(&jw, 1024);
-    jw_key(&jw, "messages");
-    jw_array_start(&jw);
-    jw_object_start(&jw);
-    jw_key(&jw, "role");
-    jw_string(&jw, "user");
-    jw_key(&jw, "content");
-    jw_string(&jw, "Hello");
-    jw_object_end(&jw);
-    jw_array_end(&jw);
-    jw_object_end(&jw);
+    if (build_current_path(cwd, sizeof(cwd)) < 0)
+        safe_copy(cwd, sizeof(cwd), "/");
 
-    if (jw_finish(&jw) < 0) {
-        TEST_FAIL("json_writer", "jw_finish failed");
+    printf("Memory sources:\n");
+    count = agent_collect_memory_sources(cwd, sources, AGENT_MEMORY_SOURCE_MAX);
+    if (count <= 0) {
+        printf("(none)\n");
         return;
     }
 
-    if (strcmp(buf, expected) == 0) {
-        TEST_PASS("json_writer");
-    } else {
-        debug_printf("[AGENT-TEST] json_writer: got '%s'\n", buf);
-        debug_printf("[AGENT-TEST] json_writer: exp '%s'\n", expected);
-        TEST_FAIL("json_writer", "output mismatch");
+    for (i = 0; i < count; i++) {
+        printf("- %s\n", sources[i].path);
+        if (read_text_file(sources[i].path, buf, sizeof(buf)) > 0) {
+            printf("%s\n", buf);
+        }
     }
 }
 
-static void test_json_escape(void)
+static int append_workspace_memory_note(struct agent_state *state,
+                                        const char *note,
+                                        int quiet)
 {
-    const char *js = "{\"msg\":\"hello\\nworld\\t\\\"quoted\\\"\"}";
-    struct json_parser jp;
-    struct json_token tokens[16];
-    int n, tok;
-    char val[64];
+    char cwd[AGENT_PATH_MAX];
+    char path[AGENT_PATH_MAX];
+    int ret;
 
-    json_init(&jp);
-    n = json_parse(&jp, js, strlen(js), tokens, 16);
-    if (n < 0) {
-        TEST_FAIL("json_escape", "parse failed");
-        return;
-    }
+    if (!state || !note || !*note)
+        return -1;
 
-    tok = json_find_key(js, tokens, n, 0, "msg");
-    if (tok < 0) {
-        TEST_FAIL("json_escape", "key not found");
-        return;
+    if (build_current_path(cwd, sizeof(cwd)) < 0)
+        safe_copy(cwd, sizeof(cwd), "/");
+    ensure_memory_dirs();
+    ret = agent_memory_append_workspace(cwd, note, path, sizeof(path));
+    if (ret == -2) {
+        if (!quiet)
+            printf("memory skipped: secret-like text\n");
+        return -1;
     }
+    if (ret < 0)
+        return -1;
 
-    json_token_str(js, &tokens[tok], val, sizeof(val));
-    if (strcmp(val, "hello\nworld\t\"quoted\"") == 0)
-        TEST_PASS("json_escape");
-    else {
-        debug_printf("[AGENT-TEST] json_escape: got '%s'\n", val);
-        TEST_FAIL("json_escape", "mismatch");
-    }
+    conv_append_system_text(&state->conv, "Workspace Memory", note);
+    if (!quiet)
+        printf("memory saved: %s\n", path);
+    return 0;
 }
 
-/* ---- Main ---- */
+static int handle_compact(struct agent_state *state,
+                          const struct session_meta *session,
+                          const char *focus)
+{
+    char summary[COMPACT_SUMMARY_MAX];
+    int keep_from;
+    int removed;
+
+    if (!state || !session)
+        return -1;
+    if (state->conv.turn_count <= COMPACT_KEEP_TURNS) {
+        printf("compact: not needed\n");
+        return 0;
+    }
+
+    keep_from = state->conv.turn_count - COMPACT_KEEP_TURNS;
+    removed = conv_compact(&state->conv, COMPACT_KEEP_TURNS,
+                           focus, summary, sizeof(summary));
+    if (removed < 0)
+        return -1;
+    session_append_compact(session->id, summary, 0, keep_from - 1);
+    printf("compacted: kept %d recent turns\n", COMPACT_KEEP_TURNS);
+    return 0;
+}
+
+static int handle_shell_shortcut(struct agent_state *state,
+                                 const struct session_meta *session,
+                                 const char *command)
+{
+    char input_json[1024];
+    char result_json[4096];
+    char conv_text[PROMPT_MAX];
+    struct json_writer jw;
+    int start_turn;
+    int len;
+
+    if (!state || !session || !command)
+        return -1;
+
+    jw_init(&jw, input_json, sizeof(input_json));
+    jw_object_start(&jw);
+    jw_key(&jw, "command");
+    jw_string(&jw, command);
+    jw_object_end(&jw);
+    len = jw_finish(&jw);
+    if (len < 0)
+        return -1;
+
+    len = tool_run_command(input_json, len, result_json, sizeof(result_json));
+    if (len < 0)
+        return -1;
+
+    printf("! %s\n", command);
+    write(STDOUT_FILENO, result_json, (size_t)len);
+    if (result_json[len - 1] != '\n')
+        printf("\n");
+
+    start_turn = state->conv.turn_count;
+    snprintf(conv_text, sizeof(conv_text),
+             "Shell command: %s\nResult JSON: %s", command, result_json);
+    conv_add_user_text(&state->conv, conv_text);
+    session_append_turn(session->id, &state->conv.turns[start_turn], 0, 0);
+    {
+        char auto_note[512];
+
+        if (agent_memory_auto_note_command(command,
+                                           auto_note, sizeof(auto_note)) > 0) {
+            append_workspace_memory_note(state, auto_note, 1);
+        }
+    }
+    return 0;
+}
+
+static void print_help(void)
+{
+    printf("/help /clear /compact [/focus] /memory [/add ...] /permissions /resume [id]\n");
+    printf("/sessions /rename <name> /status\n");
+    printf("# memo で workspace memory 追記\n");
+    printf("!cmd でシェル実行結果を会話へ追加\n");
+}
+
+static int run_single_turn(struct agent_state *state,
+                           const struct session_meta *session,
+                           const char *prompt)
+{
+    int start_turn;
+    int ret;
+
+    if (!state || !session || !prompt)
+        return -1;
+
+    start_turn = state->conv.turn_count;
+    s_streamed_chars = 0;
+    claude_client_set_text_stream_callback(repl_stream_text, (void *)0);
+    ret = agent_run_turn(&s_config, state, prompt, &s_result);
+    claude_client_set_text_stream_callback((claude_stream_text_fn)0, (void *)0);
+    if (ret == 0)
+        persist_new_turns(session->id, state, start_turn, &s_result);
+    if (s_streamed_chars > 0 &&
+        s_result.stop_reason == AGENT_STOP_END_TURN &&
+        s_result.final_text_len > 0) {
+        if (s_result.final_text[s_result.final_text_len - 1] != '\n')
+            printf("\n");
+    } else {
+        print_result(&s_result);
+    }
+    if (ret == 0 &&
+        (state->conv.turn_count > (COMPACT_KEEP_TURNS * 2) ||
+         conv_check_tokens(&state->conv) != 0)) {
+        handle_compact(state, session, "auto");
+    }
+    return ret;
+}
+
+static int print_repl_prompt(const struct agent_state *state,
+                             const struct session_meta *session)
+{
+    char cwd[AGENT_PATH_MAX];
+    char prompt[REPL_PROMPT_MAX];
+    int total_tokens;
+    int ctx_percent;
+
+    if (build_current_path(cwd, sizeof(cwd)) < 0)
+        safe_copy(cwd, sizeof(cwd), "/");
+
+    total_tokens = conv_total_tokens(&state->conv);
+    ctx_percent = (total_tokens * 100) / CONV_TOKEN_LIMIT;
+    if (ctx_percent < 0)
+        ctx_percent = 0;
+    if (ctx_percent > 999)
+        ctx_percent = 999;
+
+    snprintf(prompt, sizeof(prompt),
+             "[agent %.8s %s ctx=%d%%] > ",
+             session->id[0] ? session->id : "new",
+             cwd,
+             ctx_percent);
+    write(STDOUT_FILENO, prompt, (size_t)strlen(prompt));
+    return 0;
+}
+
+static int handle_slash_command(char *line,
+                                struct agent_state *state,
+                                struct session_meta *session,
+                                int custom_steps)
+{
+    if (strcmp(line, "/help") == 0) {
+        print_help();
+        return 0;
+    }
+
+    if (strcmp(line, "/sessions") == 0) {
+        print_sessions();
+        return 0;
+    }
+
+    if (strcmp(line, "/status") == 0) {
+        print_status(state, session);
+        return 0;
+    }
+
+    if (strncmp(line, "/rename ", 8) == 0) {
+        safe_copy(session->name, sizeof(session->name), line + 8);
+        session_append_rename(session->id, session->name);
+        printf("renamed: %s\n", session->name);
+        return 0;
+    }
+
+    if (strcmp(line, "/memory") == 0) {
+        print_memory_sources();
+        return 0;
+    }
+
+    if (strncmp(line, "/memory add ", 12) == 0) {
+        append_workspace_memory_note(state, line + 12, 0);
+        return 0;
+    }
+
+    if (strncmp(line, "/compact", 8) == 0) {
+        const char *focus = line[8] ? line + 9 : "";
+        handle_compact(state, session, focus);
+        return 0;
+    }
+
+    if (strcmp(line, "/permissions") == 0 ||
+        strncmp(line, "/permissions ", 13) == 0) {
+        printf("permissions: standard\n");
+        return 0;
+    }
+
+    if (strcmp(line, "/clear") == 0) {
+        prepare_agent_config(custom_steps);
+        if (start_new_session(state, session) == 0)
+            printf("new session: %s\n", session->id);
+        return 0;
+    }
+
+    if (strncmp(line, "/resume", 7) == 0) {
+        char resume_id[SESSION_ID_LEN + 1];
+
+        memset(resume_id, 0, sizeof(resume_id));
+        if (line[7] == ' ' && line[8] != '\0') {
+            safe_copy(resume_id, sizeof(resume_id), line + 8);
+        } else if (pick_resume_session(resume_id, sizeof(resume_id)) < 0) {
+            printf("resume: no session\n");
+            return 0;
+        }
+        prepare_agent_config(custom_steps);
+        if (resume_session(resume_id, state, session) < 0) {
+            printf("resume: failed %s\n", resume_id);
+            return 0;
+        }
+        printf("resumed: %s\n", session->id);
+        return 0;
+    }
+
+    printf("unknown command: %s\n", line);
+    return 0;
+}
+
+static int repl_loop(struct agent_state *state,
+                     struct session_meta *session,
+                     const char *initial_prompt,
+                     int custom_steps)
+{
+    if (initial_prompt && *initial_prompt) {
+        if (run_single_turn(state, session, initial_prompt) < 0)
+            return -1;
+    }
+
+    for (;;) {
+        int n;
+
+        print_repl_prompt(state, session);
+        n = read_line_stdin(s_input_line, sizeof(s_input_line));
+        if (n < 0)
+            break;
+        if (n == 0)
+            continue;
+
+        if (strcmp(s_input_line, "exit") == 0 ||
+            strcmp(s_input_line, "quit") == 0)
+            break;
+        if (s_input_line[0] == '/') {
+            handle_slash_command(s_input_line, state, session, custom_steps);
+            continue;
+        }
+        if (s_input_line[0] == '#') {
+            const char *note = s_input_line + 1;
+            while (*note == ' ')
+                note++;
+            append_workspace_memory_note(state, note, 0);
+            continue;
+        }
+        if (s_input_line[0] == '!') {
+            const char *command = s_input_line + 1;
+            while (*command == ' ')
+                command++;
+            handle_shell_shortcut(state, session, command);
+            continue;
+        }
+
+        run_single_turn(state, session, s_input_line);
+    }
+
+    return 0;
+}
+
+static int run_oneshot(const char *prompt)
+{
+    int ret;
+
+    ret = agent_run(&s_config, prompt, &s_result);
+    print_result(&s_result);
+    return ret;
+}
+
 int main(int argc, char *argv[])
 {
-    debug_printf("[AGENT-TEST] === Phase A Bringup Test Start ===\n");
-    printf("[AGENT-TEST] === Phase A Bringup Test Start ===\n");
+    enum agent_cli_mode mode = AGENT_MODE_REPL;
+    char prompt[PROMPT_MAX];
+    char session_id[SESSION_ID_LEN + 1];
+    char delete_id[SESSION_ID_LEN + 1];
+    int custom_steps = 0;
+    int i;
+    int prompt_start = -1;
 
-    /* JSON standalone tests (no network) */
-    test_json_parser();
-    test_json_writer();
-    test_json_escape();
+    memset(prompt, 0, sizeof(prompt));
+    memset(session_id, 0, sizeof(session_id));
+    memset(delete_id, 0, sizeof(delete_id));
 
-    /* TCP tests */
-    test_tcp_connect();
-    test_tcp_cycle();
-    test_tcp_error();
-
-    /* Entropy/PRNG tests */
-    test_entropy_prng();
-
-    /* DNS tests */
-    test_dns_resolve();
-    test_dns_cache();
-    test_dns_nxdomain();
-
-    /* HTTP + JSON integration tests */
-    test_http_healthz();
-    test_http_get_html();
-    test_http_echo_json();
-    test_http_mock_claude();
-    test_http_mock_claude_error();
-
-    /* TLS/HTTPS test */
-    test_https_get();
-
-    debug_printf("[AGENT-TEST] === RESULT: %d/%d passed ===\n",
-                passed, passed + failed);
-    printf("[AGENT-TEST] === RESULT: %d/%d passed ===\n",
-          passed, passed + failed);
-
-    if (failed == 0) {
-        debug_printf("[AGENT-TEST] ALL TESTS PASSED\n");
-        printf("[AGENT-TEST] ALL TESTS PASSED\n");
+    for (i = 1; i < argc; i++) {
+        if ((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0)) {
+            print_usage();
+            return 0;
+        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+            custom_steps = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-p") == 0) {
+            mode = AGENT_MODE_ONESHOT;
+            prompt_start = i + 1;
+            break;
+        } else if (strcmp(argv[i], "run") == 0) {
+            mode = AGENT_MODE_RUN;
+            prompt_start = i + 1;
+            break;
+        } else if (strcmp(argv[i], "--continue") == 0) {
+            mode = AGENT_MODE_CONTINUE;
+        } else if (strcmp(argv[i], "--resume") == 0) {
+            mode = AGENT_MODE_RESUME;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                safe_copy(session_id, sizeof(session_id), argv[i + 1]);
+                i++;
+            }
+        } else if (strcmp(argv[i], "sessions") == 0) {
+            mode = AGENT_MODE_SESSIONS;
+            if (i + 2 < argc && strcmp(argv[i + 1], "--delete") == 0) {
+                safe_copy(delete_id, sizeof(delete_id), argv[i + 2]);
+            }
+            break;
+        } else if (strcmp(argv[i], "memory") == 0) {
+            mode = AGENT_MODE_MEMORY;
+            if (i + 2 < argc && strcmp(argv[i + 1], "add") == 0) {
+                prompt_start = i + 2;
+            }
+            break;
+        } else {
+            prompt_start = i;
+            break;
+        }
     }
 
-    exit(failed == 0 ? 0 : 1);
-    return 0;
+    if (mode == AGENT_MODE_SESSIONS) {
+        if (delete_id[0] != '\0') {
+            session_delete(delete_id);
+            printf("deleted: %s\n", delete_id);
+        }
+        print_sessions();
+        return 0;
+    }
+
+    if (mode == AGENT_MODE_MEMORY) {
+        if (prompt_start >= 0)
+            build_prompt(argc, argv, prompt_start, prompt, sizeof(prompt));
+        if (prompt[0] != '\0') {
+            struct agent_state tmp_state;
+            struct agent_config tmp_config;
+
+            agent_config_init(&tmp_config);
+            agent_state_init(&tmp_state, &tmp_config);
+            if (append_workspace_memory_note(&tmp_state, prompt, 0) < 0)
+                return 1;
+        }
+        print_memory_sources();
+        return 0;
+    }
+
+    if (prompt_start >= 0)
+        build_prompt(argc, argv, prompt_start, prompt, sizeof(prompt));
+
+    entropy_init();
+    entropy_collect_jitter(512);
+    if (prng_init() < 0) {
+        printf("agent: PRNG init failed\n");
+        return 1;
+    }
+
+    if (prepare_agent_config(custom_steps) < 0)
+        return 1;
+
+    if (mode == AGENT_MODE_ONESHOT || mode == AGENT_MODE_RUN) {
+        if (prompt[0] == '\0') {
+            printf("agent: empty prompt\n");
+            return 1;
+        }
+        return run_oneshot(prompt) == 0 ? 0 : 1;
+    }
+
+    if (mode == AGENT_MODE_CONTINUE) {
+        if (resolve_continue_session(session_id, sizeof(session_id)) < 0) {
+            printf("continue: no session for cwd\n");
+            return 1;
+        }
+        if (resume_session(session_id, &s_state, &s_session) < 0) {
+            printf("continue: failed %s\n", session_id);
+            return 1;
+        }
+        return repl_loop(&s_state, &s_session, 0, custom_steps) == 0 ? 0 : 1;
+    }
+
+    if (mode == AGENT_MODE_RESUME) {
+        if (session_id[0] == '\0' &&
+            pick_resume_session(session_id, sizeof(session_id)) < 0) {
+            printf("resume: no session\n");
+            return 1;
+        }
+        if (resume_session(session_id, &s_state, &s_session) < 0) {
+            printf("resume: failed %s\n", session_id);
+            return 1;
+        }
+        return repl_loop(&s_state, &s_session, 0, custom_steps) == 0 ? 0 : 1;
+    }
+
+    if (start_new_session(&s_state, &s_session) < 0) {
+        printf("agent: session create failed\n");
+        return 1;
+    }
+    printf("session: %s\n", s_session.id);
+    return repl_loop(&s_state, &s_session,
+                     prompt[0] ? prompt : 0,
+                     custom_steps) == 0 ? 0 : 1;
 }

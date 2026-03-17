@@ -1,14 +1,18 @@
 /*
  * tool_run_command.c - run_command tool implementation
  *
- * Executes commands on the Sodex OS. Currently supports a set of
- * built-in commands since full shell pipe+capture is not yet available.
+ * Executes commands on the Sodex OS via execve + pipe.
+ * Spawns "sh -c <command>" as a child process, captures stdout
+ * via pipe, and returns the output as a tool result.
  */
 
 #include <agent/tool_handlers.h>
+#include <agent/bounded_output.h>
 #include <json.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <fs.h>
 
 #ifndef TEST_BUILD
 #include <debug.h>
@@ -19,84 +23,102 @@ static void debug_printf(const char *fmt, ...) { (void)fmt; }
 const char TOOL_SCHEMA_RUN_COMMAND[] =
     "{\"type\":\"object\","
     "\"properties\":{\"command\":{\"type\":\"string\","
-    "\"description\":\"Command to execute\"}},"
+    "\"description\":\"Shell command to execute (passed to sh -c)\"}},"
     "\"required\":[\"command\"]}";
 
-/* Handle built-in commands that we can respond to without execve */
-static int handle_builtin(const char *cmd, struct json_writer *jw)
+#define CMD_TIMEOUT     100   /* Max ticks to wait (~10 seconds at 10ms/tick) */
+
+/*
+ * Execute a command via execve("/usr/bin/sh", ["sh", "-c", cmd], NULL)
+ * and capture its stdout through a pipe.
+ *
+ * Returns exit code (>= 0) on success, -1 on failure.
+ * Output is written to out_buf (up to out_cap bytes).
+ * *out_len is set to the number of bytes written.
+ */
+static int exec_and_capture_bounded(const char *cmd,
+                                    struct bounded_output *bounded,
+                                    int *exit_status)
 {
-    if (strcmp(cmd, "uname") == 0 || strcmp(cmd, "uname -a") == 0) {
-        jw_object_start(jw);
-        jw_key(jw, "output");
-        jw_string(jw, "Sodex 1.0 i486 (custom kernel)");
-        jw_key(jw, "exit_code");
-        jw_int(jw, 0);
-        jw_object_end(jw);
-        return 0;
+    int pipefd[2];
+    int saved_stdout;
+    pid_t pid;
+    char *argv[4];
+    int ret;
+    int status = 0;
+
+    /* Create pipe: pipefd[0]=read, pipefd[1]=write */
+    if (pipe(pipefd) < 0) {
+        debug_printf("[TOOL run_command] pipe() failed\n");
+        return -1;
     }
 
-    if (strcmp(cmd, "uptime") == 0) {
-        jw_object_start(jw);
-        jw_key(jw, "output");
-        jw_string(jw, "uptime: information not available via syscall");
-        jw_key(jw, "exit_code");
-        jw_int(jw, 0);
-        jw_object_end(jw);
-        return 0;
+    /* Save current stdout and redirect to pipe write end */
+    saved_stdout = dup(STDOUT_FILENO);
+    if (saved_stdout < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        debug_printf("[TOOL run_command] dup(stdout) failed\n");
+        return -1;
     }
 
-    if (strcmp(cmd, "whoami") == 0) {
-        jw_object_start(jw);
-        jw_key(jw, "output");
-        jw_string(jw, "root");
-        jw_key(jw, "exit_code");
-        jw_int(jw, 0);
-        jw_object_end(jw);
-        return 0;
+    close(STDOUT_FILENO);
+    if (dup(pipefd[1]) != STDOUT_FILENO) {
+        /* Restore stdout */
+        close(STDOUT_FILENO);
+        dup(saved_stdout);
+        close(saved_stdout);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        debug_printf("[TOOL run_command] dup(pipefd[1]) != STDOUT\n");
+        return -1;
+    }
+    close(pipefd[1]);  /* Close original write end; child inherits STDOUT */
+
+    /* Spawn sh -c "command" */
+    argv[0] = "sh";
+    argv[1] = "-c";
+    argv[2] = (char *)cmd;
+    argv[3] = (char *)0;
+
+    pid = execve("/usr/bin/sh", argv, (char *const *)0);
+
+    /* Restore stdout immediately after execve */
+    close(STDOUT_FILENO);
+    dup(saved_stdout);
+    close(saved_stdout);
+
+    if (pid < 0) {
+        close(pipefd[0]);
+        debug_printf("[TOOL run_command] execve failed\n");
+        return -1;
     }
 
-    if (strcmp(cmd, "arch") == 0) {
-        jw_object_start(jw);
-        jw_key(jw, "output");
-        jw_string(jw, "i486");
-        jw_key(jw, "exit_code");
-        jw_int(jw, 0);
-        jw_object_end(jw);
-        return 0;
+    debug_printf("[TOOL run_command] spawned pid=%d: sh -c \"%s\"\n",
+                (int)pid, cmd);
+
+    /* Read output from pipe read end */
+    for (;;) {
+        char chunk[512];
+
+        ret = (int)read(pipefd[0], chunk, sizeof(chunk));
+        if (ret <= 0)
+            break;
+        bounded_output_append(bounded, chunk, ret);
+    }
+    close(pipefd[0]);
+
+    /* Wait for child to finish */
+    if (waitpid(pid, &status, 0) < 0) {
+        debug_printf("[TOOL run_command] waitpid failed\n");
+        status = -1;
     }
 
-    if (strcmp(cmd, "hostname") == 0) {
-        jw_object_start(jw);
-        jw_key(jw, "output");
-        jw_string(jw, "sodex");
-        jw_key(jw, "exit_code");
-        jw_int(jw, 0);
-        jw_object_end(jw);
-        return 0;
-    }
+    debug_printf("[TOOL run_command] pid=%d exited status=%d, output=%d bytes\n",
+                (int)pid, status, bounded ? bounded->total_bytes : 0);
 
-    if (strcmp(cmd, "pwd") == 0) {
-        jw_object_start(jw);
-        jw_key(jw, "output");
-        jw_string(jw, "/");
-        jw_key(jw, "exit_code");
-        jw_int(jw, 0);
-        jw_object_end(jw);
-        return 0;
-    }
-
-    if (strcmp(cmd, "help") == 0) {
-        jw_object_start(jw);
-        jw_key(jw, "output");
-        jw_string(jw, "Built-in commands: uname, uptime, whoami, "
-                       "arch, hostname, pwd, help");
-        jw_key(jw, "exit_code");
-        jw_int(jw, 0);
-        jw_object_end(jw);
-        return 0;
-    }
-
-    return -1;  /* Not a builtin */
+    *exit_status = status;
+    return 0;
 }
 
 int tool_run_command(const char *input_json, int input_len,
@@ -108,6 +130,8 @@ int tool_run_command(const char *input_json, int input_len,
     int tok;
     char command[512];
     struct json_writer jw;
+    int exit_code;
+    struct bounded_output bounded;
 
     if (!input_json || !result_buf)
         return -1;
@@ -132,26 +156,39 @@ int tool_run_command(const char *input_json, int input_len,
 
     debug_printf("[TOOL run_command] command: %s\n", command);
 
+    /* Execute command and capture output */
+    bounded_output_init(&bounded);
+    bounded_output_begin_artifact(&bounded, "run", ".txt");
+    if (exec_and_capture_bounded(command, &bounded, &exit_code) < 0)
+        exit_code = -1;
+    bounded_output_finish(&bounded, bounded.total_bytes > AGENT_BOUNDED_INLINE);
+
     jw_init(&jw, result_buf, result_cap);
 
-    /* Try built-in commands first */
-    if (handle_builtin(command, &jw) == 0) {
-        return jw_finish(&jw);
+    if (exit_code < 0) {
+        /* Execution failed entirely */
+        jw_object_start(&jw);
+        jw_key(&jw, "error");
+        jw_string(&jw, "command execution failed");
+        jw_key(&jw, "command");
+        jw_string(&jw, command);
+        jw_key(&jw, "exit_code");
+        jw_int(&jw, -1);
+        jw_object_end(&jw);
+    } else {
+        jw_object_start(&jw);
+        jw_key(&jw, "command");
+        jw_string(&jw, command);
+        bounded_output_write_json(&bounded, &jw,
+                                  "output",
+                                  "output_head",
+                                  "output_tail");
+        jw_key(&jw, "exit_code");
+        jw_int(&jw, exit_code);
+        jw_key(&jw, "total_bytes");
+        jw_int(&jw, bounded.total_bytes);
+        jw_object_end(&jw);
     }
-
-    /* Command not recognized as builtin - return informative message */
-    jw_object_start(&jw);
-    jw_key(&jw, "output");
-    jw_string(&jw, "");
-    jw_key(&jw, "error");
-    jw_string(&jw, "command execution with output capture is not yet "
-                    "supported on Sodex. Use read_file/write_file/list_dir "
-                    "tools for filesystem operations.");
-    jw_key(&jw, "command");
-    jw_string(&jw, command);
-    jw_key(&jw, "exit_code");
-    jw_int(&jw, 127);
-    jw_object_end(&jw);
 
     return jw_finish(&jw);
 }

@@ -9,7 +9,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_session_restore_full test_memory_loader test_compaction test_bounded_output
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -451,6 +451,62 @@ test_http_client_http.o: $(SRC)/usr/lib/libagent/http_client.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_http_client_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# REPL helper tests (Plan 20)
+test_agent_repl_cli: test_agent_repl_cli.c test_agent_repl_cli_repl.o test_agent_repl_cli_session.o test_agent_repl_cli_conversation.o test_agent_repl_cli_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_agent_repl_cli.c test_agent_repl_cli_repl.o test_agent_repl_cli_session.o test_agent_repl_cli_conversation.o test_agent_repl_cli_json.o
+
+test_agent_repl_cli_repl.o: $(SRC)/usr/lib/libagent/repl.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_agent_repl_cli_session.o: $(SRC)/usr/lib/libagent/session.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_agent_repl_cli_conversation.o: $(SRC)/usr/lib/libagent/conversation.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_agent_repl_cli_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Full-fidelity session restore tests (Plan 20)
+test_session_restore_full: test_session_restore_full.c test_session_restore_full_session.o test_session_restore_full_conversation.o test_session_restore_full_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_session_restore_full.c test_session_restore_full_session.o test_session_restore_full_conversation.o test_session_restore_full_json.o
+
+test_session_restore_full_session.o: $(SRC)/usr/lib/libagent/session.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_session_restore_full_conversation.o: $(SRC)/usr/lib/libagent/conversation.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_session_restore_full_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Memory source tests (Plan 20)
+test_memory_loader: test_memory_loader.c test_memory_loader_memory_store.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_memory_loader.c test_memory_loader_memory_store.o
+
+test_memory_loader_memory_store.o: $(SRC)/usr/lib/libagent/memory_store.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Compaction tests (Plan 20)
+test_compaction: test_compaction.c test_compaction_conversation.o test_compaction_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_compaction.c test_compaction_conversation.o test_compaction_json.o
+
+test_compaction_conversation.o: $(SRC)/usr/lib/libagent/conversation.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_compaction_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Bounded output tests (Plan 20)
+test_bounded_output: test_bounded_output.c test_bounded_output_bounded_output.o test_bounded_output_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_bounded_output.c test_bounded_output_bounded_output.o test_bounded_output_json.o
+
+test_bounded_output_bounded_output.o: $(SRC)/usr/lib/libagent/bounded_output.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_bounded_output_json.o: $(SRC)/usr/lib/libagent/json.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 clean:

@@ -20,6 +20,30 @@
 
 /* ---- Retry with simple backoff ---- */
 
+static claude_stream_text_fn s_stream_text_callback = (claude_stream_text_fn)0;
+static void *s_stream_text_userdata = (void *)0;
+
+static void emit_stream_text_delta(int prev_text_len[CLAUDE_MAX_BLOCKS],
+                                   const struct claude_response *resp)
+{
+    int i;
+
+    if (!resp || !s_stream_text_callback)
+        return;
+
+    for (i = 0; i < resp->block_count && i < CLAUDE_MAX_BLOCKS; i++) {
+        if (resp->blocks[i].type != CLAUDE_CONTENT_TEXT)
+            continue;
+        if (resp->blocks[i].text.text_len > prev_text_len[i]) {
+            int delta_len = resp->blocks[i].text.text_len - prev_text_len[i];
+
+            s_stream_text_callback(resp->blocks[i].text.text + prev_text_len[i],
+                                   delta_len,
+                                   s_stream_text_userdata);
+        }
+    }
+}
+
 static void wait_ms(int ms)
 {
     /* Use a busy loop based on an approximate iteration count.
@@ -68,7 +92,15 @@ static int recv_sse_stream(
         /* Feed chunk to SSE parser, process all complete events */
         sp.consumed = 0;
         while ((sse_ret = sse_feed(&sp, recv_chunk, ret, &ev)) == SSE_EVENT_DATA) {
+            int prev_text_len[CLAUDE_MAX_BLOCKS] = {0};
+            int i;
+
+            for (i = 0; i < CLAUDE_MAX_BLOCKS; i++) {
+                if (resp->blocks[i].type == CLAUDE_CONTENT_TEXT)
+                    prev_text_len[i] = resp->blocks[i].text.text_len;
+            }
             claude_ret = claude_parse_sse_event(&ev, resp);
+            emit_stream_text_delta(prev_text_len, resp);
             if (claude_ret == 1) {
                 /* message_stop received */
                 debug_printf("[CLAUDE] response complete: %d block(s), stop=%d, tokens=%d/%d\n",
@@ -266,7 +298,15 @@ static int claude_do_request(
             if (extra > 0) {
                 sp.consumed = 0;
                 while ((sse_ret = sse_feed(&sp, recv_buf + header_len, extra, &ev)) == SSE_EVENT_DATA) {
+                    int prev_text_len[CLAUDE_MAX_BLOCKS] = {0};
+                    int i;
+
+                    for (i = 0; i < CLAUDE_MAX_BLOCKS; i++) {
+                        if (out->blocks[i].type == CLAUDE_CONTENT_TEXT)
+                            prev_text_len[i] = out->blocks[i].text.text_len;
+                    }
                     claude_ret = claude_parse_sse_event(&ev, out);
+                    emit_stream_text_delta(prev_text_len, out);
                     if (claude_ret == 1) {
                         tls_close();
                         debug_printf("[CLAUDE] response complete: %d block(s), stop=%d\n",
@@ -297,7 +337,15 @@ static int claude_do_request(
 
                 sp.consumed = 0;
                 while ((sse_ret = sse_feed(&sp, chunk, ret, &ev)) == SSE_EVENT_DATA) {
+                    int prev_text_len[CLAUDE_MAX_BLOCKS] = {0};
+                    int i;
+
+                    for (i = 0; i < CLAUDE_MAX_BLOCKS; i++) {
+                        if (out->blocks[i].type == CLAUDE_CONTENT_TEXT)
+                            prev_text_len[i] = out->blocks[i].text.text_len;
+                    }
                     claude_ret = claude_parse_sse_event(&ev, out);
+                    emit_stream_text_delta(prev_text_len, out);
                     if (claude_ret == 1) {
                         tls_close();
                         debug_printf("[CLAUDE] response complete: %d block(s), stop=%d, tokens=%d/%d\n",
@@ -400,10 +448,11 @@ int claude_send_message(
 
 /* ---- Multi-turn conversation API ---- */
 
-int claude_send_conversation(
+int claude_send_conversation_with_key(
     const struct llm_provider *provider,
     const struct conversation *conv,
     int tools_enabled,
+    const char *api_key,
     struct claude_response *out)
 {
     static char request_buf[16384];  /* static: too large for stack */
@@ -468,7 +517,7 @@ int claude_send_conversation(
         }
 
         ret = claude_do_request(provider, request_buf, strlen(request_buf),
-                               (const char *)0, out);
+                               api_key, out);
         if (ret == CLAUDE_OK)
             return CLAUDE_OK;
 
@@ -479,6 +528,16 @@ int claude_send_conversation(
 
     debug_printf("[CLAUDE] all retries exhausted (conversation)\n");
     return ret;
+}
+
+int claude_send_conversation(
+    const struct llm_provider *provider,
+    const struct conversation *conv,
+    int tools_enabled,
+    struct claude_response *out)
+{
+    return claude_send_conversation_with_key(provider, conv, tools_enabled,
+                                             (const char *)0, out);
 }
 
 /* ---- Raw request API (for agent loop) ---- */
@@ -518,4 +577,11 @@ int claude_send_raw_request(
 
     debug_printf("[CLAUDE] all retries exhausted (raw request)\n");
     return ret;
+}
+
+void claude_client_set_text_stream_callback(claude_stream_text_fn callback,
+                                            void *userdata)
+{
+    s_stream_text_callback = callback;
+    s_stream_text_userdata = userdata;
 }

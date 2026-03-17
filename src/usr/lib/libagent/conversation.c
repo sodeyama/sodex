@@ -10,6 +10,7 @@
 #include <agent/tool_dispatch.h>
 #include <json.h>
 #include <string.h>
+#include <stdio.h>
 
 #ifndef TEST_BUILD
 #include <debug.h>
@@ -35,6 +36,24 @@ static int safe_copy(char *dst, int dst_cap, const char *src, int src_len)
     return copy_len;
 }
 
+static int append_text(char *dst, int cap, const char *text)
+{
+    int cur;
+    int len;
+
+    if (!dst || !text || cap <= 0)
+        return -1;
+    cur = strlen(dst);
+    len = strlen(text);
+    if (cur + len >= cap)
+        len = cap - cur - 1;
+    if (len <= 0)
+        return -1;
+    memcpy(dst + cur, text, (size_t)len);
+    dst[cur + len] = '\0';
+    return len;
+}
+
 /* ---- Public API ---- */
 
 void conv_init(struct conversation *conv, const char *system_prompt)
@@ -45,6 +64,54 @@ void conv_init(struct conversation *conv, const char *system_prompt)
             conv->system_prompt, CONV_TEXT_BUF,
             system_prompt, strlen(system_prompt));
     }
+}
+
+int conv_append_system_text(struct conversation *conv,
+                             const char *header,
+                             const char *text)
+{
+    int remaining;
+    int add_len = 0;
+
+    if (!conv || !text)
+        return -1;
+
+    remaining = CONV_TEXT_BUF - conv->system_prompt_len - 1;
+    if (remaining <= 0)
+        return -1;
+
+    if (header && *header) {
+        const char *prefix = "\n\n== ";
+        const char *suffix = " ==\n";
+        int prefix_len = strlen(prefix);
+        int header_len = strlen(header);
+        int suffix_len = strlen(suffix);
+
+        if (prefix_len + header_len + suffix_len > remaining)
+            return -1;
+
+        memcpy(conv->system_prompt + conv->system_prompt_len,
+               prefix, prefix_len);
+        conv->system_prompt_len += prefix_len;
+        memcpy(conv->system_prompt + conv->system_prompt_len,
+               header, header_len);
+        conv->system_prompt_len += header_len;
+        memcpy(conv->system_prompt + conv->system_prompt_len,
+               suffix, suffix_len);
+        conv->system_prompt_len += suffix_len;
+        remaining = CONV_TEXT_BUF - conv->system_prompt_len - 1;
+    }
+
+    add_len = strlen(text);
+    if (add_len > remaining)
+        add_len = remaining;
+    if (add_len <= 0)
+        return -1;
+
+    memcpy(conv->system_prompt + conv->system_prompt_len, text, add_len);
+    conv->system_prompt_len += add_len;
+    conv->system_prompt[conv->system_prompt_len] = '\0';
+    return add_len;
 }
 
 int conv_add_user_text(struct conversation *conv, const char *text)
@@ -302,6 +369,70 @@ int conv_truncate_oldest(struct conversation *conv, int keep_count)
                 remove_count, keep_count);
 #endif
     return remove_count;
+}
+
+int conv_compact(struct conversation *conv,
+                 int keep_count,
+                 const char *focus,
+                 char *summary,
+                 int summary_cap)
+{
+    int keep_from;
+    int i;
+
+    if (!conv || !summary || summary_cap <= 0)
+        return -1;
+    summary[0] = '\0';
+
+    if (keep_count < 0)
+        keep_count = 0;
+    if (keep_count >= conv->turn_count)
+        return 0;
+
+    if (focus && *focus) {
+        append_text(summary, summary_cap, "focus: ");
+        append_text(summary, summary_cap, focus);
+        append_text(summary, summary_cap, "\n");
+    }
+
+    keep_from = conv->turn_count - keep_count;
+    if (keep_from < 0)
+        keep_from = 0;
+
+    for (i = 0; i < keep_from; i++) {
+        int b;
+
+        append_text(summary, summary_cap, "[");
+        append_text(summary, summary_cap,
+                    conv->turns[i].role ? conv->turns[i].role : "user");
+        append_text(summary, summary_cap, "] ");
+
+        for (b = 0; b < conv->turns[i].block_count; b++) {
+            const struct conv_block *blk = &conv->turns[i].blocks[b];
+            char line[160];
+
+            if (blk->type == CONV_BLOCK_TEXT) {
+                int copy_len = blk->text.text_len;
+
+                if (copy_len > 100)
+                    copy_len = 100;
+                memcpy(line, blk->text.text, (size_t)copy_len);
+                line[copy_len] = '\0';
+                append_text(summary, summary_cap, line);
+            } else if (blk->type == CONV_BLOCK_TOOL_USE) {
+                snprintf(line, sizeof(line), "<tool:%s>",
+                         blk->tool_use.name);
+                append_text(summary, summary_cap, line);
+            } else if (blk->type == CONV_BLOCK_TOOL_RESULT) {
+                append_text(summary, summary_cap, "<tool_result>");
+            }
+            append_text(summary, summary_cap, " ");
+        }
+        append_text(summary, summary_cap, "\n");
+    }
+
+    conv_append_system_text(conv, "Compact Summary", summary);
+    return conv_truncate_oldest(conv, keep_count);
 }
 
 int conv_total_tokens(const struct conversation *conv)

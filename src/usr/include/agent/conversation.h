@@ -67,6 +67,11 @@ struct conversation {
 /* Initialize conversation */
 void conv_init(struct conversation *conv, const char *system_prompt);
 
+/* system prompt に追加テキストを追記する */
+int conv_append_system_text(struct conversation *conv,
+                             const char *header,
+                             const char *text);
+
 /* Add a user text turn */
 int conv_add_user_text(struct conversation *conv, const char *text);
 
@@ -95,6 +100,13 @@ int conv_check_tokens(const struct conversation *conv);
 
 /* Truncate oldest turns to reduce token count */
 int conv_truncate_oldest(struct conversation *conv, int keep_count);
+
+/* 古いターンを要約して recent turn だけ残す */
+int conv_compact(struct conversation *conv,
+                 int keep_count,
+                 const char *focus,
+                 char *summary,
+                 int summary_cap);
 
 /* Get total token count */
 int conv_total_tokens(const struct conversation *conv);

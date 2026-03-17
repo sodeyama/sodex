@@ -11,6 +11,7 @@
 #include <agent/tool_handlers.h>
 #include <agent/claude_client.h>
 #include <agent/llm_provider.h>
+#include <agent/memory_store.h>
 #include <agent/tool_registry.h>
 #include <json.h>
 #include <string.h>
@@ -24,11 +25,328 @@
 static void debug_printf(const char *fmt, ...) { (void)fmt; }
 #endif
 
+#ifndef TEST_BUILD
+#define AGENT_CLAUDE_PATH_MAX   PATHNAME_MAX
+#define AGENT_INSTRUCTION_PATH  AGENT_USER_CLAUDE_PATH
+#define AGENT_PROJECT_CLAUDE    "CLAUDE.md"
+#define AGENT_MEMORY_DIR        "/var/agent/memory"
+#define AGENT_GLOBAL_MEMORY     AGENT_MEMORY_DIR "/global.md"
+#endif
+
 /* Default system prompt (hardcoded fallback) */
 static const char DEFAULT_SYSTEM_PROMPT[] =
     "You are Sodex OS system agent. Sodex is a custom i486 OS kernel. "
     "You can use tools to read/write files, list directories, get system info, "
     "and run commands. Be concise and helpful.";
+
+#ifndef TEST_BUILD
+static int prompt_append_chunk(struct agent_config *config,
+                               const char *text, int text_len)
+{
+    int remaining;
+
+    if (!config || !text)
+        return 0;
+    if (text_len < 0)
+        text_len = strlen(text);
+
+    remaining = AGENT_MAX_SYSTEM_PROMPT - config->system_prompt_len - 1;
+    if (remaining <= 0)
+        return 0;
+    if (text_len > remaining)
+        text_len = remaining;
+
+    memcpy(config->system_prompt + config->system_prompt_len, text, text_len);
+    config->system_prompt_len += text_len;
+    config->system_prompt[config->system_prompt_len] = '\0';
+    return text_len;
+}
+
+static int build_dentry_path(ext3_dentry *dentry, char *buf, int cap)
+{
+    int pos;
+    int name_len;
+
+    if (!dentry || !buf || cap <= 1)
+        return -1;
+
+    if (dentry->d_parent == 0 ||
+        (dentry->d_namelen == 1 && dentry->d_name[0] == '/')) {
+        buf[0] = '/';
+        buf[1] = '\0';
+        return 1;
+    }
+
+    pos = build_dentry_path(dentry->d_parent, buf, cap);
+    if (pos < 0)
+        return -1;
+
+    if (pos > 1) {
+        if (pos >= cap - 1)
+            return -1;
+        buf[pos++] = '/';
+        buf[pos] = '\0';
+    }
+
+    name_len = dentry->d_namelen;
+    if (name_len <= 0)
+        return pos;
+    if (pos + name_len >= cap)
+        name_len = cap - pos - 1;
+    if (name_len <= 0)
+        return -1;
+
+    memcpy(buf + pos, dentry->d_name, name_len);
+    pos += name_len;
+    buf[pos] = '\0';
+    return pos;
+}
+
+static int build_current_path(char *buf, int cap)
+{
+    ext3_dentry *dentry;
+
+    if (!buf || cap <= 1)
+        return -1;
+
+    dentry = (ext3_dentry *)getdentry();
+    if (!dentry)
+        return -1;
+    return build_dentry_path(dentry, buf, cap);
+}
+
+static int build_project_claude_path(char *buf, int cap)
+{
+    char cwd[AGENT_CLAUDE_PATH_MAX];
+    int cwd_len;
+    int file_len;
+
+    if (!buf || cap <= 1)
+        return -1;
+
+    cwd_len = build_current_path(cwd, sizeof(cwd));
+    if (cwd_len < 0)
+        return -1;
+
+    file_len = strlen(AGENT_PROJECT_CLAUDE);
+    if (strcmp(cwd, "/") == 0) {
+        if (file_len + 2 > cap)
+            return -1;
+        buf[0] = '/';
+        memcpy(buf + 1, AGENT_PROJECT_CLAUDE, file_len);
+        buf[file_len + 1] = '\0';
+        return file_len + 1;
+    }
+
+    if (cwd_len + file_len + 2 > cap)
+        return -1;
+
+    memcpy(buf, cwd, cwd_len);
+    buf[cwd_len] = '/';
+    memcpy(buf + cwd_len + 1, AGENT_PROJECT_CLAUDE, file_len);
+    buf[cwd_len + file_len + 1] = '\0';
+    return cwd_len + file_len + 1;
+}
+
+static unsigned int hash_path(const char *path)
+{
+    unsigned int hash = 5381U;
+
+    if (!path)
+        return 0U;
+    while (*path) {
+        hash = ((hash << 5) + hash) ^ (unsigned int)(unsigned char)(*path);
+        path++;
+    }
+    return hash;
+}
+
+static int path_join(char *dst, int cap, const char *dir, const char *name)
+{
+    int dir_len;
+    int name_len;
+
+    if (!dst || !dir || !name || cap <= 1)
+        return -1;
+
+    dir_len = strlen(dir);
+    name_len = strlen(name);
+    if (strcmp(dir, "/") == 0) {
+        if (name_len + 2 > cap)
+            return -1;
+        dst[0] = '/';
+        memcpy(dst + 1, name, name_len);
+        dst[name_len + 1] = '\0';
+        return name_len + 1;
+    }
+
+    if (dir_len + name_len + 2 > cap)
+        return -1;
+    memcpy(dst, dir, dir_len);
+    dst[dir_len] = '/';
+    memcpy(dst + dir_len + 1, name, name_len);
+    dst[dir_len + name_len + 1] = '\0';
+    return dir_len + name_len + 1;
+}
+
+static int trim_to_parent(char *path)
+{
+    int len;
+
+    if (!path)
+        return -1;
+    len = strlen(path);
+    if (len <= 1)
+        return -1;
+
+    while (len > 1 && path[len - 1] == '/') {
+        path[len - 1] = '\0';
+        len--;
+    }
+    while (len > 1 && path[len - 1] != '/') {
+        path[len - 1] = '\0';
+        len--;
+    }
+    if (len > 1)
+        path[len - 1] = '\0';
+    if (path[0] == '\0') {
+        path[0] = '/';
+        path[1] = '\0';
+    }
+    return 0;
+}
+
+static int build_workspace_memory_path(char *buf, int cap)
+{
+    char cwd[AGENT_CLAUDE_PATH_MAX];
+    unsigned int hash;
+
+    if (!buf || cap <= 1)
+        return -1;
+    if (build_current_path(cwd, sizeof(cwd)) < 0)
+        return -1;
+
+    hash = hash_path(cwd);
+    return snprintf(buf, cap, "%s/%08x.md", AGENT_MEMORY_DIR, hash);
+}
+
+static int read_text_file(const char *path, char *buf, int cap)
+{
+    int fd;
+    int n;
+
+    if (!path || !buf || cap <= 1)
+        return -1;
+
+    fd = open(path, O_RDONLY, 0);
+    if (fd < 0)
+        return -1;
+
+    n = read(fd, buf, cap - 1);
+    close(fd);
+    if (n <= 0)
+        return -1;
+
+    while (n > 0 &&
+           (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' '))
+        n--;
+
+    buf[n] = '\0';
+    return n;
+}
+
+static void append_instruction_file(struct agent_config *config,
+                                    const char *path,
+                                    const char *label)
+{
+    char header[160];
+    char body[AGENT_MAX_SYSTEM_PROMPT];
+    int body_len;
+    int header_len;
+    int appended;
+
+    body_len = read_text_file(path, body, sizeof(body));
+    if (body_len <= 0)
+        return;
+
+    header_len = snprintf(header, sizeof(header), "\n\n== %s ==\n", label);
+    if (header_len > 0)
+        prompt_append_chunk(config, header, header_len);
+
+    appended = prompt_append_chunk(config, body, body_len);
+    debug_printf("[AGENT] loaded %s: %d bytes\n", path, body_len);
+    if (appended < body_len) {
+        debug_printf("[AGENT] truncated %s to %d/%d bytes\n",
+                     path, appended, body_len);
+    }
+}
+
+static void append_instruction_files(struct agent_config *config)
+{
+    char project_path[AGENT_CLAUDE_PATH_MAX];
+
+    append_instruction_file(config,
+                            AGENT_INSTRUCTION_PATH,
+                            "User Scope Instructions (/etc/CLAUDE.md)");
+
+    if (build_project_claude_path(project_path, sizeof(project_path)) >= 0) {
+        append_instruction_file(config,
+                                project_path,
+                                "Project Scope Instructions (./CLAUDE.md)");
+    }
+}
+
+static void append_parent_memory_files(struct agent_config *config)
+{
+    static const char *names[] = {
+        "AGENTS.md",
+        "AGENTS.local.md",
+        "CLAUDE.local.md",
+        0
+    };
+    char scan[AGENT_CLAUDE_PATH_MAX];
+    int is_first = 1;
+
+    if (build_current_path(scan, sizeof(scan)) < 0)
+        return;
+
+    for (;;) {
+        int idx;
+
+        for (idx = 0; names[idx] != 0; idx++) {
+            char path[AGENT_CLAUDE_PATH_MAX];
+
+            if (path_join(path, sizeof(path), scan, names[idx]) >= 0)
+                append_instruction_file(config, path, names[idx]);
+        }
+
+        if (!is_first) {
+            char path[AGENT_CLAUDE_PATH_MAX];
+
+            if (path_join(path, sizeof(path), scan, "CLAUDE.md") >= 0)
+                append_instruction_file(config, path, "CLAUDE.md");
+        }
+
+        if (strcmp(scan, "/") == 0)
+            break;
+        if (trim_to_parent(scan) < 0)
+            break;
+        is_first = 0;
+    }
+}
+
+static void append_memory_files(struct agent_config *config)
+{
+    char workspace_path[AGENT_CLAUDE_PATH_MAX];
+
+    append_instruction_file(config,
+                            AGENT_GLOBAL_MEMORY,
+                            "Global Memory");
+    append_parent_memory_files(config);
+    if (build_workspace_memory_path(workspace_path, sizeof(workspace_path)) >= 0)
+        append_instruction_file(config, workspace_path, "Workspace Memory");
+}
+#endif
 
 void agent_config_init(struct agent_config *config)
 {
@@ -54,8 +372,11 @@ void agent_config_init(struct agent_config *config)
 int agent_load_config(struct agent_config *config)
 {
 #ifndef TEST_BUILD
+    int loaded = 0;
+    int fd;
+
     /* Try to read /etc/agent/system_prompt.txt */
-    int fd = open("/etc/agent/system_prompt.txt", O_RDONLY, 0);
+    fd = open("/etc/agent/system_prompt.txt", O_RDONLY, 0);
     if (fd >= 0) {
         int n = read(fd, config->system_prompt, AGENT_MAX_SYSTEM_PROMPT - 1);
         close(fd);
@@ -63,10 +384,14 @@ int agent_load_config(struct agent_config *config)
             config->system_prompt[n] = '\0';
             config->system_prompt_len = n;
             debug_printf("[AGENT] loaded system prompt: %d bytes\n", n);
-            return 0;
+            loaded = 1;
         }
     }
-    debug_printf("[AGENT] using default system prompt\n");
+    if (!loaded)
+        debug_printf("[AGENT] using default system prompt\n");
+
+    append_instruction_files(config);
+    append_memory_files(config);
 #endif
     return 0;
 }
@@ -117,8 +442,9 @@ static int send_conversation(
     prov = config->provider ? config->provider : &provider_claude;
 
     claude_response_init(resp);
-    return claude_send_conversation(prov, &state->conv,
-                                     (tc > 0) ? 1 : 0, resp);
+    return claude_send_conversation_with_key(prov, &state->conv,
+                                              (tc > 0) ? 1 : 0,
+                                              config->api_key, resp);
 }
 
 int agent_step(
@@ -130,41 +456,38 @@ int agent_step(
     return send_conversation(config, state, resp);
 }
 
-int agent_run(
+void agent_state_init(struct agent_state *state,
+                       const struct agent_config *config)
+{
+    if (!state)
+        return;
+
+    memset(state, 0, sizeof(*state));
+    if (config)
+        conv_init(&state->conv, config->system_prompt);
+    else
+        conv_init(&state->conv, DEFAULT_SYSTEM_PROMPT);
+}
+
+static int agent_run_loop(
     const struct agent_config *config,
-    const char *initial_prompt,
+    struct agent_state *state,
     struct agent_result *result)
 {
-    /* These structs are too large for the stack (~1MB+).
-     * Use static storage. Not reentrant, but fine for this OS. */
-    static struct agent_state state;
+    /* 応答は大きいので static に逃がす */
     static struct claude_response resp;
     int step;
     int ret;
 
-    if (!config || !initial_prompt || !result)
+    if (!config || !state || !result)
         return -1;
 
-    /* Initialize */
-    memset(&state, 0, sizeof(state));
     memset(result, 0, sizeof(*result));
-    conv_init(&state.conv, config->system_prompt);
     tool_init();
-
-    /* Add initial user prompt */
-    conv_add_user_text(&state.conv, initial_prompt);
-
-    debug_printf("[AGENT] === Agent Run Start ===\n");
-    debug_printf("[AGENT] model=%s, max_steps=%d\n",
-                config->model, config->max_steps);
-    debug_printf("[AGENT] system_prompt=%d bytes, tools=%d registered\n",
-                config->system_prompt_len, tool_count());
-    debug_printf("[AGENT] prompt: %.80s%s\n", initial_prompt,
-                strlen(initial_prompt) > 80 ? "..." : "");
 
     /* Main loop */
     for (step = 0; step < config->max_steps; step++) {
-        state.current_step = step;
+        state->current_step = step;
         debug_printf("[AGENT] step %d/%d\n", step + 1, config->max_steps);
 
         /* Brief delay between steps to let TCP/TLS state settle */
@@ -175,31 +498,31 @@ int agent_run(
         }
 
         /* Send conversation to Claude */
-        ret = agent_step(config, &state, &resp);
+        ret = agent_step(config, state, &resp);
         if (ret != 0) {
             debug_printf("[AGENT] API error: %d\n", ret);
-            fill_result(result, &state, AGENT_STOP_ERROR, step + 1);
+            fill_result(result, state, AGENT_STOP_ERROR, step + 1);
             debug_printf("[AGENT] === Agent Run End (error) ===\n");
             return -1;
         }
 
-        state.total_api_calls++;
-        conv_update_tokens(&state.conv, &resp);
+        state->total_api_calls++;
+        conv_update_tokens(&state->conv, &resp);
 
         /* Add assistant response to conversation */
-        conv_add_assistant_response(&state.conv, &resp);
+        conv_add_assistant_response(&state->conv, &resp);
 
         /* Check stop reason */
         switch (resp.stop_reason) {
         case CLAUDE_STOP_END_TURN:
             /* Natural completion */
             extract_final_text(&resp, result);
-            fill_result(result, &state, AGENT_STOP_END_TURN, step + 1);
+            fill_result(result, state, AGENT_STOP_END_TURN, step + 1);
             debug_printf("[AGENT] completed: %d steps, %d tokens, %d tool calls\n",
                         step + 1,
-                        state.conv.total_input_tokens +
-                            state.conv.total_output_tokens,
-                        state.total_tool_executions);
+                        state->conv.total_input_tokens +
+                            state->conv.total_output_tokens,
+                        state->total_tool_executions);
             agent_print_summary(result);
             debug_printf("[AGENT] === Agent Run End ===\n");
             return 0;
@@ -221,7 +544,7 @@ int agent_run(
                     debug_printf("[AGENT] terminal tool '%s' called\n",
                                 config->terminal_tool);
                     extract_final_text(&resp, result);
-                    fill_result(result, &state,
+                    fill_result(result, state,
                                 AGENT_STOP_SPECIFIC_TOOL, step + 1);
                     agent_print_summary(result);
                     debug_printf("[AGENT] === Agent Run End ===\n");
@@ -235,12 +558,12 @@ int agent_run(
                               &tool_results[tool_count_exec]);
 
                 if (tool_results[tool_count_exec].is_error) {
-                    state.total_errors++;
+                    state->total_errors++;
                     debug_printf("[AGENT] tool error: %.80s\n",
                                 tool_results[tool_count_exec].result_json);
                 }
 
-                state.total_tool_executions++;
+                state->total_tool_executions++;
                 tool_count_exec++;
 
                 debug_printf("[AGENT] tool result: %d bytes, is_error=%d\n",
@@ -253,14 +576,14 @@ int agent_run(
 
             /* Add tool results to conversation */
             if (tool_count_exec > 0) {
-                conv_add_tool_results(&state.conv,
+                conv_add_tool_results(&state->conv,
                                        tool_results, tool_count_exec);
             }
 
             /* Check token limits */
-            if (conv_check_tokens(&state.conv) == 2) {
+            if (conv_check_tokens(&state->conv) == 2) {
                 debug_printf("[AGENT] token limit reached\n");
-                fill_result(result, &state,
+                fill_result(result, state,
                             AGENT_STOP_TOKEN_LIMIT, step + 1);
                 agent_print_summary(result);
                 debug_printf("[AGENT] === Agent Run End ===\n");
@@ -284,7 +607,7 @@ int agent_run(
 
     /* Max steps reached */
     debug_printf("[AGENT] max steps (%d) reached\n", config->max_steps);
-    fill_result(result, &state, AGENT_STOP_MAX_STEPS, config->max_steps);
+    fill_result(result, state, AGENT_STOP_MAX_STEPS, config->max_steps);
 
     /* Try to extract any text from the last response */
     extract_final_text(&resp, result);
@@ -292,6 +615,42 @@ int agent_run(
     agent_print_summary(result);
     debug_printf("[AGENT] === Agent Run End ===\n");
     return 0;
+}
+
+int agent_run_turn(
+    const struct agent_config *config,
+    struct agent_state *state,
+    const char *user_prompt,
+    struct agent_result *result)
+{
+    if (!config || !state || !user_prompt || !result)
+        return -1;
+    tool_init();
+    if (conv_add_user_text(&state->conv, user_prompt) < 0)
+        return -1;
+
+    debug_printf("[AGENT] === Agent Turn Start ===\n");
+    debug_printf("[AGENT] model=%s, max_steps=%d\n",
+                config->model, config->max_steps);
+    debug_printf("[AGENT] system_prompt=%d bytes, tools=%d registered\n",
+                state->conv.system_prompt_len, tool_count());
+    debug_printf("[AGENT] prompt: %.80s%s\n", user_prompt,
+                strlen(user_prompt) > 80 ? "..." : "");
+    return agent_run_loop(config, state, result);
+}
+
+int agent_run(
+    const struct agent_config *config,
+    const char *initial_prompt,
+    struct agent_result *result)
+{
+    static struct agent_state state;
+
+    if (!config || !initial_prompt || !result)
+        return -1;
+
+    agent_state_init(&state, config);
+    return agent_run_turn(config, &state, initial_prompt, result);
 }
 
 void agent_print_summary(const struct agent_result *result)

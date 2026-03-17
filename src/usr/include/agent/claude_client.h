@@ -12,6 +12,10 @@
 #include <agent/claude_adapter.h>
 #include <agent/conversation.h>
 
+typedef void (*claude_stream_text_fn)(const char *text,
+                                      int text_len,
+                                      void *userdata);
+
 /* Retry configuration */
 #define CLAUDE_MAX_RETRIES      3
 #define CLAUDE_INITIAL_WAIT_MS  1000
@@ -56,6 +60,18 @@ int claude_send_conversation(
 );
 
 /*
+ * Send full conversation with API key override.
+ * api_key: NULL to use default from provider headers.
+ */
+int claude_send_conversation_with_key(
+    const struct llm_provider *provider,
+    const struct conversation *conv,
+    int tools_enabled,
+    const char *api_key,
+    struct claude_response *out
+);
+
+/*
  * Send raw request JSON (for multi-turn agent loop).
  * request_json: complete JSON body to POST.
  * request_json_len: length of request_json.
@@ -69,5 +85,8 @@ int claude_send_raw_request(
     const char *api_key,
     struct claude_response *out
 );
+
+void claude_client_set_text_stream_callback(claude_stream_text_fn callback,
+                                            void *userdata);
 
 #endif /* _AGENT_CLAUDE_CLIENT_H */

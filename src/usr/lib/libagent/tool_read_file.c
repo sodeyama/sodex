@@ -5,6 +5,7 @@
  */
 
 #include <agent/tool_handlers.h>
+#include <agent/bounded_output.h>
 #include <json.h>
 #include <string.h>
 #include <stdio.h>
@@ -16,9 +17,6 @@
 #else
 static void debug_printf(const char *fmt, ...) { (void)fmt; }
 #endif
-
-/* Maximum file size we can read (leave room for JSON wrapping) */
-#define READ_FILE_MAX  3072
 
 const char TOOL_SCHEMA_READ_FILE[] =
     "{\"type\":\"object\","
@@ -35,9 +33,9 @@ int tool_read_file(const char *input_json, int input_len,
     int tok;
     char path[256];
     int fd;
-    char file_buf[READ_FILE_MAX];
     int bytes_read;
     struct json_writer jw;
+    struct bounded_output bounded;
 
     if (!input_json || !result_buf)
         return -1;
@@ -73,23 +71,37 @@ int tool_read_file(const char *input_json, int input_len,
                         "{\"error\":\"file not found: %s\"}", path);
     }
 
-    /* Read content */
-    bytes_read = read(fd, file_buf, READ_FILE_MAX - 1);
-    close(fd);
+    bounded_output_init(&bounded);
+    bounded_output_begin_artifact(&bounded, "read", ".txt");
+    bytes_read = 0;
+    for (;;) {
+        char chunk[512];
+        int ret = read(fd, chunk, sizeof(chunk));
 
-    if (bytes_read < 0) {
-        debug_printf("[TOOL read_file] read failed: %s\n", path);
-        return snprintf(result_buf, result_cap,
-                        "{\"error\":\"read failed: %s\"}", path);
+        if (ret < 0) {
+            close(fd);
+            bounded_output_finish(&bounded, 0);
+            debug_printf("[TOOL read_file] read failed: %s\n", path);
+            return snprintf(result_buf, result_cap,
+                            "{\"error\":\"read failed: %s\"}", path);
+        }
+        if (ret == 0)
+            break;
+        bounded_output_append(&bounded, chunk, ret);
+        bytes_read += ret;
     }
-
-    file_buf[bytes_read] = '\0';
+    close(fd);
+    bounded_output_finish(&bounded, bounded.total_bytes > AGENT_BOUNDED_INLINE);
 
     /* Build result JSON */
     jw_init(&jw, result_buf, result_cap);
     jw_object_start(&jw);
-    jw_key(&jw, "content");
-    jw_string_n(&jw, file_buf, bytes_read);
+    jw_key(&jw, "path");
+    jw_string(&jw, path);
+    bounded_output_write_json(&bounded, &jw,
+                              "content",
+                              "content_head",
+                              "content_tail");
     jw_key(&jw, "bytes_read");
     jw_int(&jw, bytes_read);
     jw_object_end(&jw);

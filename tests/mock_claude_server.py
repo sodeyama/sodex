@@ -215,8 +215,10 @@ def _find_scenario_keyword(messages):
     Returns the keyword string if found, else None.
     """
     keywords = ("test_immediate", "test_one_tool", "test_two_tools",
-                "test_max_steps")
-    for msg in messages:
+                "test_max_steps",
+                "test_session_resume_b", "test_session_resume_a",
+                "test_repl_turn2", "test_repl_turn1")
+    for msg in reversed(messages):
         content = msg.get("content", "")
         # content may be a plain string or a list of blocks
         if isinstance(content, str):
@@ -224,7 +226,7 @@ def _find_scenario_keyword(messages):
                 if kw in content:
                     return kw
         elif isinstance(content, list):
-            for block in content:
+            for block in reversed(content):
                 if isinstance(block, dict):
                     text = block.get("text", "")
                     if isinstance(text, str):
@@ -238,7 +240,20 @@ def _find_scenario_keyword(messages):
     return None
 
 
-def _agent_scenario_events(scenario, tool_results_count):
+def _messages_contain_text(messages, needle):
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            if needle in content:
+                return True
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and needle in block.get("text", ""):
+                    return True
+    return False
+
+
+def _agent_scenario_events(scenario, tool_results_count, messages):
     """Return SSE events for a given agent integration scenario."""
 
     if scenario == "test_immediate":
@@ -290,6 +305,34 @@ def _agent_scenario_events(scenario, tool_results_count):
             tool_input_json='{}',
             text_before="Getting info.",
             msg_id=f"msg_integ_ms_{tool_results_count}")
+
+    if scenario == "test_repl_turn1":
+        return text_response_stream(
+            text="Turn one stored.",
+            msg_id="msg_integ_repl_1")
+
+    if scenario == "test_repl_turn2":
+        if not _messages_contain_text(messages, "test_repl_turn1"):
+            return text_response_stream(
+                text="Turn two missing turn1 context.",
+                msg_id="msg_integ_repl_2_missing")
+        return text_response_stream(
+            text="Turn two remembers turn1.",
+            msg_id="msg_integ_repl_2")
+
+    if scenario == "test_session_resume_a":
+        return text_response_stream(
+            text="Session turn A stored.",
+            msg_id="msg_integ_resume_a")
+
+    if scenario == "test_session_resume_b":
+        if not _messages_contain_text(messages, "test_session_resume_a"):
+            return text_response_stream(
+                text="Resume missing prior session.",
+                msg_id="msg_integ_resume_b_missing")
+        return text_response_stream(
+            text="Resumed session remembered.",
+            msg_id="msg_integ_resume_b")
 
     # Fallback (should not happen)
     return text_response_stream(text="Unknown scenario", msg_id="msg_integ_unk")
@@ -344,7 +387,7 @@ class MockClaudeHandler(BaseHTTPRequestHandler):
             sys.stderr.write(
                 f"[mock-claude] agent-integ scenario={scenario} "
                 f"tool_results={tool_results_count}\n")
-            events = _agent_scenario_events(scenario, tool_results_count)
+            events = _agent_scenario_events(scenario, tool_results_count, messages)
         else:
             # --- Legacy scenario detection ---
             last_msg = messages[-1]["content"] if messages else ""

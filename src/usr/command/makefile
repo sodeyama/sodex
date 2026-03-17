@@ -49,6 +49,7 @@ UTF8DEMO = ${USRDIR}/bin/utf8demo
 MEMGROW = ${USRDIR}/bin/memgrow
 FSLARGE = ${USRDIR}/bin/fslarge
 AGENT   = ${USRDIR}/bin/agent
+DIG     = ${USRDIR}/bin/dig
 
 all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
@@ -81,6 +82,7 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/memgrow.o -o ${MEMGROW} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/fslarge.o -o ${FSLARGE} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/agent.o -o ${AGENT} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/dig.o -o ${DIG} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/sshd.o: sshd.c ../../include/ssh_server.h
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

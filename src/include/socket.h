@@ -45,7 +45,7 @@ struct wait_queue;
 #define TCP_CLOSE_TIMEOUT_TICKS     500   /* 5s at HZ=100 */
 
 #define SOCK_ACCEPT_BACKLOG_SIZE 4
-#define SOCK_RXBUF_SIZE  8192
+#define SOCK_RXBUF_SIZE  32768
 #define SOCK_TXBUF_SIZE  1460  /* Max TCP segment payload (MSS) */
 
 struct sockaddr_in {
@@ -65,11 +65,12 @@ struct kern_socket {
     struct uip_conn     *tcp_conn;
     struct uip_udp_conn *udp_conn;
 
-    /* Receive ring buffer */
-    u_int8_t rx_buf[SOCK_RXBUF_SIZE];
+    /* Receive ring buffer (dynamically allocated) */
+    u_int8_t *rx_buf;
     u_int16_t rx_head;
     u_int16_t rx_tail;
     u_int16_t rx_len;
+    u_int16_t rx_buf_size;
 
     /* Source address storage for recvfrom */
     struct sockaddr_in rx_from[16];

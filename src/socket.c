@@ -19,6 +19,8 @@ EXTERN volatile u_int32_t kernel_tick;
 EXTERN void *uip_sappdata;
 EXTERN u16_t uip_slen;
 EXTERN void network_poll(void);
+PUBLIC void* kalloc(u_int32_t size);
+PUBLIC int32_t kfree(void* ptr);
 
 PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 
@@ -157,18 +159,26 @@ PRIVATE void rxbuf_init(struct kern_socket *sk)
   sk->rx_tail = 0;
   sk->rx_len = 0;
   sk->rx_pkt_count = 0;
+  if (sk->rx_buf == NULL) {
+    sk->rx_buf = kalloc(SOCK_RXBUF_SIZE);
+    if (sk->rx_buf != NULL) {
+      memset(sk->rx_buf, 0, SOCK_RXBUF_SIZE);
+      sk->rx_buf_size = SOCK_RXBUF_SIZE;
+    }
+  }
 }
 
 PRIVATE int rxbuf_write(struct kern_socket *sk, u_int8_t *data, u_int16_t len,
                         struct sockaddr_in *from)
 {
   if (len == 0) return 0;
-  if (sk->rx_len + len > SOCK_RXBUF_SIZE) return -1;
+  if (sk->rx_buf == NULL) return -1;
+  if (sk->rx_len + len > sk->rx_buf_size) return -1;
 
   int i;
   for (i = 0; i < len; i++) {
     sk->rx_buf[sk->rx_head] = data[i];
-    sk->rx_head = (sk->rx_head + 1) % SOCK_RXBUF_SIZE;
+    sk->rx_head = (sk->rx_head + 1) % sk->rx_buf_size;
   }
   sk->rx_len += len;
 
@@ -206,7 +216,7 @@ PRIVATE int rxbuf_read(struct kern_socket *sk, u_int8_t *buf, u_int16_t maxlen,
   int i;
   for (i = 0; i < to_read; i++) {
     buf[i] = sk->rx_buf[sk->rx_tail];
-    sk->rx_tail = (sk->rx_tail + 1) % SOCK_RXBUF_SIZE;
+    sk->rx_tail = (sk->rx_tail + 1) % sk->rx_buf_size;
   }
   sk->rx_len -= to_read;
 
@@ -216,7 +226,7 @@ PRIVATE int rxbuf_read(struct kern_socket *sk, u_int8_t *buf, u_int16_t maxlen,
     /* Skip remaining bytes if we read less than packet */
     u_int16_t remaining = pkt_len - to_read;
     for (i = 0; i < remaining; i++) {
-      sk->rx_tail = (sk->rx_tail + 1) % SOCK_RXBUF_SIZE;
+      sk->rx_tail = (sk->rx_tail + 1) % sk->rx_buf_size;
     }
     sk->rx_len -= remaining;
 
@@ -339,6 +349,7 @@ PRIVATE void socket_fill_addr_from_uip(struct sockaddr_in *addr,
 PRIVATE void socket_release_entry(int sockfd)
 {
   struct kern_socket *sk = &socket_table[sockfd];
+  u_int8_t *rx = sk->rx_buf;
 
   if (sk->tcp_conn) {
     sk->tcp_conn->appstate = -1;
@@ -347,6 +358,9 @@ PRIVATE void socket_release_entry(int sockfd)
   memset(sk, 0, sizeof(struct kern_socket));
   sk->state = SOCK_STATE_UNUSED;
   sk->parent_fd = -1;
+  /* Free rx_buf after memset cleared the pointer */
+  if (rx != NULL)
+    kfree(rx);
 }
 
 PUBLIC int kern_socket(int domain, int type, int protocol)

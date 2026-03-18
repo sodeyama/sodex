@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fs.h>
+#include <poll.h>
 
 #ifndef TEST_BUILD
 #include <debug.h>
@@ -97,22 +98,49 @@ static int exec_and_capture_bounded(const char *cmd,
     debug_printf("[TOOL run_command] spawned pid=%d: sh -c \"%s\"\n",
                 (int)pid, cmd);
 
-    /* Wait for child to finish first, then read pipe.
-     * Sodex pipe_read busy-waits without yielding, so we must let
-     * the child complete before attempting to read from the pipe. */
-    if (waitpid(pid, &status, 0) < 0) {
-        debug_printf("[TOOL run_command] waitpid failed\n");
-        status = -1;
-    }
+    /* Drain pipe while waiting for child.
+     * We must read pipe data concurrently with waitpid because:
+     * - If we waitpid first, child blocks on full pipe -> deadlock
+     * - If we read first, pipe_read busy-waits without yielding -> hang
+     * Solution: poll pipe with short timeout, then check waitpid(WNOHANG) */
+    {
+        int child_done = 0;
+        struct pollfd pfd;
 
-    /* Now read all output from pipe (child has finished, data is ready) */
-    for (;;) {
-        char chunk[512];
+        pfd.fd = pipefd[0];
+        pfd.events = POLLIN;
 
-        ret = (int)read(pipefd[0], chunk, sizeof(chunk));
-        if (ret <= 0)
-            break;
-        bounded_output_append(bounded, chunk, ret);
+        while (!child_done) {
+            pfd.revents = 0;
+            ret = poll(&pfd, 1, 10);  /* 10 ticks ~ 100ms */
+            if (ret > 0 && (pfd.revents & POLLIN)) {
+                char chunk[512];
+                int nr = (int)read(pipefd[0], chunk, sizeof(chunk));
+                if (nr > 0)
+                    bounded_output_append(bounded, chunk, nr);
+            }
+            /* Check if child exited */
+            if (waitpid(pid, &status, WNOHANG) > 0)
+                child_done = 1;
+            if (pfd.revents & POLLHUP)
+                child_done = 1;
+        }
+
+        /* Drain any remaining data after child exit */
+        for (;;) {
+            char chunk[512];
+
+            pfd.revents = 0;
+            ret = poll(&pfd, 1, 1);
+            if (ret <= 0)
+                break;
+            if (!(pfd.revents & POLLIN))
+                break;
+            ret = (int)read(pipefd[0], chunk, sizeof(chunk));
+            if (ret <= 0)
+                break;
+            bounded_output_append(bounded, chunk, ret);
+        }
     }
     close(pipefd[0]);
 

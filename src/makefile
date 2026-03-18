@@ -68,7 +68,7 @@ ASMSRC  = startup.S    \
 ASMOBJS = $(addprefix $(OBJDIR)/,$(ASMSRC:.S=.o))
 
 EXTRA_CFLAGS ?=
-SODEX_QEMU_MEM_MB ?= 512
+SODEX_QEMU_MEM_MB ?= 1024
 SODEX_RAM_CAP_MB ?= 0
 SODEX_ROOTFS_OVERLAY ?= ${SRCDIR}/rootfs-overlay
 SODEX_ADMIN_STATUS_TOKEN ?= status-secret

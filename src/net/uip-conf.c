@@ -136,5 +136,5 @@ void uip_udp_appcall(void) {
 }
 
 void uip_log(char *msg) {
-  _kprintf(msg);
+  com1_printf("%s", msg);
 }

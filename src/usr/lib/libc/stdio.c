@@ -35,28 +35,45 @@ static int buf_putud(char *buf, size_t size, int pos, u_int32_t val)
   return pos;
 }
 
-/* Helper: emit hex to buffer (full 32-bit, no leading zero suppression) */
-static int buf_puthex(char *buf, size_t size, int pos, u_int32_t val)
+/* Helper: emit hex to buffer with optional width and zero-pad */
+static int buf_puthex_w(char *buf, size_t size, int pos, u_int32_t val,
+                        int width, int zero_pad)
 {
   char tmp[8];
   int i = 0;
-  int started = 0;
   int shift;
-  if (val == 0)
-    return buf_putc(buf, size, pos, '0');
   for (shift = 28; shift >= 0; shift -= 4) {
     int digit = (val >> shift) & 0x0f;
-    if (digit != 0 || started) {
-      started = 1;
-      if (digit < 10)
-        pos = buf_putc(buf, size, pos, '0' + digit);
-      else
-        pos = buf_putc(buf, size, pos, 'A' + digit - 10);
-    }
+    if (digit < 10)
+      tmp[i++] = '0' + digit;
+    else
+      tmp[i++] = 'a' + digit - 10;
   }
-  (void)tmp;
-  (void)i;
+  /* tmp has 8 hex chars, skip leading zeros unless zero_pad */
+  {
+    int start = 0;
+    int len;
+    if (!zero_pad && width <= 0) {
+      while (start < 7 && tmp[start] == '0')
+        start++;
+    } else if (width > 0) {
+      start = 8 - width;
+      if (start < 0) start = 0;
+    }
+    len = 8 - start;
+    while (len < width) {
+      pos = buf_putc(buf, size, pos, zero_pad ? '0' : ' ');
+      width--;
+    }
+    for (; start < 8; start++)
+      pos = buf_putc(buf, size, pos, tmp[start]);
+  }
   return pos;
+}
+
+static int buf_puthex(char *buf, size_t size, int pos, u_int32_t val)
+{
+  return buf_puthex_w(buf, size, pos, val, 0, 0);
 }
 
 int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
@@ -69,7 +86,34 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 
   for (p = fmt; *p != '\0'; p++) {
     if (*p == '%') {
+      int zero_pad = 0;
+      int width = 0;
+      int precision = -1;
+
       p++;
+
+      /* Parse flags */
+      if (*p == '0') {
+        zero_pad = 1;
+        p++;
+      }
+
+      /* Parse width */
+      while (*p >= '0' && *p <= '9') {
+        width = width * 10 + (*p - '0');
+        p++;
+      }
+
+      /* Parse precision (.N) */
+      if (*p == '.') {
+        p++;
+        precision = 0;
+        while (*p >= '0' && *p <= '9') {
+          precision = precision * 10 + (*p - '0');
+          p++;
+        }
+      }
+
       switch (*p) {
       case 'd': {
         int val = va_arg(ap, int);
@@ -87,13 +131,20 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
       }
       case 'x': {
         u_int32_t val = va_arg(ap, u_int32_t);
-        pos = buf_puthex(buf, size, pos, val);
+        pos = buf_puthex_w(buf, size, pos, val, width, zero_pad);
         break;
       }
       case 's': {
         const char *s = va_arg(ap, const char *);
-        if (s)
-          pos = buf_puts(buf, size, pos, s);
+        if (s) {
+          if (precision >= 0) {
+            int i;
+            for (i = 0; i < precision && s[i]; i++)
+              pos = buf_putc(buf, size, pos, s[i]);
+          } else {
+            pos = buf_puts(buf, size, pos, s);
+          }
+        }
         break;
       }
       case 'c': {

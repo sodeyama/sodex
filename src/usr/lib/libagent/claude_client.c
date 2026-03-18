@@ -7,7 +7,9 @@
 
 #include <agent/claude_client.h>
 #include <agent/claude_adapter.h>
+#include <agent/conversation.h>
 #include <agent/llm_provider.h>
+#include <agent/tool_dispatch.h>
 #include <http_client.h>
 #include <tls_client.h>
 #include <sse_parser.h>
@@ -17,6 +19,30 @@
 #include <debug.h>
 
 /* ---- Retry with simple backoff ---- */
+
+static claude_stream_text_fn s_stream_text_callback = (claude_stream_text_fn)0;
+static void *s_stream_text_userdata = (void *)0;
+
+static void emit_stream_text_delta(int prev_text_len[CLAUDE_MAX_BLOCKS],
+                                   const struct claude_response *resp)
+{
+    int i;
+
+    if (!resp || !s_stream_text_callback)
+        return;
+
+    for (i = 0; i < resp->block_count && i < CLAUDE_MAX_BLOCKS; i++) {
+        if (resp->blocks[i].type != CLAUDE_CONTENT_TEXT)
+            continue;
+        if (resp->blocks[i].text.text_len > prev_text_len[i]) {
+            int delta_len = resp->blocks[i].text.text_len - prev_text_len[i];
+
+            s_stream_text_callback(resp->blocks[i].text.text + prev_text_len[i],
+                                   delta_len,
+                                   s_stream_text_userdata);
+        }
+    }
+}
 
 static void wait_ms(int ms)
 {
@@ -35,9 +61,9 @@ static int recv_sse_stream(
     int sockfd,
     struct claude_response *resp)
 {
-    struct sse_parser sp;
-    struct sse_event ev;
-    char recv_chunk[2048];
+    static struct sse_parser sp;
+    static struct sse_event ev;
+    static char recv_chunk[2048];
     int ret, sse_ret, claude_ret;
 
     sse_parser_init(&sp);
@@ -66,7 +92,15 @@ static int recv_sse_stream(
         /* Feed chunk to SSE parser, process all complete events */
         sp.consumed = 0;
         while ((sse_ret = sse_feed(&sp, recv_chunk, ret, &ev)) == SSE_EVENT_DATA) {
+            int prev_text_len[CLAUDE_MAX_BLOCKS] = {0};
+            int i;
+
+            for (i = 0; i < CLAUDE_MAX_BLOCKS; i++) {
+                if (resp->blocks[i].type == CLAUDE_CONTENT_TEXT)
+                    prev_text_len[i] = resp->blocks[i].text.text_len;
+            }
             claude_ret = claude_parse_sse_event(&ev, resp);
+            emit_stream_text_delta(prev_text_len, resp);
             if (claude_ret == 1) {
                 /* message_stop received */
                 debug_printf("[CLAUDE] response complete: %d block(s), stop=%d, tokens=%d/%d\n",
@@ -95,10 +129,10 @@ static int claude_do_request(
     const char *api_key,
     struct claude_response *out)
 {
-    struct http_header headers[8];
-    struct http_request req;
-    struct http_response resp;
-    char recv_buf[4096];  /* For headers only; body via SSE stream */
+    static struct http_header headers[8];
+    static struct http_request req;
+    static struct http_response resp;
+    static char recv_buf[4096];  /* For headers only; body via SSE stream */
     int header_count = 0;
     int ret;
     int i;
@@ -134,16 +168,38 @@ static int claude_do_request(
      * Use TLS directly for SSE streaming. */
 
     if (req.use_tls) {
-        char send_buf[4096];
+        static char send_buf[4096];
         int send_len;
         int total_recv = 0;
         int header_len = 0;
 
-        /* Build HTTP request string */
-        send_len = http_build_request(send_buf, sizeof(send_buf), &req);
-        if (send_len < 0) {
-            debug_printf("[CLAUDE] request build failed: %d\n", send_len);
-            return CLAUDE_ERR_BUF_OVERFLOW;
+        /* Build HTTP headers */
+        {
+            int pos = 0;
+            int hdr_i;
+
+            pos = snprintf(send_buf, sizeof(send_buf),
+                          "%s %s HTTP/1.1\r\n", req.method, req.path);
+            pos += snprintf(send_buf + pos, sizeof(send_buf) - pos,
+                           "Host: %s\r\n", req.host);
+            for (hdr_i = 0; headers[hdr_i].name != (const char *)0; hdr_i++) {
+                pos += snprintf(send_buf + pos, sizeof(send_buf) - pos,
+                               "%s: %s\r\n",
+                               headers[hdr_i].name, headers[hdr_i].value);
+            }
+            if (request_body_len > 0) {
+                pos += snprintf(send_buf + pos, sizeof(send_buf) - pos,
+                               "Content-Length: %d\r\n", request_body_len);
+            }
+            pos += snprintf(send_buf + pos, sizeof(send_buf) - pos,
+                           "Connection: close\r\n");
+            pos += snprintf(send_buf + pos, sizeof(send_buf) - pos, "\r\n");
+
+            if (pos >= (int)sizeof(send_buf)) {
+                debug_printf("[CLAUDE] HTTP header too large\n");
+                return CLAUDE_ERR_BUF_OVERFLOW;
+            }
+            send_len = pos;
         }
 
         /* TLS connect */
@@ -155,12 +211,22 @@ static int claude_do_request(
             return CLAUDE_ERR_CONNECT;
         }
 
-        /* Send request */
+        /* Send headers first, then body */
         ret = tls_send(send_buf, send_len);
+        debug_printf("[CLAUDE] tls_send headers: ret=%d (len=%d)\n", ret, send_len);
         if (ret < 0) {
-            debug_printf("[CLAUDE] TLS send failed: %d\n", ret);
+            debug_printf("[CLAUDE] TLS send headers failed: %d\n", ret);
             tls_close();
             return CLAUDE_ERR_HTTP;
+        }
+        if (request_body_len > 0) {
+            ret = tls_send(request_body, request_body_len);
+            debug_printf("[CLAUDE] tls_send body: ret=%d (len=%d)\n", ret, request_body_len);
+            if (ret < 0) {
+                debug_printf("[CLAUDE] TLS send body failed: %d\n", ret);
+                tls_close();
+                return CLAUDE_ERR_HTTP;
+            }
         }
         debug_printf("[CLAUDE] POST %s (body=%d bytes)\n",
                     provider->endpoint->path, request_body_len);
@@ -168,6 +234,7 @@ static int claude_do_request(
         /* Receive headers first */
         while (total_recv < (int)sizeof(recv_buf) - 1) {
             ret = tls_recv(recv_buf + total_recv, sizeof(recv_buf) - 1 - total_recv);
+            debug_printf("[CLAUDE] tls_recv returned %d (total=%d)\n", ret, total_recv + (ret > 0 ? ret : 0));
             if (ret <= 0) break;
             total_recv += ret;
             recv_buf[total_recv] = '\0';
@@ -220,8 +287,8 @@ static int claude_do_request(
          * Push it back into the SSE parser, then continue receiving. */
         {
             int extra = total_recv - header_len;
-            struct sse_parser sp;
-            struct sse_event ev;
+            static struct sse_parser sp;
+            static struct sse_event ev;
             int sse_ret, claude_ret;
 
             sse_parser_init(&sp);
@@ -231,7 +298,15 @@ static int claude_do_request(
             if (extra > 0) {
                 sp.consumed = 0;
                 while ((sse_ret = sse_feed(&sp, recv_buf + header_len, extra, &ev)) == SSE_EVENT_DATA) {
+                    int prev_text_len[CLAUDE_MAX_BLOCKS] = {0};
+                    int i;
+
+                    for (i = 0; i < CLAUDE_MAX_BLOCKS; i++) {
+                        if (out->blocks[i].type == CLAUDE_CONTENT_TEXT)
+                            prev_text_len[i] = out->blocks[i].text.text_len;
+                    }
                     claude_ret = claude_parse_sse_event(&ev, out);
+                    emit_stream_text_delta(prev_text_len, out);
                     if (claude_ret == 1) {
                         tls_close();
                         debug_printf("[CLAUDE] response complete: %d block(s), stop=%d\n",
@@ -247,7 +322,7 @@ static int claude_do_request(
 
             /* Continue receiving SSE chunks */
             for (;;) {
-                char chunk[2048];
+                static char chunk[2048];
                 ret = tls_recv(chunk, sizeof(chunk) - 1);
                 if (ret <= 0) {
                     if (out->stop_reason != CLAUDE_STOP_NONE) {
@@ -262,7 +337,15 @@ static int claude_do_request(
 
                 sp.consumed = 0;
                 while ((sse_ret = sse_feed(&sp, chunk, ret, &ev)) == SSE_EVENT_DATA) {
+                    int prev_text_len[CLAUDE_MAX_BLOCKS] = {0};
+                    int i;
+
+                    for (i = 0; i < CLAUDE_MAX_BLOCKS; i++) {
+                        if (out->blocks[i].type == CLAUDE_CONTENT_TEXT)
+                            prev_text_len[i] = out->blocks[i].text.text_len;
+                    }
                     claude_ret = claude_parse_sse_event(&ev, out);
+                    emit_stream_text_delta(prev_text_len, out);
                     if (claude_ret == 1) {
                         tls_close();
                         debug_printf("[CLAUDE] response complete: %d block(s), stop=%d, tokens=%d/%d\n",
@@ -307,7 +390,7 @@ int claude_send_message_with_key(
     const char *api_key,
     struct claude_response *out)
 {
-    char request_buf[4096];
+    static char request_buf[4096];
     struct json_writer jw;
     struct claude_message msgs[1];
     int ret;
@@ -361,4 +444,144 @@ int claude_send_message(
 {
     return claude_send_message_with_key(provider, user_message,
                                         (const char *)0, out);
+}
+
+/* ---- Multi-turn conversation API ---- */
+
+int claude_send_conversation_with_key(
+    const struct llm_provider *provider,
+    const struct conversation *conv,
+    int tools_enabled,
+    const char *api_key,
+    struct claude_response *out)
+{
+    static char request_buf[16384];  /* static: too large for stack */
+    struct json_writer jw;
+    int ret;
+    int attempt;
+    int wait_ms_val = CLAUDE_INITIAL_WAIT_MS;
+
+    if (!provider || !conv || !out)
+        return CLAUDE_ERR_BUF_OVERFLOW;
+
+    /* Build request JSON */
+    jw_init(&jw, request_buf, sizeof(request_buf));
+    jw_object_start(&jw);
+
+    jw_key(&jw, "model");
+    jw_string(&jw, "claude-sonnet-4-20250514");
+
+    jw_key(&jw, "max_tokens");
+    jw_int(&jw, 4096);
+
+    if (conv->system_prompt_len > 0) {
+        jw_key(&jw, "system");
+        jw_string_n(&jw, conv->system_prompt, conv->system_prompt_len);
+    }
+
+    jw_key(&jw, "stream");
+    jw_bool(&jw, 1);
+
+    if (tools_enabled) {
+        jw_key(&jw, "tools");
+        tool_build_definitions(&jw);
+    }
+
+    jw_key(&jw, "messages");
+    ret = conv_build_messages_json(conv, &jw);
+    if (ret < 0) {
+        debug_printf("[CLAUDE] conv_build_messages_json failed: %d\n", ret);
+        return CLAUDE_ERR_BUF_OVERFLOW;
+    }
+
+    jw_object_end(&jw);
+    ret = jw_finish(&jw);
+    if (ret < 0) {
+        debug_printf("[CLAUDE] JSON writer overflow (need > %d bytes)\n",
+                    (int)sizeof(request_buf));
+        return CLAUDE_ERR_BUF_OVERFLOW;
+    }
+
+    debug_printf("[CLAUDE] conversation request: %d turns, %d bytes JSON\n",
+                conv->turn_count, ret);
+
+    /* Retry loop */
+    for (attempt = 0; attempt <= CLAUDE_MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+            debug_printf("[CLAUDE] retry %d/%d (wait %dms)\n",
+                        attempt, CLAUDE_MAX_RETRIES, wait_ms_val);
+            wait_ms(wait_ms_val);
+            wait_ms_val *= 2;
+            if (wait_ms_val > CLAUDE_MAX_WAIT_MS)
+                wait_ms_val = CLAUDE_MAX_WAIT_MS;
+        }
+
+        ret = claude_do_request(provider, request_buf, strlen(request_buf),
+                               api_key, out);
+        if (ret == CLAUDE_OK)
+            return CLAUDE_OK;
+
+        /* Only retry on timeout/429 */
+        if (ret != CLAUDE_ERR_TIMEOUT)
+            return ret;
+    }
+
+    debug_printf("[CLAUDE] all retries exhausted (conversation)\n");
+    return ret;
+}
+
+int claude_send_conversation(
+    const struct llm_provider *provider,
+    const struct conversation *conv,
+    int tools_enabled,
+    struct claude_response *out)
+{
+    return claude_send_conversation_with_key(provider, conv, tools_enabled,
+                                             (const char *)0, out);
+}
+
+/* ---- Raw request API (for agent loop) ---- */
+
+int claude_send_raw_request(
+    const struct llm_provider *provider,
+    const char *request_json, int request_json_len,
+    const char *api_key,
+    struct claude_response *out)
+{
+    int ret;
+    int attempt;
+    int wait_ms_val = CLAUDE_INITIAL_WAIT_MS;
+
+    if (!provider || !request_json || !out)
+        return CLAUDE_ERR_BUF_OVERFLOW;
+
+    /* Retry loop */
+    for (attempt = 0; attempt <= CLAUDE_MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+            debug_printf("[CLAUDE] retry %d/%d (wait %dms)\n",
+                        attempt, CLAUDE_MAX_RETRIES, wait_ms_val);
+            wait_ms(wait_ms_val);
+            wait_ms_val *= 2;
+            if (wait_ms_val > CLAUDE_MAX_WAIT_MS)
+                wait_ms_val = CLAUDE_MAX_WAIT_MS;
+        }
+
+        ret = claude_do_request(provider, request_json, request_json_len,
+                               api_key, out);
+        if (ret == CLAUDE_OK)
+            return CLAUDE_OK;
+
+        if (ret != CLAUDE_ERR_TIMEOUT)
+            return ret;
+    }
+
+    debug_printf("[CLAUDE] all retries exhausted (raw request)\n");
+    return ret;
+}
+
+void claude_client_set_text_stream_callback(claude_stream_text_fn callback,
+                                            void *userdata)
+{
+    s_stream_text_callback = callback;
+    s_stream_text_userdata = userdata;
 }

@@ -68,7 +68,7 @@ ASMSRC  = startup.S    \
 ASMOBJS = $(addprefix $(OBJDIR)/,$(ASMSRC:.S=.o))
 
 EXTRA_CFLAGS ?=
-SODEX_QEMU_MEM_MB ?= 512
+SODEX_QEMU_MEM_MB ?= 1024
 SODEX_RAM_CAP_MB ?= 0
 SODEX_ROOTFS_OVERLAY ?= ${SRCDIR}/rootfs-overlay
 SODEX_ADMIN_STATUS_TOKEN ?= status-secret
@@ -230,7 +230,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-agent-bringup test-claude-smoke ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-agent-bringup test-claude-smoke test-agent-full ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -362,6 +362,10 @@ test-agent-bringup:
 test-claude-smoke:
 	@echo "=== Running Claude smoke test (Phase C) in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/tests/run_claude_smoke.py
+
+test-agent-full:
+	@echo "=== Running Agent Integration Test (Plan 18) in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/tests/run_agent_integration.py
 
 # === API key injection ===
 

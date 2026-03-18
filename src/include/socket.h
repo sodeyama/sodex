@@ -6,7 +6,7 @@
 
 struct wait_queue;
 
-#define MAX_SOCKETS      16
+#define MAX_SOCKETS      64
 
 #define AF_INET          2
 

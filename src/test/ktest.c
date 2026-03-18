@@ -712,6 +712,70 @@ PRIVATE void test_connect_close_cycle(void)
     ktest_fail("connect_close_3_cycles", "cycle failed");
 }
 
+/* === Test: TCP half-close (server sends FIN first, CLOSE_WAIT) === */
+PRIVATE void test_tcp_halfclose(void)
+{
+  int fd = kern_socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) {
+    ktest_fail("tcp_halfclose", "socket creation failed");
+    return;
+  }
+
+  /* Set a reasonable recv timeout */
+  u_int32_t timeout_ms = 10000;
+  kern_setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout_ms, sizeof(timeout_ms));
+
+  struct sockaddr_in addr;
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(7778);  /* half-close server port */
+  u_int8_t *a = (u_int8_t *)&addr.sin_addr;
+  a[0] = 10; a[1] = 0; a[2] = 2; a[3] = 100;
+
+  if (kern_connect(fd, &addr) != 0) {
+    ktest_fail("tcp_halfclose_connect", "connect failed");
+    kern_close_socket(fd);
+    return;
+  }
+  ktest_pass("tcp_halfclose_connect");
+
+  /* The server sends "HALFCLOSE_TEST_OK\n" then shuts down its write side.
+   * This means the server sends FIN first. Our side should enter CLOSE_WAIT,
+   * allowing us to read the data before the connection fully closes. */
+  char rxbuf[64];
+  int total = 0;
+  int chunk;
+  memset(rxbuf, 0, sizeof(rxbuf));
+
+  /* Read until EOF (recv returns 0) */
+  while (total < (int)sizeof(rxbuf) - 1) {
+    chunk = kern_recv(fd, rxbuf + total, sizeof(rxbuf) - 1 - total, 0);
+    if (chunk <= 0)
+      break;
+    total += chunk;
+  }
+
+  serial_puts("  [TCP-HC] received ");
+  serial_putdec(total);
+  serial_puts(" bytes: ");
+  if (total > 0) {
+    /* Print first few bytes */
+    int i;
+    for (i = 0; i < total && i < 40; i++)
+      serial_putc(rxbuf[i] >= ' ' && rxbuf[i] <= '~' ? rxbuf[i] : '.');
+  }
+  serial_puts("\n");
+
+  /* Expected: "HALFCLOSE_TEST_OK\n" (18 bytes) */
+  if (total == 18 && memcmp(rxbuf, "HALFCLOSE_TEST_OK\n", 18) == 0) {
+    ktest_pass("tcp_halfclose_recv");
+  } else {
+    ktest_fail("tcp_halfclose_recv", "wrong data or truncated");
+  }
+
+  kern_close_socket(fd);
+  ktest_pass("tcp_halfclose_close");
+}
+
 /* === Main test runner === */
 PUBLIC void run_kernel_tests(void)
 {
@@ -742,6 +806,7 @@ PUBLIC void run_kernel_tests(void)
   test_tcp_connect();
   test_tcp_split_send();
   test_connect_close_cycle();
+  test_tcp_halfclose();
   /* test_connect_timeout: skipped — takes 10s+ and existing cycle test
    * already validates PIT-tick-based timeout behaviour. */
   test_udp_echo();

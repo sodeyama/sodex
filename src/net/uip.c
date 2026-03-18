@@ -731,6 +731,20 @@ uip_process(u8_t flag)
       if(uip_connr->timer == UIP_TIME_WAIT_TIMEOUT) {
 	uip_connr->tcpstateflags = UIP_CLOSED;
       }
+    } else if(uip_connr->tcpstateflags == UIP_CLOSE_WAIT) {
+      /* Poll the application so it can call uip_close().
+         Timeout after UIP_TIME_WAIT_TIMEOUT to prevent leak. */
+      ++(uip_connr->timer);
+      if(uip_connr->timer >= UIP_TIME_WAIT_TIMEOUT) {
+	/* Timeout: force close */
+	uip_connr->tcpstateflags = UIP_CLOSED;
+	uip_flags = UIP_TIMEDOUT;
+	UIP_APPCALL();
+      } else {
+	uip_flags = UIP_POLL;
+	UIP_APPCALL();
+	goto appsend;
+      }
     } else if(uip_connr->tcpstateflags != UIP_CLOSED) {
       /* If the connection has outstanding data, we increase the
 	 connection's timer and see if it has reached the RTO value
@@ -1460,10 +1474,9 @@ uip_process(u8_t flag)
 
   /* Do different things depending on in what state the connection is. */
   switch(uip_connr->tcpstateflags & UIP_TS_MASK) {
-    /* CLOSED and LISTEN are not handled here. CLOSE_WAIT is not
-	implemented, since we force the application to close when the
-	peer sends a FIN (hence the application goes directly from
-	ESTABLISHED to LAST_ACK). */
+    /* CLOSED and LISTEN are not handled here. CLOSE_WAIT is handled:
+	when the peer sends a FIN, we enter CLOSE_WAIT and wait for the
+	application to call uip_close() before transitioning to LAST_ACK. */
   case UIP_SYN_RCVD:
     /* In SYN_RCVD we have sent out a SYNACK in response to a SYN, and
        we are waiting for an ACK that acknowledges the data we sent
@@ -1566,12 +1579,11 @@ uip_process(u8_t flag)
 	uip_flags |= UIP_NEWDATA;
       }
       UIP_APPCALL();
-      uip_connr->len = 1;
-      uip_connr->tcpstateflags = UIP_LAST_ACK;
+      /* Enter CLOSE_WAIT: send ACK only, wait for app to close */
+      uip_connr->tcpstateflags = UIP_CLOSE_WAIT;
       uip_connr->nrtx = 0;
-    tcp_send_finack:
-      BUF->flags = TCP_FIN | TCP_ACK;
-      goto tcp_send_nodata;
+      uip_connr->timer = 0;
+      goto tcp_send_ack;
     }
 
     /* Check the URG flag. If this is set, the segment carries urgent
@@ -1656,7 +1668,11 @@ uip_process(u8_t flag)
       if(uip_flags & UIP_CLOSE) {
 	uip_slen = 0;
 	uip_connr->len = 1;
-	uip_connr->tcpstateflags = UIP_FIN_WAIT_1;
+	if(uip_connr->tcpstateflags == UIP_CLOSE_WAIT) {
+	  uip_connr->tcpstateflags = UIP_LAST_ACK;
+	} else {
+	  uip_connr->tcpstateflags = UIP_FIN_WAIT_1;
+	}
 	uip_connr->nrtx = 0;
 	BUF->flags = TCP_FIN | TCP_ACK;
 	goto tcp_send_nodata;
@@ -1717,6 +1733,16 @@ uip_process(u8_t flag)
       }
     }
     goto drop;
+
+  case UIP_CLOSE_WAIT:
+    /* Peer has sent FIN, we ACKed it. Now we wait for the application
+       to call uip_close() via periodic polling (see above).
+       If the peer re-sends FIN (our ACK was lost), just re-ACK. */
+    if(BUF->flags & TCP_FIN) {
+      goto tcp_send_ack;
+    }
+    goto drop;
+
   case UIP_LAST_ACK:
     /* We can close this connection if the peer has acknowledged our
        FIN. This is indicated by the UIP_ACKDATA flag. */
@@ -1784,6 +1810,11 @@ uip_process(u8_t flag)
   }
   goto drop;
   
+
+  /* We jump here when we need to retransmit a FIN+ACK. */
+ tcp_send_finack:
+  BUF->flags = TCP_FIN | TCP_ACK;
+  goto tcp_send_nodata;
 
   /* We jump here when we are ready to send the packet, and just want
      to set the appropriate TCP sequence numbers in the TCP header. */

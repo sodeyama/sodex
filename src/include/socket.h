@@ -24,6 +24,7 @@ struct wait_queue;
 #define SOCK_STATE_LISTENING  3
 #define SOCK_STATE_CONNECTED  4
 #define SOCK_STATE_CLOSED     5
+#define SOCK_STATE_CLOSE_WAIT 6
 
 /* Socket error codes (negative values returned by kern_connect etc.) */
 #define SOCK_ERR_TIMEOUT     (-1)   /* Connection or recv timed out */

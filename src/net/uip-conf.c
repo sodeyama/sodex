@@ -86,11 +86,26 @@ void uip_appcall(void) {
     socket_tcp_input(sockfd, (u_int8_t *)uip_appdata, uip_datalen());
   }
 
-  if (uip_closed() || uip_aborted() || uip_timedout()) {
+  if (uip_aborted() || uip_timedout()) {
     sk->state = SOCK_STATE_CLOSED;
     wakeup(&sk->recv_wq);
     wakeup(&sk->connect_wq);
     poll_notify_all();
+  }
+
+  if (uip_closed()) {
+    if (uip_conn->tcpstateflags == UIP_CLOSE_WAIT) {
+      /* Peer sent FIN, but we haven't closed yet — enter CLOSE_WAIT */
+      sk->state = SOCK_STATE_CLOSE_WAIT;
+      wakeup(&sk->recv_wq);
+      poll_notify_all();
+    } else {
+      /* Connection fully closed (LAST_ACK → CLOSED, etc.) */
+      sk->state = SOCK_STATE_CLOSED;
+      wakeup(&sk->recv_wq);
+      wakeup(&sk->connect_wq);
+      poll_notify_all();
+    }
   }
 
   /* appcall 中だけ uip_send() / uip_close() を呼ぶ */
@@ -106,7 +121,8 @@ void uip_appcall(void) {
     sent_output = 1;
   }
 
-  if (ready_for_output && !sent_output &&
+  if ((ready_for_output || sk->state == SOCK_STATE_CLOSE_WAIT) &&
+      !sent_output &&
       sk->close_pending && !sk->tx_pending &&
       !uip_outstanding(uip_conn)) {
     dbg_puts("TCP: CLOSE sockfd=");

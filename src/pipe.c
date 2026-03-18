@@ -10,6 +10,8 @@ struct pipe_info {
   size_t data_size;
   int read_open;
   int write_open;
+  struct wait_queue *read_wq;
+  struct wait_queue *write_wq;
 };
 
 PRIVATE ssize_t pipe_read(struct file *file, void *buf, size_t count);
@@ -44,7 +46,11 @@ PRIVATE ssize_t pipe_read(struct file *file, void *buf, size_t count)
   while (pipe->data_size == 0) {
     if (pipe->write_open == 0)
       return 0;
-    enableInterrupt();
+    sleep_on(&pipe->read_wq);
+    /* Woken by signal while pipe still empty and write end open */
+    if (pipe->data_size == 0 && pipe->write_open != 0 &&
+        current != (struct task_struct *)0 && current->signal != 0)
+      return -1;
   }
 
   total = count;
@@ -93,6 +99,7 @@ PRIVATE ssize_t pipe_write(struct file *file, const void *buf, size_t count)
 
   pipe->write_pos = (pipe->write_pos + total) % PIPE_BUFFER_SIZE;
   pipe->data_size += total;
+  wakeup(&pipe->read_wq);
   return (ssize_t)total;
 }
 
@@ -109,8 +116,11 @@ PRIVATE int pipe_close(struct file *file)
 
   if (file->f_stdioflag == FLAG_PIPE_READ && pipe->read_open > 0)
     pipe->read_open--;
-  if (file->f_stdioflag == FLAG_PIPE_WRITE && pipe->write_open > 0)
+  if (file->f_stdioflag == FLAG_PIPE_WRITE && pipe->write_open > 0) {
     pipe->write_open--;
+    if (pipe->write_open == 0)
+      wakeup(&pipe->read_wq);
+  }
 
   if (pipe->read_open == 0 && pipe->write_open == 0) {
     if (pipe->buffer != NULL)

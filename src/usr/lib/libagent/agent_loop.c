@@ -56,8 +56,13 @@ static int prompt_append_chunk(struct agent_config *config,
     remaining = AGENT_MAX_SYSTEM_PROMPT - config->system_prompt_len - 1;
     if (remaining <= 0)
         return 0;
-    if (text_len > remaining)
+    if (text_len > remaining) {
         text_len = remaining;
+        /* Back up to avoid splitting a multi-byte UTF-8 sequence */
+        while (text_len > 0 &&
+               ((unsigned char)text[text_len] & 0xC0) == 0x80)
+            text_len--;
+    }
 
     memcpy(config->system_prompt + config->system_prompt_len, text, text_len);
     config->system_prompt_len += text_len;

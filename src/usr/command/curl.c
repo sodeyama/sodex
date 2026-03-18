@@ -59,9 +59,9 @@ PRIVATE int parse_url(const char *url, struct parsed_url *out)
         out->port = 80;
         p = url + 7;
     } else {
-        /* No scheme: assume http */
-        out->use_tls = 0;
-        out->port = 80;
+        /* No scheme: assume https */
+        out->use_tls = 1;
+        out->port = 443;
         p = url;
     }
 
@@ -292,9 +292,10 @@ int main(int argc, char *argv[])
     if (url.use_tls) {
         int send_len2;
         static char send_buf2[2048];
+        static char hdr_buf[4096];
+        int hdr_len = 0;
         int total_body = 0;
         int header_done = 0;
-        int header_bytes = 0;
 
         /* TLS connect */
         ret = tls_connect(url.host, url.port);
@@ -318,7 +319,10 @@ int main(int argc, char *argv[])
                 pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
                                "Content-Length: %d\r\n", req.body_len);
             pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
-                           "Accept-Encoding: identity\r\n\r\n");
+                           "User-Agent: sodex-curl/1.0\r\n"
+                           "Accept: */*\r\n"
+                           "Accept-Encoding: identity\r\n"
+                           "Connection: close\r\n\r\n");
             send_len2 = pos;
         }
 
@@ -352,19 +356,29 @@ int main(int argc, char *argv[])
                 continue;
             }
             zero_count = 0;
-            recv_buf[ret] = '\0';
 
             if (!header_done) {
-                /* Accumulate until we see \r\n\r\n */
-                char *body_start = strstr(recv_buf, "\r\n\r\n");
-                if (body_start) {
+                /* Accumulate header data until we see \r\n\r\n */
+                int copy = ret;
+                char *sep;
+
+                if (hdr_len + copy > (int)sizeof(hdr_buf) - 1)
+                    copy = (int)sizeof(hdr_buf) - 1 - hdr_len;
+                if (copy > 0) {
+                    memcpy(hdr_buf + hdr_len, recv_buf, copy);
+                    hdr_len += copy;
+                    hdr_buf[hdr_len] = '\0';
+                }
+
+                sep = strstr(hdr_buf, "\r\n\r\n");
+                if (sep) {
+                    char *body_start = sep + 4;
+                    int body_offset = body_start - hdr_buf;
+
                     header_done = 1;
-                    body_start += 4;
-                    header_bytes = body_start - recv_buf;
 
                     if (verbose) {
-                        /* Print headers */
-                        char *p = recv_buf;
+                        char *p = hdr_buf;
                         while (p < body_start) {
                             char *nl = strstr(p, "\r\n");
                             if (!nl || nl >= body_start) break;
@@ -375,9 +389,9 @@ int main(int argc, char *argv[])
                         printf("<\n");
                     }
 
-                    /* Output body portion */
+                    /* Output body portion that was in the header buffer */
                     {
-                        int body_len = ret - header_bytes;
+                        int body_len = hdr_len - body_offset;
                         if (body_len > 0) {
                             if (fd >= 0)
                                 write(fd, body_start, body_len);
@@ -385,6 +399,17 @@ int main(int argc, char *argv[])
                                 write(1, body_start, body_len);
                             total_body += body_len;
                         }
+                    }
+
+                    /* Also output any remaining data from recv_buf
+                     * that didn't fit in hdr_buf */
+                    if (copy < ret) {
+                        int extra = ret - copy;
+                        if (fd >= 0)
+                            write(fd, recv_buf + copy, extra);
+                        else
+                            write(1, recv_buf + copy, extra);
+                        total_body += extra;
                     }
                 }
             } else {

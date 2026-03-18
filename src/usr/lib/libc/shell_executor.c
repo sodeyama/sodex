@@ -749,6 +749,122 @@ static int shell_builtin_exit(struct shell_state *state,
   return status;
 }
 
+/* ---- builtin [ / test ---- */
+
+static int test_file_exists(const char *path)
+{
+  int fd = open(path, O_RDONLY, 0);
+
+  if (fd < 0)
+    return 0;
+  close(fd);
+  return 1;
+}
+
+static int test_is_nonempty_string(const char *s)
+{
+  return s != 0 && s[0] != '\0';
+}
+
+/*
+ * Evaluate a single test primary.  Returns 1 for true, 0 for false.
+ * *pos is advanced past the consumed tokens.
+ */
+static int test_eval_primary(int argc, char **argv, int *pos)
+{
+  const char *tok;
+
+  if (*pos >= argc)
+    return 0;
+
+  tok = argv[*pos];
+
+  /* unary: ! expr */
+  if (strcmp(tok, "!") == 0) {
+    (*pos)++;
+    return !test_eval_primary(argc, argv, pos);
+  }
+
+  /* -f FILE */
+  if (strcmp(tok, "-f") == 0 || strcmp(tok, "-e") == 0) {
+    (*pos)++;
+    if (*pos >= argc)
+      return 0;
+    (*pos)++;
+    return test_file_exists(argv[*pos - 1]);
+  }
+
+  /* -d DIR (use open; good enough for this OS) */
+  if (strcmp(tok, "-d") == 0) {
+    (*pos)++;
+    if (*pos >= argc)
+      return 0;
+    (*pos)++;
+    return test_file_exists(argv[*pos - 1]);
+  }
+
+  /* -n STRING */
+  if (strcmp(tok, "-n") == 0) {
+    (*pos)++;
+    if (*pos >= argc)
+      return 0;
+    (*pos)++;
+    return test_is_nonempty_string(argv[*pos - 1]);
+  }
+
+  /* -z STRING */
+  if (strcmp(tok, "-z") == 0) {
+    (*pos)++;
+    if (*pos >= argc)
+      return 1;
+    (*pos)++;
+    return !test_is_nonempty_string(argv[*pos - 1]);
+  }
+
+  /* binary: STRING = STRING  /  STRING != STRING */
+  if (*pos + 2 < argc) {
+    const char *op = argv[*pos + 1];
+
+    if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) {
+      int r = strcmp(argv[*pos], argv[*pos + 2]) == 0;
+      *pos += 3;
+      return r;
+    }
+    if (strcmp(op, "!=") == 0) {
+      int r = strcmp(argv[*pos], argv[*pos + 2]) != 0;
+      *pos += 3;
+      return r;
+    }
+  }
+
+  /* bare string — true if non-empty */
+  (*pos)++;
+  return test_is_nonempty_string(tok);
+}
+
+static int shell_builtin_test(struct shell_expanded_command *command)
+{
+  int is_bracket;
+  int argc;
+  int pos;
+  int result;
+
+  is_bracket = (strcmp(command->argv[0], "[") == 0);
+
+  argc = command->argc;
+  /* strip trailing ] for [ ... ] syntax */
+  if (is_bracket) {
+    if (argc < 2 || strcmp(command->argv[argc - 1], "]") != 0)
+      return 2; /* syntax error */
+    argc--;
+  }
+
+  pos = 1; /* skip argv[0] which is "[" or "test" */
+  result = test_eval_primary(argc, command->argv, &pos);
+
+  return result ? 0 : 1;
+}
+
 static int shell_apply_assignments(struct shell_state *state,
                                    const struct shell_expanded_command *command)
 {
@@ -800,6 +916,8 @@ static int shell_builtin_run(struct shell_state *state,
     return 0;
   if (strcmp(name, "false") == 0)
     return 1;
+  if (strcmp(name, "[") == 0 || strcmp(name, "test") == 0)
+    return shell_builtin_test(command);
   return -1;
 }
 

@@ -1381,6 +1381,7 @@ void uip_process(u8_t flag);
 #define UIP_CLOSING     6
 #define UIP_TIME_WAIT   7
 #define UIP_LAST_ACK    8
+#define UIP_CLOSE_WAIT  9
 #define UIP_TS_MASK     15
   
 #define UIP_STOPPED      16

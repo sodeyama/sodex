@@ -13,7 +13,7 @@ import time
 from qemu_config import get_qemu_memory_mb
 
 QEMU_SUCCESS = 1
-DEFAULT_TIMEOUT = 45
+DEFAULT_TIMEOUT = 60
 
 
 def _dump_file(path: pathlib.Path) -> None:
@@ -67,6 +67,7 @@ def main() -> int:
     logdir = pathlib.Path(sys.argv[2]).resolve()
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     echo_server = repo_root / "src/test/echo_server.py"
+    halfclose_server = repo_root / "src/test/halfclose_server.py"
 
     logdir.mkdir(parents=True, exist_ok=True)
     serial_log = logdir / "test_serial.log"
@@ -83,11 +84,22 @@ def main() -> int:
     qemu_bin = os.environ.get("QEMU", "qemu-system-i386")
     qemu_memory_mb = get_qemu_memory_mb()
 
-    with echo_log.open("w") as echo_fp:
+    halfclose_log = logdir / "test_halfclose.log"
+    if halfclose_log.exists():
+        halfclose_log.unlink()
+
+    with echo_log.open("w") as echo_fp, halfclose_log.open("w") as hc_fp:
         echo_proc = subprocess.Popen(
             [sys.executable, str(echo_server)],
             cwd=repo_root,
             stdout=echo_fp,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        halfclose_proc = subprocess.Popen(
+            [sys.executable, str(halfclose_server)],
+            cwd=repo_root,
+            stdout=hc_fp,
             stderr=subprocess.STDOUT,
             text=True,
         )
@@ -97,6 +109,10 @@ def main() -> int:
             if echo_proc.poll() is not None:
                 print("echo server failed to start")
                 _dump_file(echo_log)
+                return 1
+            if halfclose_proc.poll() is not None:
+                print("halfclose server failed to start")
+                _dump_file(halfclose_log)
                 return 1
 
             qemu_args = [
@@ -116,7 +132,7 @@ def main() -> int:
                 "-D",
                 str(qemu_log),
                 "-netdev",
-                "user,id=net0,guestfwd=tcp:10.0.2.100:7777-tcp:127.0.0.1:17777",
+                "user,id=net0,guestfwd=tcp:10.0.2.100:7777-tcp:127.0.0.1:17777,guestfwd=tcp:10.0.2.100:7778-tcp:127.0.0.1:17778",
                 "-device",
                 "ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net0",
             ]
@@ -142,11 +158,17 @@ def main() -> int:
                     qemu_rc = qemu_proc.wait()
 
             echo_proc.terminate()
+            halfclose_proc.terminate()
             try:
                 echo_proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 echo_proc.kill()
                 echo_proc.wait()
+            try:
+                halfclose_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                halfclose_proc.kill()
+                halfclose_proc.wait()
 
             print("")
             print("=== KERNEL INTEGRATION TESTS DONE ===")

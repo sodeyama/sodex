@@ -52,6 +52,16 @@ int http_build_request(char *buf, int cap, const struct http_request *req)
         }
     }
 
+    /* User-Agent (required by many CDN/WAF like CloudFront) */
+    pos += snprintf(buf + pos, cap - pos, "User-Agent: sodex-curl/1.0\r\n");
+    if (pos >= cap)
+        return HTTP_ERR_BUF_OVERFLOW;
+
+    /* Accept */
+    pos += snprintf(buf + pos, cap - pos, "Accept: */*\r\n");
+    if (pos >= cap)
+        return HTTP_ERR_BUF_OVERFLOW;
+
     /* Content-Length for POST with body */
     if (req->body && req->body_len > 0) {
         pos += snprintf(buf + pos, cap - pos, "Content-Length: %d\r\n",

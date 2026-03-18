@@ -288,7 +288,121 @@ int main(int argc, char *argv[])
     req.body_len = data ? strlen(data) : 0;
     req.use_tls = url.use_tls;
 
-    /* Execute request */
+    /* For HTTPS: streaming receive (TLS handles connection) */
+    if (url.use_tls) {
+        int send_len2;
+        static char send_buf2[2048];
+        int total_body = 0;
+        int header_done = 0;
+        int header_bytes = 0;
+
+        /* TLS connect */
+        ret = tls_connect(url.host, url.port);
+        if (ret != 0) {
+            printf("curl: TLS connect failed (%d)\n", ret);
+            exit(1);
+            return 1;
+        }
+
+        /* Build and send HTTP request */
+        {
+            int pos = 0;
+            pos = snprintf(send_buf2, sizeof(send_buf2),
+                          "%s %s HTTP/1.1\r\nHost: %s\r\n",
+                          method, url.path, url.host);
+            for (i = 0; i < num_headers; i++) {
+                pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
+                               "%s: %s\r\n", headers[i].name, headers[i].value);
+            }
+            if (req.body_len > 0)
+                pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
+                               "Content-Length: %d\r\n", req.body_len);
+            pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
+                           "Connection: close\r\n\r\n");
+            send_len2 = pos;
+        }
+
+        tls_send(send_buf2, send_len2);
+        if (req.body_len > 0)
+            tls_send(req.body, req.body_len);
+
+        /* Streaming receive: print body as it arrives */
+        fd = -1;
+        if (output_file) {
+            fd = creat(output_file, 0644);
+            if (fd < 0) {
+                printf("curl: cannot open '%s'\n", output_file);
+                tls_close();
+                exit(1);
+                return 1;
+            }
+        }
+
+        for (;;) {
+            ret = tls_recv(recv_buf, sizeof(recv_buf) - 1);
+            if (ret <= 0)
+                break;
+            recv_buf[ret] = '\0';
+
+            if (!header_done) {
+                /* Accumulate until we see \r\n\r\n */
+                char *body_start = strstr(recv_buf, "\r\n\r\n");
+                if (body_start) {
+                    header_done = 1;
+                    body_start += 4;
+                    header_bytes = body_start - recv_buf;
+
+                    if (verbose) {
+                        /* Print headers */
+                        char *p = recv_buf;
+                        while (p < body_start) {
+                            char *nl = strstr(p, "\r\n");
+                            if (!nl || nl >= body_start) break;
+                            *nl = '\0';
+                            printf("< %s\n", p);
+                            p = nl + 2;
+                        }
+                        printf("<\n");
+                    }
+
+                    /* Output body portion */
+                    {
+                        int body_len = ret - header_bytes;
+                        if (body_len > 0) {
+                            if (fd >= 0)
+                                write(fd, body_start, body_len);
+                            else
+                                write(1, body_start, body_len);
+                            total_body += body_len;
+                        }
+                    }
+                }
+            } else {
+                /* Pure body data */
+                if (fd >= 0)
+                    write(fd, recv_buf, ret);
+                else
+                    write(1, recv_buf, ret);
+                total_body += ret;
+            }
+        }
+
+        tls_close();
+        if (fd >= 0) {
+            close(fd);
+            if (verbose)
+                printf("\nSaved %d bytes to %s\n", total_body, output_file);
+        } else if (total_body > 0) {
+            /* trailing newline */
+            if (recv_buf[0] && recv_buf[ret > 0 ? ret - 1 : 0] != '\n')
+                putc('\n');
+        }
+
+        exit(0);
+        return 0;
+    }
+
+    /* Non-TLS: use http_do_request as before */
     ret = http_do_request(&req, recv_buf, sizeof(recv_buf), &resp);
 
     if (ret != HTTP_OK) {
@@ -307,37 +421,28 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Verbose: show status and headers info */
     if (verbose) {
         printf("< HTTP %d %s\n", resp.status_code, resp.status_text);
         if (resp.content_type[0])
             printf("< Content-Type: %s\n", resp.content_type);
         if (resp.content_length >= 0)
             printf("< Content-Length: %d\n", resp.content_length);
-        if (resp.is_chunked)
-            printf("< Transfer-Encoding: chunked\n");
-        if (resp.retry_after >= 0)
-            printf("< Retry-After: %d\n", resp.retry_after);
         printf("<\n");
     }
 
-    /* Output body */
     if (resp.body && resp.body_len > 0) {
         if (output_file) {
             fd = creat(output_file, 0644);
             if (fd < 0) {
-                printf("curl: cannot open '%s' for writing\n", output_file);
+                printf("curl: cannot open '%s'\n", output_file);
                 exit(1);
                 return 1;
             }
             write(fd, resp.body, resp.body_len);
             close(fd);
-            if (verbose)
-                printf("Saved %d bytes to %s\n", resp.body_len, output_file);
         } else {
             write(1, resp.body, resp.body_len);
-            /* Add trailing newline if body doesn't end with one */
-            if (resp.body_len > 0 && resp.body[resp.body_len - 1] != '\n')
+            if (resp.body[resp.body_len - 1] != '\n')
                 putc('\n');
         }
     }

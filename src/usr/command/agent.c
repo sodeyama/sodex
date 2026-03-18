@@ -618,10 +618,10 @@ static int run_single_turn(struct agent_state *state,
     claude_client_set_text_stream_callback((claude_stream_text_fn)0, (void *)0);
     if (ret == 0)
         persist_new_turns(session->id, state, start_turn, &s_result);
-    if (s_streamed_chars > 0 &&
-        s_result.stop_reason == AGENT_STOP_END_TURN &&
-        s_result.final_text_len > 0) {
-        if (s_result.final_text[s_result.final_text_len - 1] != '\n')
+    if (s_streamed_chars > 0) {
+        /* Streaming already displayed text; just add newline if needed */
+        if (s_result.final_text_len > 0 &&
+            s_result.final_text[s_result.final_text_len - 1] != '\n')
             printf("\n");
     } else {
         print_result(&s_result);
@@ -745,6 +745,8 @@ static int repl_loop(struct agent_state *state,
                      const char *initial_prompt,
                      int custom_steps)
 {
+    printf("session: %s\n", session->id);
+
     if (initial_prompt && *initial_prompt) {
         if (run_single_turn(state, session, initial_prompt) < 0)
             return -1;

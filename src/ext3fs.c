@@ -896,7 +896,7 @@ PRIVATE ext3_dentry* __create_file(const char* pathname,
   // If the file we want to open already exist,
   //  return NULL
   if (__get_dentry(filename, parentdir) != NULL) {
-    _kprintf("%s file already exist.\n", pathname);
+    com1_printf("mkdir: %s already exists\r\n", pathname);
     return NULL;
   }
   

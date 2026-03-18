@@ -254,6 +254,13 @@ static void vt_parser_dispatch_csi(struct vt_parser *parser, char final)
   case 's':
     terminal_surface_save_cursor(surface);
     break;
+  case 'r': {
+    /* DECSTBM: Set Scrolling Region */
+    int top = vt_parser_param(parser, 0, 1) - 1;
+    int bottom = vt_parser_param(parser, 1, surface->rows) - 1;
+    terminal_surface_set_scroll_region(surface, top, bottom);
+    break;
+  }
   case 'u':
     terminal_surface_restore_cursor(surface);
     break;

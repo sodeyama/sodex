@@ -58,6 +58,8 @@ struct terminal_surface {
   int primary_saved_col;
   int primary_saved_row;
   int primary_saved_wrap_pending;
+  int scroll_top;     /* top row of scroll region (0-based, inclusive) */
+  int scroll_bottom;  /* bottom row of scroll region (0-based, inclusive) */
 };
 
 int terminal_surface_init(struct terminal_surface *surface, int cols, int rows);
@@ -88,6 +90,8 @@ void terminal_surface_enter_alternate(struct terminal_surface *surface,
                                       const struct term_cell *fill);
 void terminal_surface_leave_alternate(struct terminal_surface *surface);
 int terminal_surface_is_alternate(const struct terminal_surface *surface);
+void terminal_surface_set_scroll_region(struct terminal_surface *surface,
+                                        int top, int bottom);
 void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
                                 const struct term_cell *fill);
 void terminal_surface_put_cell(struct terminal_surface *surface,

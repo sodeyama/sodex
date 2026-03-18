@@ -180,9 +180,9 @@ static void terminal_surface_wrap_for_output(struct terminal_surface *surface,
 
   surface->wrap_pending = 0;
   surface->cursor_col = 0;
-  if (surface->cursor_row >= surface->rows - 1) {
+  if (surface->cursor_row >= surface->scroll_bottom) {
     terminal_surface_scroll_up(surface, 1, fill);
-    surface->cursor_row = surface->rows - 1;
+    surface->cursor_row = surface->scroll_bottom;
   } else {
     surface->cursor_row++;
   }
@@ -304,6 +304,8 @@ void terminal_surface_reset(struct terminal_surface *surface,
   surface->saved_row = 0;
   surface->saved_wrap_pending = 0;
   surface->scroll_count = 0;
+  surface->scroll_top = 0;
+  surface->scroll_bottom = surface->rows - 1;
   terminal_surface_clear(surface, fill);
 }
 
@@ -527,26 +529,57 @@ int terminal_surface_is_alternate(const struct terminal_surface *surface)
   return surface->alternate_active != 0;
 }
 
+void terminal_surface_set_scroll_region(struct terminal_surface *surface,
+                                        int top, int bottom)
+{
+  if (surface == NULL)
+    return;
+  if (top < 0)
+    top = 0;
+  if (bottom >= surface->rows)
+    bottom = surface->rows - 1;
+  if (top >= bottom)
+    return;
+  surface->scroll_top = top;
+  surface->scroll_bottom = bottom;
+  /* DECSTBM resets cursor to home */
+  surface->cursor_col = 0;
+  surface->cursor_row = 0;
+  surface->wrap_pending = 0;
+}
+
 void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
                                 const struct term_cell *fill)
 {
   struct term_cell blank;
   int row;
   int col;
+  int region_top;
+  int region_bottom;
+  int region_size;
 
   if (surface == NULL || surface->cells == NULL || lines <= 0)
     return;
 
   surface->wrap_pending = 0;
 
-  if (lines >= surface->rows) {
+  region_top = surface->scroll_top;
+  region_bottom = surface->scroll_bottom;
+  if (region_top < 0)
+    region_top = 0;
+  if (region_bottom >= surface->rows)
+    region_bottom = surface->rows - 1;
+  region_size = region_bottom - region_top + 1;
+
+  if (lines >= region_size) {
     surface->scroll_count += lines;
-    terminal_surface_clear(surface, fill);
+    terminal_surface_clear_region(surface, 0, region_top,
+                                  surface->cols - 1, region_bottom, fill);
     return;
   }
 
   blank = terminal_surface_blank_cell(fill);
-  for (row = 0; row < surface->rows - lines; row++) {
+  for (row = region_top; row <= region_bottom - lines; row++) {
     for (col = 0; col < surface->cols; col++) {
       int dst = terminal_surface_index(surface, col, row);
       int src = terminal_surface_index(surface, col, row + lines);
@@ -554,7 +587,7 @@ void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
       surface->dirty[dst] = surface->dirty[src];
     }
   }
-  for (row = surface->rows - lines; row < surface->rows; row++) {
+  for (row = region_bottom - lines + 1; row <= region_bottom; row++) {
     for (col = 0; col < surface->cols; col++) {
       int index = terminal_surface_index(surface, col, row);
       surface->cells[index] = blank;
@@ -679,9 +712,9 @@ void terminal_surface_newline(struct terminal_surface *surface,
 
   surface->wrap_pending = 0;
   surface->cursor_col = 0;
-  if (surface->cursor_row >= surface->rows - 1) {
+  if (surface->cursor_row >= surface->scroll_bottom) {
     terminal_surface_scroll_up(surface, 1, fill);
-    surface->cursor_row = surface->rows - 1;
+    surface->cursor_row = surface->scroll_bottom;
   } else {
     surface->cursor_row++;
   }

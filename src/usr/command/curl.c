@@ -320,8 +320,7 @@ int main(int argc, char *argv[])
             pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
                            "User-Agent: sodex-curl/1.0\r\n"
                            "Accept: */*\r\n"
-                           "Accept-Encoding: identity\r\n"
-                           "Connection: close\r\n\r\n");
+                           "Accept-Encoding: identity\r\n\r\n");
             send_len2 = pos;
         }
 

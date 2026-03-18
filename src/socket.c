@@ -799,18 +799,18 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
     EXTERN void network_poll(void);
     u_int32_t deadline = kernel_tick + sk->timeout_ticks;
 
-    /* CLOSE_WAIT with empty rx buffer means EOF (peer closed) */
-    if (sk->state == SOCK_STATE_CLOSE_WAIT)
-      return 0;
-
     while ((int)(kernel_tick - deadline) < 0) {
       disableInterrupt();
       network_poll();
       enableInterrupt();
       if (sk->rx_len > 0)
         break;
-      if (sk->state == SOCK_STATE_CLOSED ||
-          sk->state == SOCK_STATE_CLOSE_WAIT)
+      if (sk->state == SOCK_STATE_CLOSED)
+        break;
+      /* CLOSE_WAIT: peer sent FIN. Poll once more so any data that
+       * arrived in the same segment as FIN gets buffered, then treat
+       * empty rx as EOF. */
+      if (sk->state == SOCK_STATE_CLOSE_WAIT)
         break;
     }
     if (signer && sk->rx_len > 0)

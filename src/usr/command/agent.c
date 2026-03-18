@@ -936,7 +936,6 @@ int main(int argc, char *argv[])
         printf("agent: session create failed\n");
         return 1;
     }
-    printf("session: %s\n", s_session.id);
     return repl_loop(&s_state, &s_session,
                      prompt[0] ? prompt : 0,
                      custom_steps) == 0 ? 0 : 1;

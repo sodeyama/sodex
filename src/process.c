@@ -28,6 +28,7 @@
 #include <debug_shell_server.h>
 
 EXTERN void network_poll(void);
+PUBLIC int32_t kfree(void* ptr);
 EXTERN volatile u_int32_t kernel_tick;
 PUBLIC volatile int process_in_timer_interrupt = FALSE;
 
@@ -278,10 +279,26 @@ PRIVATE void _exit()
 {
   struct task_struct* next = dlist_entry(current->run_list.next,
                                          struct task_struct, run_list);
-  reparent_children(current);
-  files_close_all(current->files);
-  dlist_remove(&(current->sibling));
-  dlist_remove(&(current->run_list));
+  struct task_struct *exiting = current;
+
+  reparent_children(exiting);
+  files_close_all(exiting->files);
+  dlist_remove(&(exiting->sibling));
+  dlist_remove(&(exiting->run_list));
+
+  /* Free process memory: pages → page directory → kernel allocations → task */
+  if (exiting->pg_dir != NULL)
+    free_process_pages(exiting->pg_dir);
+  if (exiting->pg_dir_raw != NULL)
+    kfree(exiting->pg_dir_raw);
+  if (exiting->context != NULL)
+    kfree(exiting->context);
+  if (exiting->esp0_raw != NULL)
+    kfree(exiting->esp0_raw);
+  if (exiting->files != NULL)
+    kfree(exiting->files);
+  kfree(exiting);
+
   current = next;
   schedule();
 }

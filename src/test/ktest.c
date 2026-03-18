@@ -16,6 +16,7 @@
 #include <socket.h>
 #include <network_config.h>
 #include <string.h>
+#include <process.h>
 
 #define KTEST_ICMP_ECHO       8
 #define KTEST_ICMP_ECHOREPLY  0
@@ -196,6 +197,36 @@ PRIVATE void test_palloc_basic(void)
     pfree(p);
   } else {
     ktest_fail("palloc_basic", "palloc returned NULL");
+  }
+}
+
+/* === Test: palloc/pfree cycle (regression for issue #12 memory leak) === */
+PRIVATE void test_palloc_pfree_cycle(void)
+{
+  int i;
+  int ok = 1;
+
+  for (i = 0; i < 20; i++) {
+    void *p = palloc(PROC_STACK_SIZE);
+    if (p == NULL) {
+      ok = 0;
+      serial_puts("  palloc returned NULL at cycle ");
+      serial_putdec(i);
+      serial_puts("\n");
+      break;
+    }
+    if (pfree(p) != KFREE_OK) {
+      ok = 0;
+      serial_puts("  pfree failed at cycle ");
+      serial_putdec(i);
+      serial_puts("\n");
+      break;
+    }
+  }
+  if (ok) {
+    ktest_pass("palloc_pfree_20_cycles");
+  } else {
+    ktest_fail("palloc_pfree_20_cycles", "palloc/pfree cycle failed");
   }
 }
 
@@ -795,6 +826,7 @@ PUBLIC void run_kernel_tests(void)
   test_memory_many_allocs();
   test_memory_layout_ready();
   test_palloc_basic();
+  test_palloc_pfree_cycle();
 
   /* Network tests (requires NE2000 + uIP init) */
   serial_puts("\n--- Network Tests ---\n");

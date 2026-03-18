@@ -98,6 +98,9 @@ struct task_struct {
   u_int32_t         signal;
   sighandler_t      sigactions[MAX_SIGNALS];
   struct wait_queue *child_wait;
+  u_int32_t        *pg_dir;
+  void             *pg_dir_raw;
+  void             *esp0_raw;
 };
 
 struct hard_context {

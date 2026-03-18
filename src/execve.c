@@ -129,12 +129,12 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   /* timer IRQ の mask は caller 側で握り、run list 更新までまとめて保護する。 */
   /* set the memory translation using page feature for user process */
   // alloc 4096Byte from kernel memory manager
-  u_int32_t* pg_dir = kalloc(BLOCK_SIZE*2);
-  if (pg_dir == NULL) {
+  void *pg_dir_raw = kalloc(BLOCK_SIZE*2);
+  if (pg_dir_raw == NULL) {
     _kprintf("%s: kern_task kalloc error\n", __func__);
     return NULL;
   }
-  pg_dir = ((u_int32_t)pg_dir & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+  u_int32_t* pg_dir = (u_int32_t *)(((u_int32_t)pg_dir_raw & ~(BLOCK_SIZE-1)) + BLOCK_SIZE);
   memset(pg_dir, 0, BLOCK_SIZE);
   create_kernel_page(pg_dir);
 
@@ -199,6 +199,8 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   memset(kern_task->context, 0, sizeof(struct hard_context));
   kern_task->context->eip = entrypoint;
   kern_task->context->esp = get_proc_stackmem(pg_dir);
+  kern_task->pg_dir = pg_dir;
+  kern_task->pg_dir_raw = pg_dir_raw;
   kern_task->context->cr3 = (u_int32_t)pg_dir - __PAGE_OFFSET;
   kern_task->context->cs = __USER_CS;
   kern_task->context->ds = __USER_DS;
@@ -210,14 +212,14 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
 
   set_default_sigaction(kern_task);
 
-  kern_task->esp0 = kalloc(BLOCK_SIZE * (PROC_KERNEL_STACK_PAGES + 1));
-  if (kern_task->esp0 == NULL) {
+  kern_task->esp0_raw = kalloc(BLOCK_SIZE * (PROC_KERNEL_STACK_PAGES + 1));
+  if (kern_task->esp0_raw == NULL) {
     _kprintf("%s: kern_task->esp0 kalloc error\n", __func__);
     return NULL;
   }
   // 割り込みと exec の深い call stack に備えて、kernel stack は複数 page 分を確保する。
   kern_task->esp0 =
-      (kern_task->esp0 & ~(BLOCK_SIZE - 1)) +
+      ((u_int32_t)kern_task->esp0_raw & ~(BLOCK_SIZE - 1)) +
       (BLOCK_SIZE * PROC_KERNEL_STACK_PAGES);
 
   return kern_task;

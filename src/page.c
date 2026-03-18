@@ -14,6 +14,12 @@
 #include <page.h>
 #include <memory_layout.h>
 
+/* Forward declarations to avoid pulling in memory.h globals */
+PUBLIC void* palloc(u_int32_t size);
+PUBLIC int32_t pfree(void* ptr);
+PUBLIC void* kalloc(u_int32_t size);
+PUBLIC int32_t kfree(void* ptr);
+
 PRIVATE void delete_first_page();
 PRIVATE u_int32_t get_need_blocks(size_t need_size, size_t size);
 PRIVATE u_int32_t kernel_extra_pdes[PAGE_DIR_SIZE];
@@ -154,6 +160,34 @@ PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
   }
 
   return (void*)new_start_vaddr;
+}
+
+PUBLIC void free_process_pages(u_int32_t *pg_dir)
+{
+  int pd_pos;
+  for (pd_pos = 0; pd_pos < PGDIR_KERNEL_START; pd_pos++) {
+    u_int32_t pde = pg_dir[pd_pos];
+    u_int32_t *pg_tbl;
+    int pt_pos;
+
+    if (pde == 0)
+      continue;
+    if (pde & PAGE_PSE)
+      continue;
+
+    pg_tbl = (u_int32_t *)(((pde & ~(BLOCK_SIZE - 1))) + __PAGE_OFFSET);
+
+    for (pt_pos = 0; pt_pos < 1024; pt_pos++) {
+      u_int32_t pte = pg_tbl[pt_pos];
+      if (pte & PAGE_PRESENT) {
+        void *phys = (void *)(pte & ~(BLOCK_SIZE - 1));
+        pfree(phys);
+      }
+    }
+
+    kfree(pg_tbl);
+    pg_dir[pd_pos] = 0;
+  }
 }
 
 PUBLIC void pg_set_kernel_4m_page(u_int32_t virt_addr, u_int32_t phys_addr,

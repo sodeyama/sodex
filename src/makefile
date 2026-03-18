@@ -230,7 +230,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-agent-bringup test-claude-smoke test-agent-full ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-agent-bringup test-claude-smoke test-agent-full ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -330,6 +330,24 @@ test-qemu-jobs:
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/jobs-rootfs-overlay all
 	@echo "=== Running job control smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) SODEX_SSH_PORT=$(SODEX_SSH_PORT) SODEX_HOST_SSH_PORT=$(SODEX_HOST_SSH_PORT) SODEX_SSH_PASSWORD=$(SODEX_SSH_PASSWORD) python3 $(BASEDIR)/src/test/run_qemu_job_control_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-curl-https:
+	@$(MAKE) clean
+	@mkdir -p $(LOGDIR)/curl-https-overlay/etc/init.d
+	@printf '#!/bin/sh\ncurl https://www.biztex.co.jp -o /tmp/biztex.html\n' > $(LOGDIR)/curl-https-overlay/etc/init.d/rcS
+	@printf 'console:rescue:/usr/bin/sh\nsysinit:/etc/init.d/rcS\n' > $(LOGDIR)/curl-https-overlay/etc/inittab
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/curl-https-overlay all
+	@echo "=== Running curl HTTPS smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_curl_https_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-websearch:
+	@$(MAKE) clean
+	@mkdir -p $(LOGDIR)/websearch-overlay/etc/init.d
+	@printf '#!/bin/sh\nwebsearch hello world\n' > $(LOGDIR)/websearch-overlay/etc/init.d/rcS
+	@printf 'console:rescue:/usr/bin/sh\nsysinit:/etc/init.d/rcS\n' > $(LOGDIR)/websearch-overlay/etc/inittab
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/websearch-overlay all
+	@echo "=== Running websearch smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_websearch_smoke.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

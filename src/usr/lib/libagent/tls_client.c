@@ -350,8 +350,17 @@ int tls_recv(void *buf, int len)
             unsigned char *rec_buf;
             size_t rec_len;
             int rlen;
+            unsigned char recv_tmp[1500];
+            int ask;
             rec_buf = br_ssl_engine_recvrec_buf(eng, &rec_len);
-            rlen = recv_msg(tls_conn.sockfd, rec_buf, (int)rec_len, 0);
+            /* Receive into stack buffer first, then copy to BearSSL's
+             * iobuf.  This works around an issue where kern_recvfrom
+             * writing directly to the BSS-resident iobuf can produce
+             * zero bytes due to page table interaction. */
+            ask = (int)rec_len;
+            if (ask > (int)sizeof(recv_tmp))
+                ask = (int)sizeof(recv_tmp);
+            rlen = recv_msg(tls_conn.sockfd, recv_tmp, ask, 0);
             if (rlen == 0) {
                 /* Timeout — no data yet. Return what we have so far,
                  * or TLS_ERR_RECV so caller can retry. */
@@ -362,6 +371,7 @@ int tls_recv(void *buf, int len)
                  * if any, otherwise signal EOF cleanly with 0. */
                 return total > 0 ? total : 0;
             }
+            memcpy(rec_buf, recv_tmp, rlen);
             br_ssl_engine_recvrec_ack(eng, (size_t)rlen);
             continue;
         }

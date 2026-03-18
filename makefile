@@ -1,7 +1,7 @@
 # Root makefile - delegates to src/makefile
 # All build artifacts go to build/
 
-.PHONY: all clean remake tools ptest test-qemu test-qemu-server test-qemu-debug-shell test-qemu-ssh test-agent-bringup test docker-server-image test-docker-server
+.PHONY: all clean remake tools ptest test-qemu test-qemu-curl-https test-qemu-websearch test-qemu-server test-qemu-debug-shell test-qemu-ssh test-agent-bringup test docker-server-image test-docker-server
 
 SODEX_ADMIN_STATUS_TOKEN ?= status-secret
 SODEX_ADMIN_CONTROL_TOKEN ?= control-secret
@@ -31,6 +31,12 @@ ptest:
 
 test-qemu:
 	$(MAKE) -C src test-qemu
+
+test-qemu-curl-https:
+	$(MAKE) -C src test-qemu-curl-https
+
+test-qemu-websearch:
+	$(MAKE) -C src test-qemu-websearch
 
 test-qemu-server:
 	$(MAKE) -C src test-qemu-server

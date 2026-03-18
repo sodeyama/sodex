@@ -59,7 +59,7 @@ int tool_list_dir(const char *input_json, int input_len,
     int tok;
     char path[256];
     int fd;
-    char dir_buf[DIR_BUF_SIZE];
+    static char dir_buf[DIR_BUF_SIZE];
     int bytes_read;
     struct json_writer jw;
     int offset;

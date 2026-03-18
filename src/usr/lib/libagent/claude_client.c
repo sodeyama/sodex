@@ -61,9 +61,9 @@ static int recv_sse_stream(
     int sockfd,
     struct claude_response *resp)
 {
-    struct sse_parser sp;
-    struct sse_event ev;
-    char recv_chunk[2048];
+    static struct sse_parser sp;
+    static struct sse_event ev;
+    static char recv_chunk[2048];
     int ret, sse_ret, claude_ret;
 
     sse_parser_init(&sp);
@@ -129,9 +129,9 @@ static int claude_do_request(
     const char *api_key,
     struct claude_response *out)
 {
-    struct http_header headers[8];
-    struct http_request req;
-    struct http_response resp;
+    static struct http_header headers[8];
+    static struct http_request req;
+    static struct http_response resp;
     static char recv_buf[4096];  /* For headers only; body via SSE stream */
     int header_count = 0;
     int ret;
@@ -287,8 +287,8 @@ static int claude_do_request(
          * Push it back into the SSE parser, then continue receiving. */
         {
             int extra = total_recv - header_len;
-            struct sse_parser sp;
-            struct sse_event ev;
+            static struct sse_parser sp;
+            static struct sse_event ev;
             int sse_ret, claude_ret;
 
             sse_parser_init(&sp);
@@ -390,7 +390,7 @@ int claude_send_message_with_key(
     const char *api_key,
     struct claude_response *out)
 {
-    char request_buf[4096];
+    static char request_buf[4096];
     struct json_writer jw;
     struct claude_message msgs[1];
     int ret;

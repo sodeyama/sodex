@@ -33,7 +33,7 @@ int tool_write_file(const char *input_json, int input_len,
     int ntokens;
     int tok;
     char path[256];
-    char content[3072];
+    static char content[3072];
     int content_len;
     int fd;
     int bytes_written;

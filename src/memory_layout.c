@@ -67,6 +67,8 @@ PRIVATE u_int32_t boot_detected_bytes(const boot_memory_info_t *boot_info)
   detected_bytes = (u_int32_t)boot_info->detected_ram_mb * 1024 * 1024;
   if (detected_bytes == 0)
     return MEMORY_LAYOUT_DEFAULT_RAM_BYTES;
+  if (detected_bytes < MEMORY_LAYOUT_DEFAULT_RAM_BYTES)
+    return MEMORY_LAYOUT_DEFAULT_RAM_BYTES;
   return detected_bytes;
 }
 

@@ -10,7 +10,7 @@ int agent_resume_latest_for_cwd(const char *cwd,
                                 char *session_id_out,
                                 int session_id_cap)
 {
-    struct session_index index;
+    static struct session_index index;
     int i;
 
     if (!cwd || !session_id_out || session_id_cap <= 0)

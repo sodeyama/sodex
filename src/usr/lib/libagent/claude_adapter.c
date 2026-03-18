@@ -99,8 +99,8 @@ int claude_parse_response(
     const char *json_str, int json_len,
     struct claude_response *out)
 {
-    struct json_parser jp;
-    struct json_token tokens[256];
+    static struct json_parser jp;
+    static struct json_token tokens[256];
     int ntokens;
     int tok;
 
@@ -212,8 +212,8 @@ int claude_parse_sse_event(
     const struct sse_event *event,
     struct claude_response *state)
 {
-    struct json_parser jp;
-    struct json_token tokens[128];
+    static struct json_parser jp;
+    static struct json_token tokens[128];
     int ntokens;
     int tok;
 
@@ -304,7 +304,7 @@ int claude_parse_sse_event(
                     /* Append text */
                     int text_tok = json_find_key(event->data, tokens, ntokens, delta_tok, "text");
                     if (text_tok >= 0) {
-                        char tmp[CLAUDE_MAX_TEXT];
+                        static char tmp[CLAUDE_MAX_TEXT];
                         int tlen = json_token_str(event->data, &tokens[text_tok],
                                                   tmp, sizeof(tmp));
                         if (tlen > 0) {
@@ -324,7 +324,7 @@ int claude_parse_sse_event(
                     /* Append partial JSON for tool input */
                     int pj_tok = json_find_key(event->data, tokens, ntokens, delta_tok, "partial_json");
                     if (pj_tok >= 0) {
-                        char tmp[CLAUDE_MAX_TOOL_INPUT];
+                        static char tmp[CLAUDE_MAX_TOOL_INPUT];
                         int tlen = json_token_str(event->data, &tokens[pj_tok],
                                                   tmp, sizeof(tmp));
                         if (tlen > 0) {

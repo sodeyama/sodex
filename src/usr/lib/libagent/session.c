@@ -209,7 +209,7 @@ static int session_read_index(struct session_index *index)
 
 static void session_mark_recent(const char *session_id)
 {
-    struct session_index index;
+    static struct session_index index;
     int i;
     int found = -1;
 
@@ -458,10 +458,10 @@ int session_create(struct session_meta *meta,
                     const char *cwd)
 {
     char path[256];
-    char line[1024];
+    static char line[1024];
     struct json_writer jw;
     int fd;
-    struct session_index index;
+    static struct session_index index;
 
     if (!meta)
         return -1;
@@ -618,9 +618,9 @@ int session_read_meta(const char *session_id, struct session_meta *meta)
     for (i = 0; i <= nread; i++) {
         int line_len;
         int ntokens;
-        struct json_parser jp;
-        struct json_token tokens[256];
-        char type[32];
+        static struct json_parser jp;
+        static struct json_token tokens[256];
+        static char type[32];
 
         if (i != nread && buf[i] != '\n')
             continue;
@@ -708,9 +708,9 @@ int session_load(const char *session_id, struct conversation *conv)
     for (i = 0; i <= nread; i++) {
         int line_len;
         int ntokens;
-        struct json_parser jp;
-        struct json_token tokens[256];
-        char type[32];
+        static struct json_parser jp;
+        static struct json_token tokens[256];
+        static char type[32];
 
         if (i != nread && buf[i] != '\n')
             continue;
@@ -755,7 +755,7 @@ int session_load(const char *session_id, struct conversation *conv)
 
 int session_list(struct session_index *index)
 {
-    struct session_index ids;
+    static struct session_index ids;
     int i;
 
     if (!index)
@@ -785,7 +785,7 @@ int session_list(struct session_index *index)
 int session_delete(const char *session_id)
 {
     char path[256];
-    struct session_index index;
+    static struct session_index index;
     int i;
     int found = -1;
 
@@ -817,7 +817,7 @@ int session_delete(const char *session_id)
 
 int session_cleanup(int max_sessions)
 {
-    struct session_index index;
+    static struct session_index index;
     int removed = 0;
 
     if (session_read_index(&index) != 0)

@@ -333,7 +333,7 @@ static int persist_new_turns(const char *session_id,
 
 static void print_sessions(void)
 {
-    struct session_index index;
+    static struct session_index index;
     int i;
 
     if (session_list(&index) != 0 || index.count == 0) {
@@ -352,7 +352,7 @@ static void print_sessions(void)
 
 static int resolve_continue_session(char *session_id, int cap)
 {
-    char cwd[AGENT_PATH_MAX];
+    static char cwd[AGENT_PATH_MAX];
 
     if (!session_id || cap <= 0)
         return -1;
@@ -363,7 +363,7 @@ static int resolve_continue_session(char *session_id, int cap)
 
 static int pick_resume_session(char *session_id, int cap)
 {
-    struct session_index index;
+    static struct session_index index;
     char line[64];
     int n;
     int choice;
@@ -392,7 +392,7 @@ static int pick_resume_session(char *session_id, int cap)
 static int start_new_session(struct agent_state *state,
                              struct session_meta *session)
 {
-    char cwd[AGENT_PATH_MAX];
+    static char cwd[AGENT_PATH_MAX];
 
     if (!state || !session)
         return -1;
@@ -442,9 +442,9 @@ static void print_status(const struct agent_state *state,
 
 static void print_memory_sources(void)
 {
-    struct agent_memory_source sources[AGENT_MEMORY_SOURCE_MAX];
-    char cwd[AGENT_PATH_MAX];
-    char buf[512];
+    static struct agent_memory_source sources[AGENT_MEMORY_SOURCE_MAX];
+    static char cwd[AGENT_PATH_MAX];
+    static char buf[512];
     int count;
     int i;
 
@@ -470,8 +470,8 @@ static int append_workspace_memory_note(struct agent_state *state,
                                         const char *note,
                                         int quiet)
 {
-    char cwd[AGENT_PATH_MAX];
-    char path[AGENT_PATH_MAX];
+    static char cwd[AGENT_PATH_MAX];
+    static char path[AGENT_PATH_MAX];
     int ret;
 
     if (!state || !note || !*note)
@@ -499,7 +499,7 @@ static int handle_compact(struct agent_state *state,
                           const struct session_meta *session,
                           const char *focus)
 {
-    char summary[COMPACT_SUMMARY_MAX];
+    static char summary[COMPACT_SUMMARY_MAX];
     int keep_from;
     int removed;
 
@@ -524,9 +524,9 @@ static int handle_shell_shortcut(struct agent_state *state,
                                  const struct session_meta *session,
                                  const char *command)
 {
-    char input_json[1024];
-    char result_json[4096];
-    char conv_text[PROMPT_MAX];
+    static char input_json[1024];
+    static char result_json[4096];
+    static char conv_text[PROMPT_MAX];
     struct json_writer jw;
     int start_turn;
     int len;
@@ -570,7 +570,7 @@ static int handle_shell_shortcut(struct agent_state *state,
 
 static void print_audit(int max_entries)
 {
-    struct audit_entry entries[32];
+    static struct audit_entry entries[32];
     int count = 0;
     int i;
 
@@ -637,8 +637,8 @@ static int run_single_turn(struct agent_state *state,
 static int print_repl_prompt(const struct agent_state *state,
                              const struct session_meta *session)
 {
-    char cwd[AGENT_PATH_MAX];
-    char prompt[REPL_PROMPT_MAX];
+    static char cwd[AGENT_PATH_MAX];
+    static char prompt[REPL_PROMPT_MAX];
     int total_tokens;
     int ctx_percent;
 
@@ -872,8 +872,8 @@ int main(int argc, char *argv[])
         if (prompt_start >= 0)
             build_prompt(argc, argv, prompt_start, prompt, sizeof(prompt));
         if (prompt[0] != '\0') {
-            struct agent_state tmp_state;
-            struct agent_config tmp_config;
+            static struct agent_state tmp_state;
+            static struct agent_config tmp_config;
 
             agent_config_init(&tmp_config);
             agent_state_init(&tmp_state, &tmp_config);

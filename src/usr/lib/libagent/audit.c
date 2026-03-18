@@ -65,7 +65,7 @@ int audit_log(const struct audit_entry *entry)
 
 int audit_read_last(struct audit_entry *entries, int max_entries, int *count)
 {
-    char buf[8192];
+    static char buf[8192];
     int fd, nread, i, line_count;
     int line_starts[256];
 
@@ -185,7 +185,7 @@ int audit_read_last(struct audit_entry *entries, int max_entries, int *count)
 
 int audit_rotate(int max_size)
 {
-    char buf[8192];
+    static char buf[8192];
     int fd, nread, half_start, i;
 
     if (max_size <= 0)

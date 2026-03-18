@@ -35,7 +35,7 @@ int tool_read_file(const char *input_json, int input_len,
     int fd;
     int bytes_read;
     struct json_writer jw;
-    struct bounded_output bounded;
+    static struct bounded_output bounded;
 
     if (!input_json || !result_buf)
         return -1;

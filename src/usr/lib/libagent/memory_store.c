@@ -169,9 +169,9 @@ int agent_collect_memory_sources(const char *cwd,
         "CLAUDE.local.md",
         0
     };
-    char project_path[PATHNAME_MAX];
-    char workspace_path[PATHNAME_MAX];
-    char scan[PATHNAME_MAX];
+    static char project_path[PATHNAME_MAX];
+    static char workspace_path[PATHNAME_MAX];
+    static char scan[PATHNAME_MAX];
     int count = 0;
     int is_first = 1;
 
@@ -199,7 +199,7 @@ int agent_collect_memory_sources(const char *cwd,
         int idx;
 
         for (idx = 0; parent_names[idx] != 0; idx++) {
-            char path[PATHNAME_MAX];
+            static char path[PATHNAME_MAX];
 
             if (path_join(path, sizeof(path), scan, parent_names[idx]) >= 0) {
                 count = append_source(out, max_sources, count,
@@ -208,7 +208,7 @@ int agent_collect_memory_sources(const char *cwd,
         }
 
         if (!is_first) {
-            char path[PATHNAME_MAX];
+            static char path[PATHNAME_MAX];
 
             if (path_join(path, sizeof(path), scan, "CLAUDE.md") >= 0) {
                 count = append_source(out, max_sources, count,
@@ -259,8 +259,8 @@ int agent_memory_append_workspace(const char *cwd,
                                   const char *note,
                                   char *path_out, int path_cap)
 {
-    char path[PATHNAME_MAX];
-    char existing[4096];
+    static char path[PATHNAME_MAX];
+    static char existing[4096];
     int fd;
     int nread;
 

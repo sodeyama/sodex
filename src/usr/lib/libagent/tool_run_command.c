@@ -131,7 +131,7 @@ int tool_run_command(const char *input_json, int input_len,
     char command[512];
     struct json_writer jw;
     int exit_code;
-    struct bounded_output bounded;
+    static struct bounded_output bounded;
 
     if (!input_json || !result_buf)
         return -1;

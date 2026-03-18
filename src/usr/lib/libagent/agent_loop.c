@@ -120,7 +120,7 @@ static int build_current_path(char *buf, int cap)
 
 static int build_project_claude_path(char *buf, int cap)
 {
-    char cwd[AGENT_CLAUDE_PATH_MAX];
+    static char cwd[AGENT_CLAUDE_PATH_MAX];
     int cwd_len;
     int file_len;
 
@@ -221,7 +221,7 @@ static int trim_to_parent(char *path)
 
 static int build_workspace_memory_path(char *buf, int cap)
 {
-    char cwd[AGENT_CLAUDE_PATH_MAX];
+    static char cwd[AGENT_CLAUDE_PATH_MAX];
     unsigned int hash;
 
     if (!buf || cap <= 1)
@@ -262,8 +262,8 @@ static void append_instruction_file(struct agent_config *config,
                                     const char *path,
                                     const char *label)
 {
-    char header[160];
-    char body[AGENT_MAX_SYSTEM_PROMPT];
+    static char header[160];
+    static char body[AGENT_MAX_SYSTEM_PROMPT];
     int body_len;
     int header_len;
     int appended;
@@ -286,7 +286,7 @@ static void append_instruction_file(struct agent_config *config,
 
 static void append_instruction_files(struct agent_config *config)
 {
-    char project_path[AGENT_CLAUDE_PATH_MAX];
+    static char project_path[AGENT_CLAUDE_PATH_MAX];
 
     append_instruction_file(config,
                             AGENT_INSTRUCTION_PATH,
@@ -307,7 +307,7 @@ static void append_parent_memory_files(struct agent_config *config)
         "CLAUDE.local.md",
         0
     };
-    char scan[AGENT_CLAUDE_PATH_MAX];
+    static char scan[AGENT_CLAUDE_PATH_MAX];
     int is_first = 1;
 
     if (build_current_path(scan, sizeof(scan)) < 0)
@@ -317,14 +317,14 @@ static void append_parent_memory_files(struct agent_config *config)
         int idx;
 
         for (idx = 0; names[idx] != 0; idx++) {
-            char path[AGENT_CLAUDE_PATH_MAX];
+            static char path[AGENT_CLAUDE_PATH_MAX];
 
             if (path_join(path, sizeof(path), scan, names[idx]) >= 0)
                 append_instruction_file(config, path, names[idx]);
         }
 
         if (!is_first) {
-            char path[AGENT_CLAUDE_PATH_MAX];
+            static char path[AGENT_CLAUDE_PATH_MAX];
 
             if (path_join(path, sizeof(path), scan, "CLAUDE.md") >= 0)
                 append_instruction_file(config, path, "CLAUDE.md");
@@ -340,7 +340,7 @@ static void append_parent_memory_files(struct agent_config *config)
 
 static void append_memory_files(struct agent_config *config)
 {
-    char workspace_path[AGENT_CLAUDE_PATH_MAX];
+    static char workspace_path[AGENT_CLAUDE_PATH_MAX];
 
     append_instruction_file(config,
                             AGENT_GLOBAL_MEMORY,

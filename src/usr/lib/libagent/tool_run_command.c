@@ -97,7 +97,15 @@ static int exec_and_capture_bounded(const char *cmd,
     debug_printf("[TOOL run_command] spawned pid=%d: sh -c \"%s\"\n",
                 (int)pid, cmd);
 
-    /* Read output from pipe read end */
+    /* Wait for child to finish first, then read pipe.
+     * Sodex pipe_read busy-waits without yielding, so we must let
+     * the child complete before attempting to read from the pipe. */
+    if (waitpid(pid, &status, 0) < 0) {
+        debug_printf("[TOOL run_command] waitpid failed\n");
+        status = -1;
+    }
+
+    /* Now read all output from pipe (child has finished, data is ready) */
     for (;;) {
         char chunk[512];
 
@@ -107,12 +115,6 @@ static int exec_and_capture_bounded(const char *cmd,
         bounded_output_append(bounded, chunk, ret);
     }
     close(pipefd[0]);
-
-    /* Wait for child to finish */
-    if (waitpid(pid, &status, 0) < 0) {
-        debug_printf("[TOOL run_command] waitpid failed\n");
-        status = -1;
-    }
 
     debug_printf("[TOOL run_command] pid=%d exited status=%d, output=%d bytes\n",
                 (int)pid, status, bounded ? bounded->total_bytes : 0);

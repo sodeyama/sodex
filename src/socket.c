@@ -21,6 +21,9 @@ EXTERN u16_t uip_slen;
 EXTERN void network_poll(void);
 PUBLIC void* kalloc(u_int32_t size);
 PUBLIC int32_t kfree(void* ptr);
+PUBLIC void* palloc(u_int32_t size);
+PUBLIC int32_t pfree(void* ptr);
+#define __PAGE_OFFSET 0xC0000000
 
 PUBLIC struct kern_socket socket_table[MAX_SOCKETS];
 
@@ -160,8 +163,9 @@ PRIVATE void rxbuf_init(struct kern_socket *sk)
   sk->rx_len = 0;
   sk->rx_pkt_count = 0;
   if (sk->rx_buf == NULL) {
-    sk->rx_buf = kalloc(SOCK_RXBUF_SIZE);
-    if (sk->rx_buf != NULL) {
+    void *phys = palloc(SOCK_RXBUF_SIZE);
+    if (phys != NULL) {
+      sk->rx_buf = (u_int8_t *)((u_int32_t)phys + __PAGE_OFFSET);
       memset(sk->rx_buf, 0, SOCK_RXBUF_SIZE);
       sk->rx_buf_size = SOCK_RXBUF_SIZE;
     }
@@ -358,9 +362,10 @@ PRIVATE void socket_release_entry(int sockfd)
   memset(sk, 0, sizeof(struct kern_socket));
   sk->state = SOCK_STATE_UNUSED;
   sk->parent_fd = -1;
-  /* Free rx_buf after memset cleared the pointer */
+  /* Free rx_buf after memset cleared the pointer.
+   * palloc-allocated: convert virtual back to physical. */
   if (rx != NULL)
-    kfree(rx);
+    pfree((void *)((u_int32_t)rx - __PAGE_OFFSET));
 }
 
 PUBLIC int kern_socket(int domain, int type, int protocol)

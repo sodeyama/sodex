@@ -9,7 +9,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_conversation test_hooks_permissions
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_conversation test_hooks_permissions test_chunked_decoder
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -544,6 +544,10 @@ test_hooks_permissions_permissions.o: $(SRC)/usr/lib/libagent/permissions.c
 
 test_hooks_permissions_audit.o: $(SRC)/usr/lib/libagent/audit.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# Chunked transfer encoding decoder tests (Issue #11)
+test_chunked_decoder: test_chunked_decoder.c
+	$(CC) -Wall -g -O0 -I. -o $@ test_chunked_decoder.c
 
 clean:
 	rm -f $(TESTS) $(IME_FIXTURE) $(IME_FIXTURE_SOURCE) derive_ssh_keypair ssh_signer *.o

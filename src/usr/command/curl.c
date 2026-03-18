@@ -26,6 +26,105 @@
 #define MAX_HEADERS     8
 #define RECV_BUF_SIZE   8192
 
+/* ---- Chunked transfer encoding decoder ---- */
+struct chunked_state {
+    int in_chunk;       /* 1 = reading chunk data, 0 = reading chunk size */
+    int chunk_remain;   /* bytes remaining in current chunk */
+    int done;           /* 1 = received final 0-length chunk */
+};
+
+/*
+ * Parse a hex chunk-size from buf. Returns the number of bytes consumed
+ * (including trailing CRLF), or 0 if the line is incomplete.
+ * Sets *chunk_size to the parsed value.
+ */
+PRIVATE int parse_chunk_size(const char *buf, int len, int *chunk_size)
+{
+    int i = 0;
+    int val = 0;
+    char c;
+
+    /* Parse hex digits */
+    while (i < len) {
+        c = buf[i];
+        if (c >= '0' && c <= '9')
+            val = val * 16 + (c - '0');
+        else if (c >= 'a' && c <= 'f')
+            val = val * 16 + (c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F')
+            val = val * 16 + (c - 'A' + 10);
+        else
+            break;
+        i++;
+    }
+    if (i == 0)
+        return 0;   /* no hex digits */
+
+    /* Skip optional chunk-extension (anything until CRLF) */
+    while (i < len && buf[i] != '\r')
+        i++;
+
+    /* Need CRLF */
+    if (i + 1 >= len)
+        return 0;   /* incomplete line */
+    if (buf[i] == '\r' && buf[i + 1] == '\n') {
+        *chunk_size = val;
+        return i + 2;
+    }
+    return 0;
+}
+
+/*
+ * Feed raw body data through the chunked decoder.
+ * Writes decoded output to out_fd (or stdout if out_fd < 0).
+ * Returns bytes of decoded body written, or -1 on error.
+ */
+PRIVATE int chunked_decode(struct chunked_state *st, const char *buf, int len,
+                           int out_fd)
+{
+    int pos = 0;
+    int written = 0;
+
+    while (pos < len && !st->done) {
+        if (st->in_chunk) {
+            /* Consume chunk data */
+            int avail = len - pos;
+            int take = (avail < st->chunk_remain) ? avail : st->chunk_remain;
+            if (take > 0) {
+                if (out_fd >= 0)
+                    write(out_fd, buf + pos, take);
+                else
+                    write(1, buf + pos, take);
+                written += take;
+                pos += take;
+                st->chunk_remain -= take;
+            }
+            if (st->chunk_remain == 0) {
+                /* Expect trailing CRLF after chunk data */
+                if (pos + 1 < len && buf[pos] == '\r' && buf[pos + 1] == '\n')
+                    pos += 2;
+                else if (pos < len && buf[pos] == '\r')
+                    pos += 1;  /* partial CRLF, next recv will have \n */
+                st->in_chunk = 0;
+            }
+        } else {
+            /* Parse chunk size line */
+            int chunk_size = 0;
+            int consumed = parse_chunk_size(buf + pos, len - pos, &chunk_size);
+            if (consumed == 0)
+                break;  /* incomplete line, need more data */
+            pos += consumed;
+            if (chunk_size == 0) {
+                st->done = 1;
+                break;
+            }
+            st->chunk_remain = chunk_size;
+            st->in_chunk = 1;
+        }
+    }
+    return written;
+}
+
 /* ---- URL parser ---- */
 struct parsed_url {
     char host[128];
@@ -296,6 +395,9 @@ int main(int argc, char *argv[])
         int hdr_len = 0;
         int total_body = 0;
         int header_done = 0;
+        int is_chunked = 0;
+        struct chunked_state chunk_st;
+        memset(&chunk_st, 0, sizeof(chunk_st));
 
         /* TLS connect */
         ret = tls_connect(url.host, url.port);
@@ -377,6 +479,17 @@ int main(int argc, char *argv[])
 
                     header_done = 1;
 
+                    /* Detect Transfer-Encoding: chunked */
+                    {
+                        char *te = strstr(hdr_buf, "Transfer-Encoding:");
+                        if (!te)
+                            te = strstr(hdr_buf, "transfer-encoding:");
+                        if (te && te < body_start) {
+                            if (strstr(te, "chunked"))
+                                is_chunked = 1;
+                        }
+                    }
+
                     if (verbose) {
                         char *p = hdr_buf;
                         while (p < body_start) {
@@ -393,11 +506,16 @@ int main(int argc, char *argv[])
                     {
                         int body_len = hdr_len - body_offset;
                         if (body_len > 0) {
-                            if (fd >= 0)
-                                write(fd, body_start, body_len);
-                            else
-                                write(1, body_start, body_len);
-                            total_body += body_len;
+                            if (is_chunked) {
+                                total_body += chunked_decode(&chunk_st,
+                                    body_start, body_len, fd);
+                            } else {
+                                if (fd >= 0)
+                                    write(fd, body_start, body_len);
+                                else
+                                    write(1, body_start, body_len);
+                                total_body += body_len;
+                            }
                         }
                     }
 
@@ -405,20 +523,31 @@ int main(int argc, char *argv[])
                      * that didn't fit in hdr_buf */
                     if (copy < ret) {
                         int extra = ret - copy;
-                        if (fd >= 0)
-                            write(fd, recv_buf + copy, extra);
-                        else
-                            write(1, recv_buf + copy, extra);
-                        total_body += extra;
+                        if (is_chunked) {
+                            total_body += chunked_decode(&chunk_st,
+                                recv_buf + copy, extra, fd);
+                        } else {
+                            if (fd >= 0)
+                                write(fd, recv_buf + copy, extra);
+                            else
+                                write(1, recv_buf + copy, extra);
+                            total_body += extra;
+                        }
                     }
                 }
             } else {
                 /* Pure body data */
-                if (fd >= 0)
-                    write(fd, recv_buf, ret);
-                else
-                    write(1, recv_buf, ret);
-                total_body += ret;
+                if (is_chunked) {
+                    total_body += chunked_decode(&chunk_st, recv_buf, ret, fd);
+                    if (chunk_st.done)
+                        break;
+                } else {
+                    if (fd >= 0)
+                        write(fd, recv_buf, ret);
+                    else
+                        write(1, recv_buf, ret);
+                    total_body += ret;
+                }
             }
         }
         }

@@ -318,7 +318,7 @@ int main(int argc, char *argv[])
                 pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
                                "Content-Length: %d\r\n", req.body_len);
             pos += snprintf(send_buf2 + pos, sizeof(send_buf2) - pos,
-                           "Connection: close\r\n\r\n");
+                           "Accept-Encoding: identity\r\n\r\n");
             send_len2 = pos;
         }
 
@@ -338,10 +338,20 @@ int main(int argc, char *argv[])
             }
         }
 
+        {
+        int zero_count = 0;
         for (;;) {
             ret = tls_recv(recv_buf, sizeof(recv_buf) - 1);
-            if (ret <= 0)
-                break;
+            if (ret <= 0) {
+                /* TLS recv returned error or 0. TCP data may still be
+                 * in flight from the server. Sleep briefly to let the
+                 * network stack poll and receive more TCP segments. */
+                if (++zero_count > 50)
+                    break;
+                sleep_ticks(2);  /* ~20ms per tick, give TCP time */
+                continue;
+            }
+            zero_count = 0;
             recv_buf[ret] = '\0';
 
             if (!header_done) {
@@ -385,6 +395,7 @@ int main(int argc, char *argv[])
                     write(1, recv_buf, ret);
                 total_body += ret;
             }
+        }
         }
 
         tls_close();

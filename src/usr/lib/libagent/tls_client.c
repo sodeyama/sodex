@@ -344,7 +344,7 @@ int tls_recv(void *buf, int len)
             memcpy(out + total, app_buf, chunk);
             br_ssl_engine_recvapp_ack(eng, (size_t)chunk);
             total += chunk;
-            return total;  /* Return available data immediately */
+            continue;  /* Try to read more data */
         }
 
         if (state & BR_SSL_RECVREC) {

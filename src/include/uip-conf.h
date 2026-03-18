@@ -107,6 +107,13 @@ typedef unsigned short uip_stats_t;
 #define UIP_CONF_BUFFER_SIZE     1500
 
 /**
+ * TCP receive window size.
+ * Larger window allows the remote side to send more data before
+ * waiting for an ACK, improving throughput for bulk transfers.
+ */
+#define UIP_CONF_RECEIVE_WINDOW  8192
+
+/**
  * CPU byte order.
  *
  * \hideinitializer

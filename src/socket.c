@@ -798,6 +798,7 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
   if (sk->rx_len == 0) {
     EXTERN void network_poll(void);
     u_int32_t deadline = kernel_tick + sk->timeout_ticks;
+    int close_polls = 0;
 
     while ((int)(kernel_tick - deadline) < 0) {
       disableInterrupt();
@@ -805,14 +806,18 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
       enableInterrupt();
       if (sk->rx_len > 0)
         break;
-      if (sk->state == SOCK_STATE_CLOSED)
-        break;
+      if (sk->state == SOCK_STATE_CLOSED) {
+        /* FIN arrived but data may still be queued in uIP.
+         * Poll a few more times to drain any remaining segments. */
+        if (++close_polls > 20)
+          break;
+      }
     }
     if (signer && sk->rx_len > 0)
       socket_dbg_udp_event("KRECV-HAVE", sockfd, sk->udp_conn->lport,
                            sk->udp_conn->rport, sk->rx_len);
     if (sk->rx_len == 0)
-      return 0; /* timeout */
+      return 0; /* timeout or closed with no data */
   }
 
   disableInterrupt();

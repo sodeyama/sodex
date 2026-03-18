@@ -209,18 +209,6 @@ PUBLIC void pg_set_kernel_4m_page(u_int32_t virt_addr, u_int32_t phys_addr,
 
 PRIVATE u_int32_t get_need_blocks(size_t need_size, size_t size)
 {
-  size_t soiled_size = (need_size&~(BLOCK_SIZE-1));
-  size_t remained_size = (need_size&(BLOCK_SIZE-1));
-  //_kprintf("need:%x soiled:%x remianed:%x\n", need_size, soiled_size, remained_size);
-  u_int32_t need_blocks;
-  if (soiled_size == 0) {
-    need_blocks = (soiled_size>>BLOCK_BITS) + 1;
-  } else {
-    if (remained_size != 0)
-      need_blocks = (soiled_size>>BLOCK_BITS) + 1;
-    else
-      need_blocks = (soiled_size>>BLOCK_BITS);
-  }
-  //_kprintf("need_blocks:%x\n", need_blocks);
-  return need_blocks;
+  /* Round up to page boundary: ceil(need_size / BLOCK_SIZE) */
+  return (need_size + BLOCK_SIZE - 1) >> BLOCK_BITS;
 }

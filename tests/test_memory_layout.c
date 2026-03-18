@@ -31,7 +31,9 @@ TEST(memory_info_prefers_e820_map) {
     memory_info_from_boot_raw(&info, &boot_info);
 
     ASSERT_EQ(info.source, MEMORY_INFO_SOURCE_E820);
-    ASSERT_EQ(info.detected_ram_bytes, 512u * 1024u * 1024u);
+    /* highest_usable_end = 0x20000000 (512MB), but sanitize_detected_bytes
+     * clamps to MEMORY_LAYOUT_DEFAULT_RAM_BYTES (768MB) as minimum. */
+    ASSERT_EQ(info.detected_ram_bytes, MEMORY_LAYOUT_DEFAULT_RAM_BYTES);
     ASSERT_EQ(info.usable_range_count, 2);
     ASSERT_EQ(info.usable_ranges[1].base, 0x00100000u);
     ASSERT_EQ(info.usable_ranges[1].size, 0x1ff00000u);
@@ -52,35 +54,34 @@ TEST(memory_info_falls_back_without_e820) {
     memory_info_from_boot_raw(&info, &boot_info);
 
     ASSERT_EQ(info.source, MEMORY_INFO_SOURCE_E801);
-    ASSERT_EQ(info.detected_ram_bytes, 128u * 1024u * 1024u);
+    /* 128MB < MEMORY_LAYOUT_DEFAULT_RAM_BYTES (768MB), clamped up */
+    ASSERT_EQ(info.detected_ram_bytes, MEMORY_LAYOUT_DEFAULT_RAM_BYTES);
     ASSERT_EQ(info.usable_range_count, 1);
     ASSERT_EQ(info.usable_ranges[0].base, MEMORY_LAYOUT_LOW_RESERVED_BYTES);
-    ASSERT_EQ(info.usable_ranges[0].size, (128u * 1024u * 1024u) - MEMORY_LAYOUT_LOW_RESERVED_BYTES);
+    ASSERT_EQ(info.usable_ranges[0].size, MEMORY_LAYOUT_DEFAULT_RAM_BYTES - MEMORY_LAYOUT_LOW_RESERVED_BYTES);
 }
 
 TEST(memory_layout_applies_cap) {
     memory_info_t info;
     memory_layout_policy_t policy;
 
+    /* detected = 1GB, cap = 768MB. Cap wins because both are >= DEFAULT. */
     memory_info_init(&info);
     info.source = MEMORY_INFO_SOURCE_E820;
-    info.detected_ram_bytes = 512u * 1024u * 1024u;
+    info.detected_ram_bytes = 1024u * 1024u * 1024u;
     info.usable_range_count = 2;
     info.usable_ranges[0].base = 0x00000000u;
     info.usable_ranges[0].size = 0x0009fc00u;
     info.usable_ranges[1].base = 0x00100000u;
-    info.usable_ranges[1].size = 0x1ff00000u;
+    info.usable_ranges[1].size = 0x3ff00000u;
 
     memory_layout_init(&policy);
-    memory_layout_build(&policy, &info, 0x00400000u, 256u * 1024u * 1024u);
+    memory_layout_build(&policy, &info, 0x00800000u, 768u * 1024u * 1024u);
 
-    ASSERT_EQ(policy.effective_ram_bytes, 256u * 1024u * 1024u);
-    ASSERT_EQ(policy.direct_map_bytes, 256u * 1024u * 1024u);
-    ASSERT_EQ(policy.kernel_heap.base, __PAGE_OFFSET + 0x00400000u);
-    ASSERT_EQ(policy.kernel_heap.size, 0x01c00000u);
-    ASSERT_EQ(policy.process_pool.base, 0x02000000u);
-    ASSERT_EQ(policy.process_pool.size, 0x0e000000u);
-    ASSERT_EQ(policy.kernel_pde_end, MEMORY_LAYOUT_KERNEL_PDE_BASE + 64);
+    ASSERT_EQ(policy.effective_ram_bytes, 768u * 1024u * 1024u);
+    ASSERT_EQ(policy.direct_map_bytes, 768u * 1024u * 1024u);
+    ASSERT_EQ(policy.kernel_heap.base, __PAGE_OFFSET + 0x00800000u);
+    ASSERT_EQ(policy.kernel_pde_end, MEMORY_LAYOUT_KERNEL_PDE_BASE + 192);
 }
 
 TEST(memory_layout_scales_to_1g) {

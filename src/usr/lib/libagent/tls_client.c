@@ -326,7 +326,6 @@ int tls_recv(void *buf, int len)
     br_ssl_engine_context *eng = &tls_conn.sc.eng;
     unsigned char *out = (unsigned char *)buf;
     int total = 0;
-
     while (total < len) {
         unsigned state = br_ssl_engine_current_state(eng);
 

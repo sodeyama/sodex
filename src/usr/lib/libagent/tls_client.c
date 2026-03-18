@@ -353,8 +353,16 @@ int tls_recv(void *buf, int len)
             int rlen;
             rec_buf = br_ssl_engine_recvrec_buf(eng, &rec_len);
             rlen = recv_msg(tls_conn.sockfd, rec_buf, (int)rec_len, 0);
-            if (rlen <= 0)
+            if (rlen == 0) {
+                /* Timeout — no data yet. Return what we have so far,
+                 * or TLS_ERR_RECV so caller can retry. */
                 return total > 0 ? total : TLS_ERR_RECV;
+            }
+            if (rlen < 0) {
+                /* EOF or error from kernel. Return accumulated data
+                 * if any, otherwise signal EOF cleanly with 0. */
+                return total > 0 ? total : 0;
+            }
             br_ssl_engine_recvrec_ack(eng, (size_t)rlen);
             continue;
         }

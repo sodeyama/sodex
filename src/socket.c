@@ -816,8 +816,14 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
     if (signer && sk->rx_len > 0)
       socket_dbg_udp_event("KRECV-HAVE", sockfd, sk->udp_conn->lport,
                            sk->udp_conn->rport, sk->rx_len);
-    if (sk->rx_len == 0)
-      return 0; /* timeout, closed, or CLOSE_WAIT with no data = EOF */
+    if (sk->rx_len == 0) {
+      /* Distinguish timeout (0) from true EOF (SOCK_ERR_EOF) so callers
+       * like tls_recv can retry on timeout but stop on EOF. */
+      if (sk->state == SOCK_STATE_CLOSE_WAIT ||
+          sk->state == SOCK_STATE_CLOSED)
+        return SOCK_ERR_EOF;
+      return 0;  /* timeout — no data yet but connection still alive */
+    }
   }
 
   disableInterrupt();

@@ -32,6 +32,7 @@ struct wait_queue;
 #define SOCK_ERR_ARP_FAIL    (-3)   /* ARP resolution failed */
 #define SOCK_ERR_NO_SOCKET   (-4)   /* No free socket slot */
 #define SOCK_ERR_BAD_STATE   (-5)   /* Invalid socket state for operation */
+#define SOCK_ERR_EOF         (-6)   /* Peer closed connection (FIN received, no data) */
 
 /* Socket option levels and names */
 #define SOL_SOCKET           1

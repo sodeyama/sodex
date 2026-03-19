@@ -582,10 +582,17 @@ static int shell_builtin_echo(struct shell_expanded_command *command)
   return 0;
 }
 
-static int shell_builtin_cd(struct shell_expanded_command *command)
+static int shell_builtin_cd(struct shell_state *state,
+                            struct shell_expanded_command *command)
 {
   const char *path = "/";
 
+  if (state != 0) {
+    const char *home = shell_var_get(state, "HOME");
+
+    if (home != 0 && home[0] != '\0')
+      path = home;
+  }
   if (command->argc > 1)
     path = command->argv[1];
   if (chdir((char *)path) < 0) {
@@ -891,7 +898,7 @@ static int shell_builtin_run(struct shell_state *state,
 
   name = command->argv[0];
   if (strcmp(name, "cd") == 0)
-    return shell_builtin_cd(command);
+    return shell_builtin_cd(state, command);
   if (strcmp(name, "exit") == 0)
     return shell_builtin_exit(state, command);
   if (strcmp(name, "export") == 0)

@@ -50,6 +50,7 @@ TEST(shell_vars_and_params) {
     char *params[] = {"start", "now"};
 
     shell_state_init(&state, 0);
+    ASSERT_STR_EQ(shell_var_get(&state, "HOME"), "/home/user");
     ASSERT_EQ(shell_var_set(&state, "NAME", "value", 1), 0);
     ASSERT_STR_EQ(shell_var_get(&state, "NAME"), "value");
     shell_state_set_script(&state, "/etc/init.d/sshd", 2, params);

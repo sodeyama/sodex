@@ -7,6 +7,7 @@
 
 #include <agent/session.h>
 #include <agent/conversation.h>
+#include <agent/path_utils.h>
 #include <json.h>
 #include <string.h>
 #include <stdio.h>
@@ -470,7 +471,8 @@ int session_create(struct session_meta *meta,
     memset(meta, 0, sizeof(*meta));
     session_generate_id(meta->id);
     safe_copy(meta->name, sizeof(meta->name), "main");
-    safe_copy(meta->cwd, sizeof(meta->cwd), cwd ? cwd : "/");
+    safe_copy(meta->cwd, sizeof(meta->cwd),
+              (cwd && cwd[0] != '\0') ? cwd : AGENT_DEFAULT_HOME);
     meta->cwd_hash = session_hash_path(meta->cwd);
     safe_copy(meta->model, sizeof(meta->model), model ? model : "");
 

@@ -67,7 +67,7 @@ void shell_state_init(struct shell_state *state, int interactive)
   state->next_job_id = 1;
   shell_copy_text(state->script_name, sizeof(state->script_name), "sh");
   shell_var_set(state, "PATH", "/usr/bin", 1);
-  shell_var_set(state, "HOME", "/", 1);
+  shell_var_set(state, "HOME", "/home/user", 1);
   shell_var_set(state, "TERM", "sodex", 1);
 }
 

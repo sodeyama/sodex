@@ -5,7 +5,7 @@
 #define _AGENT_PERMISSIONS_H
 
 #define PERM_MAX_RULES       32
-#define PERM_MAX_DENY_PATHS  16
+#define PERM_MAX_PATH_RULES  16
 #define PERM_MAX_DENY_CMDS   16
 
 enum permission_mode {
@@ -17,9 +17,15 @@ enum permission_mode {
 struct permission_policy {
     enum permission_mode mode;
 
-    /* Denied path prefixes (for write_file) */
-    char deny_paths[PERM_MAX_DENY_PATHS][256];
-    int deny_path_count;
+    /* Allowed / denied path prefixes */
+    char read_allow_paths[PERM_MAX_PATH_RULES][256];
+    int read_allow_count;
+    char read_deny_paths[PERM_MAX_PATH_RULES][256];
+    int read_deny_count;
+    char write_allow_paths[PERM_MAX_PATH_RULES][256];
+    int write_allow_count;
+    char write_deny_paths[PERM_MAX_PATH_RULES][256];
+    int write_deny_count;
 
     /* Denied command patterns (for run_command) */
     char deny_commands[PERM_MAX_DENY_CMDS][64];

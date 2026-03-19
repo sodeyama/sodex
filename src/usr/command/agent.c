@@ -18,6 +18,7 @@
 #include <agent/audit.h>
 #include <agent/claude_client.h>
 #include <agent/memory_store.h>
+#include <agent/path_utils.h>
 #include <agent/tool_handlers.h>
 #include <agent/session.h>
 
@@ -586,7 +587,7 @@ static void print_sessions(void)
                i + 1,
                index.entries[i].id,
                index.entries[i].name[0] ? index.entries[i].name : "main",
-               index.entries[i].cwd[0] ? index.entries[i].cwd : "/");
+               index.entries[i].cwd[0] ? index.entries[i].cwd : AGENT_DEFAULT_HOME);
     }
 }
 
@@ -597,7 +598,7 @@ static int resolve_continue_session(char *session_id, int cap)
     if (!session_id || cap <= 0)
         return -1;
     if (build_current_path(cwd, sizeof(cwd)) < 0)
-        safe_copy(cwd, sizeof(cwd), "/");
+        safe_copy(cwd, sizeof(cwd), AGENT_DEFAULT_HOME);
     return agent_resume_latest_for_cwd(cwd, session_id, cap);
 }
 
@@ -637,7 +638,7 @@ static int start_new_session(struct agent_state *state,
     if (!state || !session)
         return -1;
     if (build_current_path(cwd, sizeof(cwd)) < 0)
-        safe_copy(cwd, sizeof(cwd), "/");
+        safe_copy(cwd, sizeof(cwd), AGENT_DEFAULT_HOME);
 
     agent_state_init(state, &s_config);
     return session_create(session, s_config.model, cwd);
@@ -689,7 +690,7 @@ static void print_memory_sources(void)
     int i;
 
     if (build_current_path(cwd, sizeof(cwd)) < 0)
-        safe_copy(cwd, sizeof(cwd), "/");
+        safe_copy(cwd, sizeof(cwd), AGENT_DEFAULT_HOME);
 
     printf("Memory sources:\n");
     count = agent_collect_memory_sources(cwd, sources, AGENT_MEMORY_SOURCE_MAX);
@@ -718,7 +719,7 @@ static int append_workspace_memory_note(struct agent_state *state,
         return -1;
 
     if (build_current_path(cwd, sizeof(cwd)) < 0)
-        safe_copy(cwd, sizeof(cwd), "/");
+        safe_copy(cwd, sizeof(cwd), AGENT_DEFAULT_HOME);
     ensure_memory_dirs();
     ret = agent_memory_append_workspace(cwd, note, path, sizeof(path));
     if (ret == -2) {
@@ -886,7 +887,7 @@ static int print_repl_prompt(const struct agent_state *state,
     int ctx_percent;
 
     if (build_current_path(cwd, sizeof(cwd)) < 0)
-        safe_copy(cwd, sizeof(cwd), "/");
+        safe_copy(cwd, sizeof(cwd), AGENT_DEFAULT_HOME);
 
     total_tokens = conv_total_tokens(&state->conv);
     ctx_percent = (total_tokens * 100) / CONV_TOKEN_LIMIT;

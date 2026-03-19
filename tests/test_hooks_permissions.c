@@ -23,6 +23,13 @@ static int failed = 0;
 #define TEST_START(name) printf("TEST: %s\n", name)
 #define TEST_PASS(name) do { printf("  PASS: %s\n", name); passed++; } while (0)
 
+static int perm_check_json(const struct permission_policy *policy,
+                           const char *tool_name, const char *input_json)
+{
+    return perm_check_tool(policy, tool_name,
+                           input_json, (int)strlen(input_json));
+}
+
 /* ---- Mock hook handlers ---- */
 
 static int hook_pass(const struct hook_context *ctx,
@@ -160,14 +167,14 @@ static void test_perm_standard_allows_read(void)
     TEST_START("perm_standard_allows_read");
     perm_set_default(&policy);
 
-    ASSERT(perm_check_tool(&policy, "read_file",
-                            "{\"path\":\"/etc/test\"}", 20) == 1,
+    ASSERT(perm_check_json(&policy, "read_file",
+                            "{\"path\":\"/etc/test\"}") == 1,
            "read allowed");
-    ASSERT(perm_check_tool(&policy, "list_dir",
-                            "{\"path\":\"/\"}", 12) == 1,
+    ASSERT(perm_check_json(&policy, "list_dir",
+                            "{\"path\":\"/\"}") == 1,
            "list_dir allowed");
-    ASSERT(perm_check_tool(&policy, "get_system_info",
-                            "{}", 2) == 1,
+    ASSERT(perm_check_json(&policy, "get_system_info",
+                            "{}") == 1,
            "system_info allowed");
     TEST_PASS("perm_standard_allows_read");
 }
@@ -179,16 +186,44 @@ static void test_perm_standard_denies_protected_write(void)
     TEST_START("perm_standard_denies_protected_write");
     perm_set_default(&policy);
 
-    ASSERT(perm_check_tool(&policy, "write_file",
-                            "{\"path\":\"/boot/test\"}", 21) == 0,
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/boot/test\"}") == 0,
            "/boot write denied");
-    ASSERT(perm_check_tool(&policy, "write_file",
-                            "{\"path\":\"/etc/agent/conf\"}", 25) == 0,
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/etc/agent/conf\"}") == 0,
            "/etc/agent write denied");
-    ASSERT(perm_check_tool(&policy, "write_file",
-                            "{\"path\":\"/tmp/ok.txt\"}", 21) == 1,
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/tmp/ok.txt\"}") == 1,
            "/tmp write allowed");
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/var/agent/out.txt\"}") == 1,
+           "/var/agent write allowed");
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/home/user/out.txt\"}") == 1,
+           "/home/user write allowed");
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/home/out.txt\"}") == 0,
+           "/home write denied by default");
     TEST_PASS("perm_standard_denies_protected_write");
+}
+
+static void test_perm_standard_normalizes_paths(void)
+{
+    struct permission_policy policy;
+
+    TEST_START("perm_standard_normalizes_paths");
+    perm_set_default(&policy);
+
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/tmp/work/../ok.txt\"}") == 1,
+           "normalized /tmp path allowed");
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/tmp/../../boot/x\"}") == 1,
+           "invalid normalized path is left to tool validation");
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/tmp/../boot/x\"}") == 0,
+           "normalized /boot path denied");
+    TEST_PASS("perm_standard_normalizes_paths");
 }
 
 static void test_perm_standard_denies_dangerous_commands(void)
@@ -198,17 +233,17 @@ static void test_perm_standard_denies_dangerous_commands(void)
     TEST_START("perm_standard_denies_dangerous_commands");
     perm_set_default(&policy);
 
-    ASSERT(perm_check_tool(&policy, "run_command",
-                            "{\"command\":\"rm -rf /\"}", 20) == 0,
+    ASSERT(perm_check_json(&policy, "run_command",
+                            "{\"command\":\"rm -rf /\"}") == 0,
            "rm -rf denied");
-    ASSERT(perm_check_tool(&policy, "run_command",
-                            "{\"command\":\"dd if=/dev/zero of=/dev/sda\"}", 39) == 0,
+    ASSERT(perm_check_json(&policy, "run_command",
+                            "{\"command\":\"dd if=/dev/zero of=/dev/sda\"}") == 0,
            "dd denied");
-    ASSERT(perm_check_tool(&policy, "run_command",
-                            "{\"command\":\"mkfs.ext3 /dev/sda\"}", 30) == 0,
+    ASSERT(perm_check_json(&policy, "run_command",
+                            "{\"command\":\"mkfs.ext3 /dev/sda\"}") == 0,
            "mkfs denied");
-    ASSERT(perm_check_tool(&policy, "run_command",
-                            "{\"command\":\"ls /tmp\"}", 19) == 1,
+    ASSERT(perm_check_json(&policy, "run_command",
+                            "{\"command\":\"ls /tmp\"}") == 1,
            "ls allowed");
     TEST_PASS("perm_standard_denies_dangerous_commands");
 }
@@ -221,15 +256,15 @@ static void test_perm_strict_only_reads(void)
     perm_init(&policy);
     policy.mode = PERM_STRICT;
 
-    ASSERT(perm_check_tool(&policy, "read_file", "{}", 2) == 1,
+    ASSERT(perm_check_json(&policy, "read_file", "{}") == 1,
            "read allowed in strict");
-    ASSERT(perm_check_tool(&policy, "list_dir", "{}", 2) == 1,
+    ASSERT(perm_check_json(&policy, "list_dir", "{}") == 1,
            "list_dir allowed in strict");
-    ASSERT(perm_check_tool(&policy, "get_system_info", "{}", 2) == 1,
+    ASSERT(perm_check_json(&policy, "get_system_info", "{}") == 1,
            "system_info allowed in strict");
-    ASSERT(perm_check_tool(&policy, "write_file", "{}", 2) == 0,
+    ASSERT(perm_check_json(&policy, "write_file", "{}") == 0,
            "write denied in strict");
-    ASSERT(perm_check_tool(&policy, "run_command", "{}", 2) == 0,
+    ASSERT(perm_check_json(&policy, "run_command", "{}") == 0,
            "run_command denied in strict");
     TEST_PASS("perm_strict_only_reads");
 }
@@ -242,13 +277,46 @@ static void test_perm_permissive_allows_all(void)
     perm_init(&policy);
     policy.mode = PERM_PERMISSIVE;
 
-    ASSERT(perm_check_tool(&policy, "write_file",
-                            "{\"path\":\"/boot/kernel\"}", 22) == 1,
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/boot/kernel\"}") == 1,
            "write /boot in permissive");
-    ASSERT(perm_check_tool(&policy, "run_command",
-                            "{\"command\":\"rm -rf /\"}", 20) == 1,
+    ASSERT(perm_check_json(&policy, "run_command",
+                            "{\"command\":\"rm -rf /\"}") == 1,
            "rm -rf in permissive");
     TEST_PASS("perm_permissive_allows_all");
+}
+
+static void test_perm_load_policy_prefix_rules(void)
+{
+    struct permission_policy policy;
+    FILE *fp;
+
+    TEST_START("perm_load_policy_prefix_rules");
+    system("mkdir -p /tmp/agent_test_audit 2>/dev/null");
+    fp = fopen("/tmp/agent_test_audit/permissions.conf", "w");
+    ASSERT(fp != NULL, "open temp policy");
+    fputs("mode=standard\n", fp);
+    fputs("read_allow=/tmp/\n", fp);
+    fputs("read_deny=/tmp/private/\n", fp);
+    fputs("write_allow=/tmp/work/\n", fp);
+    fputs("write_deny=/tmp/work/blocked/\n", fp);
+    fclose(fp);
+
+    ASSERT(perm_load_policy(&policy, "/tmp/agent_test_audit/permissions.conf") == 0,
+           "load policy");
+    ASSERT(perm_check_json(&policy, "read_file",
+                            "{\"path\":\"/tmp/file.txt\"}") == 1,
+           "read allow works");
+    ASSERT(perm_check_json(&policy, "read_file",
+                            "{\"path\":\"/tmp/private/secret.txt\"}") == 0,
+           "read deny works");
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/tmp/work/out.txt\"}") == 1,
+           "write allow works");
+    ASSERT(perm_check_json(&policy, "write_file",
+                            "{\"path\":\"/tmp/work/blocked/out.txt\"}") == 0,
+           "write deny works");
+    TEST_PASS("perm_load_policy_prefix_rules");
 }
 
 /* ---- Audit tests ---- */
@@ -340,9 +408,11 @@ int main(void)
     /* Permission tests */
     test_perm_standard_allows_read();
     test_perm_standard_denies_protected_write();
+    test_perm_standard_normalizes_paths();
     test_perm_standard_denies_dangerous_commands();
     test_perm_strict_only_reads();
     test_perm_permissive_allows_all();
+    test_perm_load_policy_prefix_rules();
 
     /* Audit tests */
     test_audit_write_and_read();

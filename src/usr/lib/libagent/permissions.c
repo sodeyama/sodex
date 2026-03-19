@@ -6,6 +6,8 @@
  */
 
 #include <agent/permissions.h>
+#include <agent/path_utils.h>
+#include <json.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -19,7 +21,6 @@
 
 /* ---- Internal helpers ---- */
 
-/* Copy a string safely, always null-terminate */
 static void safe_str(char *dst, int dst_cap, const char *src)
 {
     int len;
@@ -32,45 +33,52 @@ static void safe_str(char *dst, int dst_cap, const char *src)
     dst[len] = '\0';
 }
 
-/*
- * Extract a JSON string value for a given key from input_json.
- * Simplified parser: finds "key":"value" pattern.
- * Returns length of extracted value, or -1 if not found.
- */
-static int json_extract_string(const char *json, int json_len,
-                                const char *key, char *out, int out_cap)
+static int store_path_rule(char rules[][256], int *count, const char *value)
 {
-    char pattern[128];
-    const char *p;
-    int pi, ki;
+    char normalized[256];
 
-    if (!json || !key || !out || out_cap <= 0)
+    if (!rules || !count || !value)
+        return -1;
+    if (*count >= PERM_MAX_PATH_RULES)
+        return -1;
+    if (agent_normalize_path(value, normalized, sizeof(normalized)) < 0)
         return -1;
 
-    /* Build pattern: "key":" */
-    ki = snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
-    if (ki <= 0)
-        return -1;
+    safe_str(rules[*count], 256, normalized);
+    (*count)++;
+    return 0;
+}
 
-    p = strstr(json, pattern);
-    if (!p)
-        return -1;
+static int path_matches_any(const char *path, const char rules[][256], int count)
+{
+    int i;
 
-    p += ki; /* skip past pattern */
-
-    /* Extract value until closing unescaped quote */
-    pi = 0;
-    while (*p && *p != '"' && pi < out_cap - 1) {
-        if (*p == '\\' && *(p + 1)) {
-            out[pi++] = *(p + 1);
-            p += 2;
-        } else {
-            out[pi++] = *p;
-            p++;
-        }
+    if (!path)
+        return 0;
+    for (i = 0; i < count; i++) {
+        if (agent_path_is_under(path, rules[i]))
+            return 1;
     }
-    out[pi] = '\0';
-    return pi;
+    return 0;
+}
+
+static int path_allowed(const char *path,
+                        const char allow_rules[][256], int allow_count,
+                        const char deny_rules[][256], int deny_count)
+{
+    int allow_hit;
+
+    if (!path)
+        return 1;
+
+    allow_hit = 1;
+    if (allow_count > 0)
+        allow_hit = path_matches_any(path, allow_rules, allow_count);
+    if (!allow_hit)
+        return 0;
+    if (path_matches_any(path, deny_rules, deny_count))
+        return 0;
+    return 1;
 }
 
 /* ---- Public API ---- */
@@ -91,10 +99,13 @@ void perm_set_default(struct permission_policy *policy)
     perm_init(policy);
     policy->mode = PERM_STANDARD;
 
-    /* Default denied paths */
-    safe_str(policy->deny_paths[0], 256, "/boot/");
-    safe_str(policy->deny_paths[1], 256, "/etc/agent/");
-    policy->deny_path_count = 2;
+    store_path_rule(policy->read_allow_paths, &policy->read_allow_count, "/");
+    store_path_rule(policy->write_allow_paths, &policy->write_allow_count,
+                    AGENT_DEFAULT_HOME "/");
+    store_path_rule(policy->write_allow_paths, &policy->write_allow_count, "/tmp/");
+    store_path_rule(policy->write_allow_paths, &policy->write_allow_count, "/var/agent/");
+    store_path_rule(policy->write_deny_paths, &policy->write_deny_count, "/boot/");
+    store_path_rule(policy->write_deny_paths, &policy->write_deny_count, "/etc/agent/");
 
     /* Default denied commands */
     safe_str(policy->deny_commands[0], 64, "rm -rf");
@@ -107,6 +118,8 @@ int perm_check_tool(const struct permission_policy *policy,
                      const char *tool_name, const char *input_json, int input_len)
 {
     int i;
+    char path[AGENT_PATH_MAX];
+    int path_len = -1;
 
     if (!policy || !tool_name)
         return 0; /* deny on invalid input */
@@ -128,32 +141,45 @@ int perm_check_tool(const struct permission_policy *policy,
         return 0;
     }
 
-    /* Standard mode: allow all tools but enforce deny lists */
+    if ((strcmp(tool_name, "read_file") == 0 ||
+         strcmp(tool_name, "list_dir") == 0 ||
+         strcmp(tool_name, "write_file") == 0) &&
+        input_json) {
+        path_len = agent_json_get_normalized_path(input_json, input_len,
+                                                  "path", path, sizeof(path));
+    }
 
-    /* Check write_file against denied paths */
-    if (strcmp(tool_name, "write_file") == 0 && input_json) {
-        char file_path[256];
-        int plen = json_extract_string(input_json, input_len,
-                                        "path", file_path, sizeof(file_path));
-        if (plen > 0) {
-            for (i = 0; i < policy->deny_path_count; i++) {
-                if (strncmp(file_path, policy->deny_paths[i],
-                            strlen(policy->deny_paths[i])) == 0) {
+    /* Standard mode: allow all tools but enforce path and command policy */
+    if (strcmp(tool_name, "read_file") == 0 ||
+        strcmp(tool_name, "list_dir") == 0) {
+        if (path_len > 0 &&
+            !path_allowed(path,
+                          policy->read_allow_paths, policy->read_allow_count,
+                          policy->read_deny_paths, policy->read_deny_count)) {
 #ifndef TEST_BUILD
-                    debug_printf("[PERM] denied write to %s (matches %s)\n",
-                                 file_path, policy->deny_paths[i]);
+            debug_printf("[PERM] denied read of %s\n", path);
 #endif
-                    return 0;
-                }
-            }
+            return 0;
+        }
+    }
+
+    if (strcmp(tool_name, "write_file") == 0) {
+        if (path_len > 0 &&
+            !path_allowed(path,
+                          policy->write_allow_paths, policy->write_allow_count,
+                          policy->write_deny_paths, policy->write_deny_count)) {
+#ifndef TEST_BUILD
+            debug_printf("[PERM] denied write to %s\n", path);
+#endif
+            return 0;
         }
     }
 
     /* Check run_command against denied commands */
     if (strcmp(tool_name, "run_command") == 0 && input_json) {
         char command[512];
-        int clen = json_extract_string(input_json, input_len,
-                                        "command", command, sizeof(command));
+        int clen = agent_json_get_string_field(input_json, input_len,
+                                               "command", command, sizeof(command));
         if (clen > 0) {
             for (i = 0; i < policy->deny_cmd_count; i++) {
                 if (strstr(command, policy->deny_commands[i]) != (void *)0) {
@@ -212,7 +238,6 @@ int perm_load_policy(struct permission_policy *policy, const char *path)
                 continue;
             }
 
-            /* Parse mode=... */
             if (strncmp(line, "mode=", 5) == 0) {
                 const char *val = line + 5;
                 if (strcmp(val, "strict") == 0)
@@ -222,16 +247,27 @@ int perm_load_policy(struct permission_policy *policy, const char *path)
                 else
                     policy->mode = PERM_STANDARD;
             }
-            /* Parse deny_path=... */
-            else if (strncmp(line, "deny_path=", 10) == 0) {
-                const char *val = line + 10;
-                if (policy->deny_path_count < PERM_MAX_DENY_PATHS) {
-                    safe_str(policy->deny_paths[policy->deny_path_count],
-                             256, val);
-                    policy->deny_path_count++;
-                }
+            else if (strncmp(line, "read_allow=", 11) == 0) {
+                store_path_rule(policy->read_allow_paths,
+                                &policy->read_allow_count, line + 11);
             }
-            /* Parse deny_cmd=... */
+            else if (strncmp(line, "read_deny=", 10) == 0) {
+                store_path_rule(policy->read_deny_paths,
+                                &policy->read_deny_count, line + 10);
+            }
+            else if (strncmp(line, "write_allow=", 12) == 0) {
+                store_path_rule(policy->write_allow_paths,
+                                &policy->write_allow_count, line + 12);
+            }
+            else if (strncmp(line, "write_deny=", 11) == 0) {
+                store_path_rule(policy->write_deny_paths,
+                                &policy->write_deny_count, line + 11);
+            }
+            else if (strncmp(line, "deny_path=", 10) == 0) {
+                /* 旧設定との互換: deny_path は write_deny として扱う */
+                store_path_rule(policy->write_deny_paths,
+                                &policy->write_deny_count, line + 10);
+            }
             else if (strncmp(line, "deny_cmd=", 9) == 0) {
                 const char *val = line + 9;
                 if (policy->deny_cmd_count < PERM_MAX_DENY_CMDS) {
@@ -246,8 +282,12 @@ int perm_load_policy(struct permission_policy *policy, const char *path)
     }
 
 #ifndef TEST_BUILD
-    debug_printf("[PERM] loaded policy: mode=%d, %d deny_paths, %d deny_cmds\n",
-                 policy->mode, policy->deny_path_count, policy->deny_cmd_count);
+    debug_printf("[PERM] loaded policy: mode=%d, read_allow=%d, read_deny=%d, "
+                 "write_allow=%d, write_deny=%d, deny_cmds=%d\n",
+                 policy->mode,
+                 policy->read_allow_count, policy->read_deny_count,
+                 policy->write_allow_count, policy->write_deny_count,
+                 policy->deny_cmd_count);
 #endif
     return 0;
 }

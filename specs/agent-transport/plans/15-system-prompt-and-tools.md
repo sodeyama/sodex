@@ -78,7 +78,7 @@ QEMU 上で動作しています。
     "properties": {
       "path": {
         "type": "string",
-        "description": "Absolute file path (e.g., /etc/hostname, /home/config.txt)"
+        "description": "File path. Relative paths resolve from the current directory"
       },
       "offset": {
         "type": "integer",
@@ -105,7 +105,7 @@ QEMU 上で動作しています。
     "properties": {
       "path": {
         "type": "string",
-        "description": "Absolute file path to write"
+        "description": "File path to write. Relative paths resolve from the current directory"
       },
       "content": {
         "type": "string",
@@ -128,7 +128,7 @@ QEMU 上で動作しています。
     "properties": {
       "path": {
         "type": "string",
-        "description": "Absolute directory path (e.g., /, /etc, /home)"
+        "description": "Directory path. Relative paths resolve from the current directory"
       }
     },
     "required": ["path"]

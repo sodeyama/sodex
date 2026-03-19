@@ -6,6 +6,7 @@ agent は `/etc/CLAUDE.md` を前提として扱ってください。
 ## 基本
 
 - 既定の対話シェルは `eshell`、スクリプト実行や `-c` は `sh`
+- 既定のホームディレクトリと起動位置は `/home/user`
 - PTY/TTY ベースで動作し、UTF-8 表示と日本語入力に対応
 - shell は `|`, `>`, `<`, `>>` を扱える
 - フルスクリーン編集は `vi`
@@ -56,6 +57,10 @@ curl -v http://10.0.2.2:8080/healthz
 - まず既存コマンドか tool で確認してから推測する
 - 長い出力は分割して取得する
 - URL が確定していれば `fetch_url` / `webfetch` を優先する
+- file tool は絶対 path または相対 path を使える
+- 相対 path は current directory から解決され、既定起動位置は `/home/user`
+- file を書く前に、可能なら `read_file` か `cat` で現状を確認する
+- `standard` mode での書き込み先は原則 `/home/user`、`/tmp`、`/var/agent`
 - URL 探索だけが必要なら `websearch`
 - raw HTTP を見る必要があるときだけ `curl`
 - 天気、ニュース、株価、為替などの最新情報は、tool を1回以上使って確認してから答える

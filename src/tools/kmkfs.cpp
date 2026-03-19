@@ -886,20 +886,28 @@ int main(int argc, char **argv)
                   FTYPE_FILE, "ptest2");
 #endif
 
-  /* make usr/tmp directory */
-  int usr_inode, usr_bin_inode, tmp_inode;
+  /* make usr/tmp/home directory */
+  int usr_inode, usr_bin_inode, tmp_inode, home_inode, home_user_inode;
   usr_inode = create_dir(kernel_iofs, (ext3_inode*)&inode, &sb, &gd,
                          (u_int8_t*)&inode_bitmap, (u_int8_t*)&block_bitmap);
   usr_bin_inode = create_dir(kernel_iofs, (ext3_inode*)&inode, &sb, &gd,
                          (u_int8_t*)&inode_bitmap, (u_int8_t*)&block_bitmap);
   tmp_inode = create_dir(kernel_iofs, (ext3_inode*)&inode, &sb, &gd,
                          (u_int8_t*)&inode_bitmap, (u_int8_t*)&block_bitmap);
+  home_inode = create_dir(kernel_iofs, (ext3_inode*)&inode, &sb, &gd,
+                          (u_int8_t*)&inode_bitmap, (u_int8_t*)&block_bitmap);
+  home_user_inode = create_dir(kernel_iofs, (ext3_inode*)&inode, &sb, &gd,
+                               (u_int8_t*)&inode_bitmap, (u_int8_t*)&block_bitmap);
   insert_dir_data(kernel_iofs, (ext3_inode*)inode, root_inode, usr_inode,
                   FTYPE_DIR, "usr");
   insert_dir_data(kernel_iofs, (ext3_inode*)inode, usr_inode, usr_bin_inode,
                   FTYPE_DIR, "bin");
   insert_dir_data(kernel_iofs, (ext3_inode*)inode, root_inode, tmp_inode,
                   FTYPE_DIR, "tmp");
+  insert_dir_data(kernel_iofs, (ext3_inode*)inode, root_inode, home_inode,
+                  FTYPE_DIR, "home");
+  insert_dir_data(kernel_iofs, (ext3_inode*)inode, home_inode, home_user_inode,
+                  FTYPE_DIR, "user");
   string path_usrbin = PATH_USRBIN;
   read_dir(kernel_iofs, inode, &sb, &gd, (u_int8_t*)&inode_bitmap,
            (u_int8_t*)&block_bitmap, usr_bin_inode, path_usrbin);

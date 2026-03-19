@@ -7,6 +7,8 @@
 #include <init_policy.h>
 #include <sleep.h>
 
+#define INIT_DEFAULT_HOME "/home/user"
+
 static void init_debug_log(const char *text)
 {
   if (text == 0)
@@ -104,6 +106,13 @@ static int init_split_command(char *buf, char **argv, int max_args)
   return argc;
 }
 
+static void init_restore_default_dir(void)
+{
+  if (chdir(INIT_DEFAULT_HOME) == 0)
+    return;
+  chdir("/");
+}
+
 static pid_t init_spawn_command(const char *command)
 {
   char buf[INIT_POLICY_CMD_MAX];
@@ -120,7 +129,7 @@ static pid_t init_spawn_command(const char *command)
   argc = init_split_command(buf, argv, 8);
   if (argc <= 0)
     return -1;
-  chdir("/");
+  init_restore_default_dir();
   pid = execve(argv[0], argv, 0);
   if (pid < 0) {
     init_debug_value("AUDIT init_spawn_failed=", argv[0]);
@@ -151,7 +160,7 @@ static int init_run_boot_script(const struct init_inittab *inittab)
   }
   if (waitpid(pid, &status, 0) < 0)
     status = 1;
-  chdir("/");
+  init_restore_default_dir();
   if (status == 0)
     init_debug_log("AUDIT init_rc_done ok\n");
   else

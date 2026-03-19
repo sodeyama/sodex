@@ -15,6 +15,7 @@
 #include <agent/tool_registry.h>
 #include <agent/hooks.h>
 #include <agent/permissions.h>
+#include <agent/path_utils.h>
 #include <agent/audit.h>
 #include <json.h>
 #include <string.h>
@@ -497,6 +498,8 @@ int agent_load_config(struct agent_config *config)
 
     append_instruction_files(config);
     append_memory_files(config);
+#else
+    (void)config;
 #endif
     return 0;
 }
@@ -574,33 +577,9 @@ void agent_state_init(struct agent_state *state,
         conv_init(&state->conv, DEFAULT_SYSTEM_PROMPT);
 }
 
-/* AT-98: Builtin hook: block writes to protected paths */
-static int builtin_path_protection(const struct hook_context *ctx,
-                                    struct hook_response *response)
-{
-    if (!ctx || !response)
-        return -1;
-
-    /* Only check write_file tool */
-    if (!ctx->tool_name || strcmp(ctx->tool_name, "write_file") != 0)
-        return 0;
-
-    if (ctx->tool_input_json && ctx->tool_input_len > 0) {
-        /* Check for protected paths: /boot/ and /etc/agent/ */
-        if (strstr(ctx->tool_input_json, "\"/boot/") ||
-            strstr(ctx->tool_input_json, "\"/etc/agent/")) {
-            response->decision = HOOK_BLOCK;
-            snprintf(response->message, sizeof(response->message),
-                     "write to protected path is not allowed");
-            return 0;
-        }
-    }
-    return 0;
-}
-
 static void agent_register_builtin_hooks(void)
 {
-    hooks_register(HOOK_PRE_TOOL_USE, builtin_path_protection);
+    /* path 保護は permissions へ集約する */
 }
 
 static int agent_run_loop(
@@ -720,19 +699,34 @@ static int agent_run_loop(
                     static struct permission_policy s_policy;
                     static int s_policy_init = 0;
                     if (!s_policy_init) {
-                        perm_set_default(&s_policy);
+                        if (perm_load_policy(&s_policy,
+                                             "/etc/agent/permissions.conf") < 0)
+                            perm_set_default(&s_policy);
                         s_policy_init = 1;
                     }
                     if (!perm_check_tool(&s_policy,
                                          resp.blocks[i].tool_use.name,
                                          resp.blocks[i].tool_use.input_json,
                                          resp.blocks[i].tool_use.input_json_len)) {
+                        char denied_path[AGENT_PATH_MAX];
+                        const char *detail_path = (const char *)0;
+
+                        if (agent_json_get_normalized_path(
+                                resp.blocks[i].tool_use.input_json,
+                                resp.blocks[i].tool_use.input_json_len,
+                                "path",
+                                denied_path, sizeof(denied_path)) > 0) {
+                            detail_path = denied_path;
+                        }
                         /* Tool blocked by permissions */
                         debug_printf("[AGENT] tool '%s' blocked by permissions\n",
                                     resp.blocks[i].tool_use.name);
-                        snprintf(tool_results[tool_count_exec].result_json, TOOL_RESULT_BUF,
-                                 "{\"error\":\"permission denied: tool '%s' is not allowed for this input\"}",
-                                 resp.blocks[i].tool_use.name);
+                        agent_write_error_json(
+                            tool_results[tool_count_exec].result_json,
+                            TOOL_RESULT_BUF,
+                            "permission_denied",
+                            "permission denied: tool input is not allowed",
+                            detail_path);
                         tool_results[tool_count_exec].result_len =
                             strlen(tool_results[tool_count_exec].result_json);
                         strncpy(tool_results[tool_count_exec].tool_use_id,
@@ -773,9 +767,12 @@ static int agent_run_loop(
                         /* Blocked by hook */
                         debug_printf("[AGENT] tool '%s' blocked by hook: %s\n",
                                     resp.blocks[i].tool_use.name, hresp.message);
-                        snprintf(tool_results[tool_count_exec].result_json, TOOL_RESULT_BUF,
-                                 "{\"error\":\"blocked by policy: %s\"}",
-                                 hresp.message[0] ? hresp.message : "operation not permitted");
+                        agent_write_error_json(
+                            tool_results[tool_count_exec].result_json,
+                            TOOL_RESULT_BUF,
+                            "permission_denied",
+                            hresp.message[0] ? hresp.message : "blocked by policy",
+                            (const char *)0);
                         tool_results[tool_count_exec].result_len =
                             strlen(tool_results[tool_count_exec].result_json);
                         strncpy(tool_results[tool_count_exec].tool_use_id,

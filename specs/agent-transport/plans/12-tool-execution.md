@@ -104,7 +104,7 @@ int tool_dispatch_all(
 #define READ_FILE_SCHEMA \
     "{\"type\":\"object\"," \
     "\"properties\":{" \
-    "  \"path\":{\"type\":\"string\",\"description\":\"Absolute file path\"}" \
+    "  \"path\":{\"type\":\"string\",\"description\":\"File path. Relative paths resolve from the current directory\"}" \
     "}," \
     "\"required\":[\"path\"]}"
 

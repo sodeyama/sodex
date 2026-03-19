@@ -216,6 +216,7 @@ def _find_scenario_keyword(messages):
     """
     keywords = ("test_immediate", "test_one_tool", "test_two_tools",
                 "test_max_steps", "test_perm_blocked", "test_fetch_url_weather",
+                "test_write_readback",
                 "test_current_weather_requires_tool",
                 "test_current_weather_retry_after_text_only",
                 "test_session_resume_b", "test_session_resume_a",
@@ -313,7 +314,7 @@ def _agent_scenario_events(scenario, tool_results_count, messages):
 
     if scenario == "test_perm_blocked":
         # Step 1: Try to write to /boot/ (will be blocked by permissions)
-        # Step 2: After getting error, try /tmp/ (will succeed)
+        # Step 2: After getting error, try current home dir (will succeed)
         # Step 3: Complete
         has_perm_error = _messages_contain_text(messages, "permission denied")
         if tool_results_count == 0 and not has_perm_error:
@@ -329,7 +330,7 @@ def _agent_scenario_events(scenario, tool_results_count, messages):
             return tool_use_response_stream(
                 tool_name="write_file",
                 tool_id="toolu_integ_perm_2",
-                tool_input_json='{"path": "/tmp/allowed.txt", "content": "test"}',
+                tool_input_json='{"path": "allowed.txt", "content": "test"}',
                 text_before="Trying alternative path.",
                 msg_id="msg_integ_perm_2")
         else:
@@ -353,6 +354,34 @@ def _agent_scenario_events(scenario, tool_results_count, messages):
         return text_response_stream(
             text="fetch_url result missing weather data",
             msg_id="msg_integ_fetch_weather_missing")
+
+    if scenario == "test_write_readback":
+        if tool_results_count == 0:
+            return tool_use_response_stream(
+                tool_name="write_file",
+                tool_id="toolu_integ_write_readback_1",
+                tool_input_json=(
+                    '{"path":"agent_write_readback.txt",'
+                    '"content":"write-readback-ok",'
+                    '"mode":"overwrite"}'
+                ),
+                text_before="Writing test file.",
+                msg_id="msg_integ_write_readback_a")
+        if tool_results_count == 1:
+            return tool_use_response_stream(
+                tool_name="read_file",
+                tool_id="toolu_integ_write_readback_2",
+                tool_input_json='{"path":"agent_write_readback.txt"}',
+                text_before="Reading test file back.",
+                msg_id="msg_integ_write_readback_b")
+        if (_messages_contain_text(messages, "/home/user/agent_write_readback.txt") and
+                _messages_contain_text(messages, "write-readback-ok")):
+            return text_response_stream(
+                text="Write/readback succeeded.",
+                msg_id="msg_integ_write_readback_c")
+        return text_response_stream(
+            text="write/readback result missing expected content",
+            msg_id="msg_integ_write_readback_missing")
 
     if scenario == "test_current_weather_requires_tool":
         if tool_results_count == 0:

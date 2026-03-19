@@ -20,17 +20,17 @@ void tool_init(void)
     tool_registry_init();
 
     tool_register("read_file",
-                  "Read a file from the filesystem",
+                  "Read a file from the guest filesystem. Relative paths use the current directory",
                   TOOL_SCHEMA_READ_FILE,
                   tool_read_file);
 
     tool_register("write_file",
-                  "Write content to a file",
+                  "Write content to the guest filesystem. Relative paths use the current directory",
                   TOOL_SCHEMA_WRITE_FILE,
                   tool_write_file);
 
     tool_register("list_dir",
-                  "List directory contents",
+                  "List entries in a guest directory. Relative paths use the current directory",
                   TOOL_SCHEMA_LIST_DIR,
                   tool_list_dir);
 

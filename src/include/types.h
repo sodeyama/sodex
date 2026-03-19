@@ -5,7 +5,9 @@
 #ifndef _SYS_TYPES_H
 #define _SYS_TYPES_H
 
+#ifndef NULL
 #define NULL 0
+#endif
 #define TRUE 1
 #define FALSE 0
 

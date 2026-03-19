@@ -23,6 +23,94 @@
 static claude_stream_text_fn s_stream_text_callback = (claude_stream_text_fn)0;
 static void *s_stream_text_userdata = (void *)0;
 
+static int parse_chunk_size_line(const char *buf, int len, int *chunk_size)
+{
+    int i = 0;
+    int val = 0;
+    char c;
+
+    if (!buf || len <= 0 || !chunk_size)
+        return 0;
+
+    while (i < len) {
+        c = buf[i];
+        if (c >= '0' && c <= '9')
+            val = val * 16 + (c - '0');
+        else if (c >= 'a' && c <= 'f')
+            val = val * 16 + (c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F')
+            val = val * 16 + (c - 'A' + 10);
+        else
+            break;
+        i++;
+    }
+    if (i == 0)
+        return 0;
+
+    while (i < len && buf[i] != '\r')
+        i++;
+    if (i + 1 >= len)
+        return 0;
+    if (buf[i] != '\r' || buf[i + 1] != '\n')
+        return 0;
+
+    *chunk_size = val;
+    return i + 2;
+}
+
+static int build_error_body_preview(const char *body, int body_len,
+                                    int is_chunked,
+                                    char *out, int out_cap)
+{
+    int pos = 0;
+    int out_len = 0;
+
+    if (!out || out_cap <= 0)
+        return 0;
+    out[0] = '\0';
+    if (!body || body_len <= 0)
+        return 0;
+
+    if (!is_chunked) {
+        out_len = body_len;
+        if (out_len >= out_cap)
+            out_len = out_cap - 1;
+        memcpy(out, body, (size_t)out_len);
+        out[out_len] = '\0';
+        return out_len;
+    }
+
+    while (pos < body_len && out_len < out_cap - 1) {
+        int chunk_size = 0;
+        int header_len = parse_chunk_size_line(body + pos,
+                                               body_len - pos,
+                                               &chunk_size);
+        int copy_len;
+
+        if (header_len <= 0)
+            break;
+        pos += header_len;
+        if (chunk_size == 0)
+            break;
+        if (pos + chunk_size > body_len)
+            chunk_size = body_len - pos;
+        if (chunk_size <= 0)
+            break;
+
+        copy_len = chunk_size;
+        if (copy_len > (out_cap - 1 - out_len))
+            copy_len = out_cap - 1 - out_len;
+        memcpy(out + out_len, body + pos, (size_t)copy_len);
+        out_len += copy_len;
+        pos += chunk_size;
+        if (pos + 1 < body_len && body[pos] == '\r' && body[pos + 1] == '\n')
+            pos += 2;
+    }
+
+    out[out_len] = '\0';
+    return out_len;
+}
+
 static void emit_stream_text_delta(int prev_text_len[CLAUDE_MAX_BLOCKS],
                                    const struct claude_response *resp)
 {
@@ -255,6 +343,31 @@ static int claude_do_request(
 
         /* Check HTTP status */
         if (resp.status_code != 200) {
+            int body_start = header_len;
+            int body_received = total_recv - header_len;
+            static char error_preview[601];
+
+            while (total_recv < (int)sizeof(recv_buf) - 1) {
+                if (resp.content_length >= 0 &&
+                    body_received >= resp.content_length) {
+                    break;
+                }
+                ret = tls_recv(recv_buf + total_recv,
+                               sizeof(recv_buf) - 1 - total_recv);
+                if (ret <= 0)
+                    break;
+                total_recv += ret;
+                body_received = total_recv - header_len;
+            }
+            recv_buf[total_recv] = '\0';
+            if (build_error_body_preview(recv_buf + body_start,
+                                         body_received,
+                                         resp.is_chunked,
+                                         error_preview,
+                                         sizeof(error_preview)) > 0) {
+                debug_printf("[CLAUDE] error body: %.600s\n",
+                             error_preview);
+            }
             tls_close();
             if (resp.status_code == 429)
                 return CLAUDE_ERR_TIMEOUT;  /* Signal retry */

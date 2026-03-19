@@ -15,8 +15,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
-#else
-static void debug_printf(const char *fmt, ...) { (void)fmt; }
 #endif
 
 /* ---- DNS header structure ---- */
@@ -36,7 +34,9 @@ struct dns_cache_entry {
 };
 
 static struct dns_cache_entry dns_cache[DNS_CACHE_SIZE];
+#ifndef TEST_BUILD
 static u_int16_t dns_txid_counter = 0x1234;
+#endif
 
 /* ---- Helpers ---- */
 

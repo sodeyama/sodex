@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 /* Use our own strcmp for ASSERT_STR_EQ to avoid pulling in host <string.h> */
-static int _test_strcmp(const char *a, const char *b) {
+static int __attribute__((unused)) _test_strcmp(const char *a, const char *b) {
     while (*a && (*a == *b)) { a++; b++; }
     return *(unsigned char*)a - *(unsigned char*)b;
 }

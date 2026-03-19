@@ -23,13 +23,23 @@
 
 #define MEMDEBUG 1
 
+#ifdef TEST_BUILD
+#define PTR_TO_MEM_ADDR(ptr) ((u_int32_t)(uintptr_t)(ptr))
+#define MEM_ADDR_TO_PTR(addr) ((void*)(uintptr_t)(addr))
+#else
+#define PTR_TO_MEM_ADDR(ptr) ((u_int32_t)(ptr))
+#define MEM_ADDR_TO_PTR(addr) ((void*)(addr))
+#endif
+
 PRIVATE MemHole* _search_used_mhole(void* ptr, MemHole* use_list);
 PRIVATE MemHole* _search_used_align_mhole(void* ptr, MemHole* use_list);
 PRIVATE int _internal_common_merge(MemHole* mem);
 PRIVATE void merge_hole(MemHole* memfrom, MemHole* memto);
 PRIVATE MemHole* new_mhole(MemHole* hole_list);
+#ifndef TEST_BUILD
 PRIVATE void init_kmem();
 PRIVATE void init_pmem();
+#endif
 PRIVATE void used_check(MemHole* mem);
 PRIVATE void init_hole_pool(MemHole* holes, u_int32_t hole_count,
                             MemHole* hole_list, MemHole* free_list,
@@ -76,7 +86,7 @@ PRIVATE void init_hole_pool(MemHole* holes, u_int32_t hole_count,
                             MemHole* use_list, u_int32_t base,
                             u_int32_t size)
 {
-  int i;
+  u_int32_t i;
   for (i = 0; i < hole_count; ++i) {
     if (i == hole_count - 1)
       holes[i].next = hole_list;
@@ -133,7 +143,7 @@ PRIVATE MemHole* _search_used_mhole(void* ptr, MemHole* use_list)
 {
   MemHole* p;
   for (p = use_list->next; p != use_list; p = p->next) {
-    if (p->base == (u_int32_t)ptr)
+    if (p->base == PTR_TO_MEM_ADDR(ptr))
       return p;
   }
   return NULL;
@@ -184,11 +194,11 @@ PUBLIC void* kalloc(u_int32_t size)
         i->base += size;
         i->size -= size;
         MHOLE_INSERT_HEAD(new, muse_list);
-        return (void*)new->base;
+        return MEM_ADDR_TO_PTR(new->base);
       } else {
         MHOLE_REMOVE(i);
         MHOLE_INSERT_HEAD(i, muse_list);
-        return (void*)i->base;
+        return MEM_ADDR_TO_PTR(i->base);
       }
     } else if (i->size == size) {
 #ifdef MEMDEBUG
@@ -196,7 +206,7 @@ PUBLIC void* kalloc(u_int32_t size)
 #endif
       MHOLE_REMOVE(i);
       MHOLE_INSERT_HEAD(i, muse_list);
-      return (void*)i->base;
+      return MEM_ADDR_TO_PTR(i->base);
     }
   }
   return NULL;
@@ -206,7 +216,7 @@ PRIVATE MemHole* _search_used_align_mhole(void* ptr, MemHole* use_list)
 {
   MemHole* p;
   for (p = use_list->next; p != use_list; p = p->next) {
-    if (p->align_base == (u_int32_t)ptr)
+    if (p->align_base == PTR_TO_MEM_ADDR(ptr))
       return p;
   }
   return NULL;
@@ -252,7 +262,7 @@ PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit)
         i->base += alloc_size;
         i->size -= alloc_size;
         MHOLE_INSERT_HEAD(new, muse_list);
-        return (void*)new->align_base;
+        return MEM_ADDR_TO_PTR(new->align_base);
       } else {
 #ifdef MEMDEBUG
         used_check(i);
@@ -260,7 +270,7 @@ PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit)
         MHOLE_REMOVE(i);
         MHOLE_INSERT_HEAD(i, muse_list);
         i->align_base = align_base;
-        return (void*)i->align_base;
+        return MEM_ADDR_TO_PTR(i->align_base);
       }
     } else if (i->size == alloc_size) {
 #ifdef MEMDEBUG
@@ -269,7 +279,7 @@ PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit)
       MHOLE_REMOVE(i);
       MHOLE_INSERT_HEAD(i, muse_list);
       i->align_base = align_base;
-      return (void*)i->align_base;
+      return MEM_ADDR_TO_PTR(i->align_base);
     }
   }
   return NULL;

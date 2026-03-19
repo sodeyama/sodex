@@ -15,9 +15,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <tls_client.h>
-#else
-/* Stubs for host-side testing */
-static void debug_printf(const char *fmt, ...) { (void)fmt; }
 #endif
 
 /* ================================================================

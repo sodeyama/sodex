@@ -14,6 +14,11 @@
 #include <stdlib.h>
 #include <fs.h>
 #include <poll.h>
+#ifdef TEST_BUILD
+#include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
+#endif
 
 #ifndef TEST_BUILD
 #include <debug.h>
@@ -27,7 +32,83 @@ const char TOOL_SCHEMA_RUN_COMMAND[] =
     "\"description\":\"Shell command to execute (passed to sh -c)\"}},"
     "\"required\":[\"command\"]}";
 
-#define CMD_TIMEOUT     100   /* Max ticks to wait (~10 seconds at 10ms/tick) */
+#define CMD_POLL_TICKS      10
+#define CMD_TIMEOUT_TICKS 1000   /* 約10秒相当 */
+
+static int drain_child_output(int read_fd, pid_t pid,
+                              struct bounded_output *bounded,
+                              int *exit_status,
+                              int *timed_out)
+{
+    int ret;
+    int status = 0;
+    int child_done = 0;
+    int waited_ticks = 0;
+    struct pollfd pfd;
+
+    if (exit_status)
+        *exit_status = 0;
+    if (timed_out)
+        *timed_out = 0;
+
+    pfd.fd = read_fd;
+    pfd.events = POLLIN;
+
+    while (!child_done) {
+        pfd.revents = 0;
+        ret = poll(&pfd, 1, CMD_POLL_TICKS);
+        if (ret == 0)
+            waited_ticks += CMD_POLL_TICKS;
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            char chunk[512];
+            int nr = (int)read(read_fd, chunk, sizeof(chunk));
+
+            if (nr > 0)
+                bounded_output_append(bounded, chunk, nr);
+        }
+
+        if (waitpid(pid, &status, WNOHANG) > 0) {
+            child_done = 1;
+        } else {
+            if (ret > 0 &&
+                (pfd.revents & POLLHUP) &&
+                !(pfd.revents & POLLIN)) {
+                poll((struct pollfd *)0, 0, CMD_POLL_TICKS);
+                waited_ticks += CMD_POLL_TICKS;
+            }
+            if (waited_ticks >= CMD_TIMEOUT_TICKS) {
+                debug_printf("[TOOL run_command] pid=%d timeout after %d ticks\n",
+                            (int)pid, waited_ticks);
+                if (timed_out)
+                    *timed_out = 1;
+                kill(pid, SIGKILL);
+                if (waitpid(pid, &status, 0) < 0)
+                    status = -1;
+                child_done = 1;
+            }
+        }
+
+    }
+
+    for (;;) {
+        char chunk[512];
+
+        pfd.revents = 0;
+        ret = poll(&pfd, 1, 1);
+        if (ret <= 0)
+            break;
+        if (!(pfd.revents & POLLIN))
+            break;
+        ret = (int)read(read_fd, chunk, sizeof(chunk));
+        if (ret <= 0)
+            break;
+        bounded_output_append(bounded, chunk, ret);
+    }
+
+    if (exit_status)
+        *exit_status = status;
+    return 0;
+}
 
 /*
  * Execute a command via execve("/usr/bin/sh", ["sh", "-c", cmd], NULL)
@@ -39,15 +120,14 @@ const char TOOL_SCHEMA_RUN_COMMAND[] =
  */
 static int exec_and_capture_bounded(const char *cmd,
                                     struct bounded_output *bounded,
-                                    int *exit_status)
+                                    int *exit_status,
+                                    int *timed_out)
 {
     int pipefd[2];
     int saved_stdout;
     int saved_stderr;
     pid_t pid;
     char *argv[4];
-    int ret;
-    int status = 0;
 
     /* Create pipe: pipefd[0]=read, pipefd[1]=write */
     if (pipe(pipefd) < 0) {
@@ -126,56 +206,12 @@ static int exec_and_capture_bounded(const char *cmd,
     debug_printf("[TOOL run_command] spawned pid=%d: sh -c \"%s\"\n",
                 (int)pid, cmd);
 
-    /* Drain pipe while waiting for child.
-     * We must read pipe data concurrently with waitpid because:
-     * - If we waitpid first, child blocks on full pipe -> deadlock
-     * - If we read first, pipe_read busy-waits without yielding -> hang
-     * Solution: poll pipe with short timeout, then check waitpid(WNOHANG) */
-    {
-        int child_done = 0;
-        struct pollfd pfd;
-
-        pfd.fd = pipefd[0];
-        pfd.events = POLLIN;
-
-        while (!child_done) {
-            pfd.revents = 0;
-            ret = poll(&pfd, 1, 10);  /* 10 ticks ~ 100ms */
-            if (ret > 0 && (pfd.revents & POLLIN)) {
-                char chunk[512];
-                int nr = (int)read(pipefd[0], chunk, sizeof(chunk));
-                if (nr > 0)
-                    bounded_output_append(bounded, chunk, nr);
-            }
-            /* Check if child exited */
-            if (waitpid(pid, &status, WNOHANG) > 0)
-                child_done = 1;
-            if (pfd.revents & POLLHUP)
-                child_done = 1;
-        }
-
-        /* Drain any remaining data after child exit */
-        for (;;) {
-            char chunk[512];
-
-            pfd.revents = 0;
-            ret = poll(&pfd, 1, 1);
-            if (ret <= 0)
-                break;
-            if (!(pfd.revents & POLLIN))
-                break;
-            ret = (int)read(pipefd[0], chunk, sizeof(chunk));
-            if (ret <= 0)
-                break;
-            bounded_output_append(bounded, chunk, ret);
-        }
-    }
+    drain_child_output(pipefd[0], pid, bounded, exit_status, timed_out);
     close(pipefd[0]);
 
     debug_printf("[TOOL run_command] pid=%d exited status=%d, output=%d bytes\n",
-                (int)pid, status, bounded ? bounded->total_bytes : 0);
-
-    *exit_status = status;
+                (int)pid, exit_status ? *exit_status : 0,
+                bounded ? bounded->total_bytes : 0);
     return 0;
 }
 
@@ -189,6 +225,7 @@ int tool_run_command(const char *input_json, int input_len,
     char command[512];
     struct json_writer jw;
     int exit_code;
+    int timed_out = 0;
     static struct bounded_output bounded;
 
     if (!input_json || !result_buf)
@@ -217,13 +254,32 @@ int tool_run_command(const char *input_json, int input_len,
     /* Execute command and capture output */
     bounded_output_init(&bounded);
     bounded_output_begin_artifact(&bounded, "run", ".txt");
-    if (exec_and_capture_bounded(command, &bounded, &exit_code) < 0)
+    if (exec_and_capture_bounded(command, &bounded, &exit_code, &timed_out) < 0)
         exit_code = -1;
     bounded_output_finish(&bounded, bounded.total_bytes > AGENT_BOUNDED_INLINE);
 
     jw_init(&jw, result_buf, result_cap);
 
-    if (exit_code < 0) {
+    if (timed_out) {
+        jw_object_start(&jw);
+        jw_key(&jw, "error");
+        jw_string(&jw, "command timed out");
+        jw_key(&jw, "code");
+        jw_string(&jw, "timeout");
+        jw_key(&jw, "command");
+        jw_string(&jw, command);
+        bounded_output_write_json(&bounded, &jw,
+                                  "output",
+                                  "output_head",
+                                  "output_tail");
+        jw_key(&jw, "exit_code");
+        jw_int(&jw, -1);
+        jw_key(&jw, "timed_out");
+        jw_bool(&jw, 1);
+        jw_key(&jw, "total_bytes");
+        jw_int(&jw, bounded.total_bytes);
+        jw_object_end(&jw);
+    } else if (exit_code < 0) {
         /* Execution failed entirely */
         jw_object_start(&jw);
         jw_key(&jw, "error");

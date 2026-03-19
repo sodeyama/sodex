@@ -297,7 +297,7 @@ static int fixture_run(const char *path)
                 terminal_surface_free(&surface);
                 goto out;
             }
-            if (cell->ch != expected_text[col] ||
+            if (cell->ch != (u_int32_t)(unsigned char)expected_text[col] ||
                 cell->fg != fg ||
                 cell->bg != bg ||
                 cell->attr != attr) {

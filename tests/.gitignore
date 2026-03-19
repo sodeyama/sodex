@@ -1,4 +1,5 @@
 *.o
+*.d
 *.dSYM/
 test_*
 !test_*.c

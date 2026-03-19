@@ -15,7 +15,9 @@ typedef unsigned char  u_int8_t;
 typedef unsigned short u_int16_t;
 typedef unsigned int   u_int32_t;
 typedef int            int32_t;
+#ifndef NULL
 #define NULL ((void*)0)
+#endif
 #define size_t unsigned long
 
 /* Our custom strlen/strncmp needed by strstr */

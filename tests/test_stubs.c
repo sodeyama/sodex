@@ -24,12 +24,55 @@ int debug_write(const char *buf, unsigned int len)
 }
 
 /* These may be referenced by http_client.c but not called in unit tests */
-int socket(int domain, int type, int protocol) { return -1; }
-int connect(int sockfd, const void *addr, unsigned int addrlen) { return -1; }
-int send_msg(int sockfd, const void *buf, int len, int flags) { return -1; }
-int recv_msg(int sockfd, void *buf, int len, int flags) { return -1; }
-int closesocket(int sockfd) { return -1; }
-int setsockopt(int sockfd, int level, int optname, const void *optval, unsigned int optlen) { return -1; }
+int socket(int domain, int type, int protocol)
+{
+    (void)domain;
+    (void)type;
+    (void)protocol;
+    return -1;
+}
+
+int connect(int sockfd, const void *addr, unsigned int addrlen)
+{
+    (void)sockfd;
+    (void)addr;
+    (void)addrlen;
+    return -1;
+}
+
+int send_msg(int sockfd, const void *buf, int len, int flags)
+{
+    (void)sockfd;
+    (void)buf;
+    (void)len;
+    (void)flags;
+    return -1;
+}
+
+int recv_msg(int sockfd, void *buf, int len, int flags)
+{
+    (void)sockfd;
+    (void)buf;
+    (void)len;
+    (void)flags;
+    return -1;
+}
+
+int closesocket(int sockfd)
+{
+    (void)sockfd;
+    return -1;
+}
+
+int setsockopt(int sockfd, int level, int optname, const void *optval, unsigned int optlen)
+{
+    (void)sockfd;
+    (void)level;
+    (void)optname;
+    (void)optval;
+    (void)optlen;
+    return -1;
+}
 
 /* inet_aton stub */
 struct mock_in_addr { unsigned int s_addr; };

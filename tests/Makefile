@@ -1,7 +1,9 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -O0 -I. -Imocks \
 	-fno-builtin -D_FORTIFY_SOURCE=0 \
-	-Wno-incompatible-library-redeclaration
+	-Wno-incompatible-library-redeclaration \
+	$(DEPFLAGS)
+DEPFLAGS = -MMD -MP
 
 SRC = ../src
 FONT_HEADERS = $(SRC)/include/font_default.h $(SRC)/include/font8x16_data.h $(SRC)/include/font16x16_data.h
@@ -9,7 +11,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_agent_autonomy test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_conversation test_hooks_permissions test_chunked_decoder
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_agent_autonomy test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_tool_run_command test_tool_file_access test_conversation test_hooks_permissions test_chunked_decoder
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -21,6 +23,8 @@ IME_DICT_MOZC_SOURCES = $(wildcard $(IME_DICT_MOZC_DIR)/dictionary*.txt)
 .PHONY: all clean test derive_ssh_keypair ssh_signer
 
 all: $(TESTS)
+
+-include $(wildcard *.d)
 
 test: $(TESTS)
 	@echo "=== Running all tests ==="
@@ -476,8 +480,8 @@ test_agent_repl_cli_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Agent autonomy tests
-test_agent_autonomy: test_agent_autonomy.c test_agent_autonomy_loop.o test_agent_autonomy_conversation.o test_agent_autonomy_json.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_agent_autonomy.c test_agent_autonomy_loop.o test_agent_autonomy_conversation.o test_agent_autonomy_json.o
+test_agent_autonomy: test_agent_autonomy.c test_agent_autonomy_loop.o test_agent_autonomy_conversation.o test_agent_autonomy_json.o test_agent_autonomy_path_utils.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_agent_autonomy.c test_agent_autonomy_loop.o test_agent_autonomy_conversation.o test_agent_autonomy_json.o test_agent_autonomy_path_utils.o
 
 test_agent_autonomy_loop.o: $(SRC)/usr/lib/libagent/agent_loop.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
@@ -486,6 +490,9 @@ test_agent_autonomy_conversation.o: $(SRC)/usr/lib/libagent/conversation.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_agent_autonomy_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_agent_autonomy_path_utils.o: $(SRC)/usr/lib/libagent/path_utils.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Full-fidelity session restore tests (Plan 20)
@@ -541,6 +548,32 @@ test_tool_dispatch_dispatch.o: $(SRC)/usr/lib/libagent/tool_dispatch.c
 test_tool_dispatch_json.o: $(SRC)/usr/lib/libagent/json.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
+# run_command timeout tests
+test_tool_run_command: test_tool_run_command.c $(SRC)/usr/lib/libagent/tool_run_command.c tool_run_command_mocks/agent/tool_handlers.h tool_run_command_mocks/agent/bounded_output.h tool_run_command_mocks/json.h tool_run_command_mocks/fs.h
+	$(CC) $(CFLAGS) -DTEST_BUILD -Itool_run_command_mocks -o $@ test_tool_run_command.c
+
+# File tool access tests
+test_tool_file_access: test_tool_file_access.c test_tool_file_access_read.o test_tool_file_access_write.o test_tool_file_access_list.o test_tool_file_access_path_utils.o test_tool_file_access_bounded_output.o test_tool_file_access_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_tool_file_access.c test_tool_file_access_read.o test_tool_file_access_write.o test_tool_file_access_list.o test_tool_file_access_path_utils.o test_tool_file_access_bounded_output.o test_tool_file_access_json.o
+
+test_tool_file_access_read.o: $(SRC)/usr/lib/libagent/tool_read_file.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_file_access_write.o: $(SRC)/usr/lib/libagent/tool_write_file.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_file_access_list.o: $(SRC)/usr/lib/libagent/tool_list_dir.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_file_access_path_utils.o: $(SRC)/usr/lib/libagent/path_utils.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_file_access_bounded_output.o: $(SRC)/usr/lib/libagent/bounded_output.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_file_access_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
 # Conversation management tests
 test_conversation: test_conversation.c test_conversation_conv.o test_conversation_json.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_conversation.c test_conversation_conv.o test_conversation_json.o
@@ -552,8 +585,8 @@ test_conversation_json.o: $(SRC)/usr/lib/libagent/json.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Hook, permission, and audit tests (Phase F)
-test_hooks_permissions: test_hooks_permissions.c test_hooks_permissions_hooks.o test_hooks_permissions_permissions.o test_hooks_permissions_audit.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_hooks_permissions.c test_hooks_permissions_hooks.o test_hooks_permissions_permissions.o test_hooks_permissions_audit.o
+test_hooks_permissions: test_hooks_permissions.c test_hooks_permissions_hooks.o test_hooks_permissions_permissions.o test_hooks_permissions_audit.o test_hooks_permissions_path_utils.o test_hooks_permissions_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_hooks_permissions.c test_hooks_permissions_hooks.o test_hooks_permissions_permissions.o test_hooks_permissions_audit.o test_hooks_permissions_path_utils.o test_hooks_permissions_json.o
 
 test_hooks_permissions_hooks.o: $(SRC)/usr/lib/libagent/hooks.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
@@ -564,9 +597,15 @@ test_hooks_permissions_permissions.o: $(SRC)/usr/lib/libagent/permissions.c
 test_hooks_permissions_audit.o: $(SRC)/usr/lib/libagent/audit.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
+test_hooks_permissions_path_utils.o: $(SRC)/usr/lib/libagent/path_utils.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_hooks_permissions_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
 # Chunked transfer encoding decoder tests (Issue #11)
 test_chunked_decoder: test_chunked_decoder.c
 	$(CC) -Wall -g -O0 -I. -o $@ test_chunked_decoder.c
 
 clean:
-	rm -f $(TESTS) $(IME_FIXTURE) $(IME_FIXTURE_SOURCE) derive_ssh_keypair ssh_signer *.o
+	rm -f $(TESTS) $(IME_FIXTURE) $(IME_FIXTURE_SOURCE) derive_ssh_keypair ssh_signer *.o *.d

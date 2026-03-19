@@ -1,0 +1,4 @@
+#ifndef _AGENT_TOOL_HANDLERS_H
+#define _AGENT_TOOL_HANDLERS_H
+
+#endif

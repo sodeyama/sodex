@@ -971,6 +971,30 @@ PUBLIC ext3_dentry* get_dentry_absolutely(const char* filename)
   return __dir_walk(filename, rootdir);
 }
 
+PUBLIC ext3_dentry* get_dentry_by_path(const char* pathname)
+{
+  char* pathbuf;
+  ext3_dentry* dentry;
+  int len;
+
+  if (pathname == NULL)
+    return NULL;
+
+  len = strlen(pathname);
+  if (len >= PATHNAME_MAX)
+    return NULL;
+
+  pathbuf = kalloc(PATHNAME_MAX);
+  if (pathbuf == NULL)
+    return NULL;
+  memset(pathbuf, 0, PATHNAME_MAX);
+  memcpy(pathbuf, pathname, len);
+
+  dentry = ext3_resolve_path(pathbuf);
+  kfree(pathbuf);
+  return dentry;
+}
+
 /*
  * example. pathname is "/foo/bar/hoge" (not "foo/bar/hoge")
  */

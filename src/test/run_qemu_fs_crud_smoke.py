@@ -144,6 +144,30 @@ def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
     raise TimeoutError("prompt screenshot did not match reference")
 
 
+def wait_for_terminal_ready(monitor: QemuMonitor, ppm_path: pathlib.Path,
+                            reference: dict[str, int | str],
+                            serial_log: pathlib.Path, timeout: float) -> None:
+    deadline = time.time() + timeout
+    serial_ready_at: float | None = None
+
+    while time.time() < deadline:
+        monitor.command(f"screendump {ppm_path}", pause=0.3)
+        if crop_matches(ppm_path, reference):
+            return
+
+        if serial_log.exists():
+            serial_text = serial_log.read_text(errors="ignore")
+            if "AUDIT eshell_ready" in serial_text:
+                if serial_ready_at is None:
+                    serial_ready_at = time.time()
+                elif time.time() - serial_ready_at >= 1.0:
+                    return
+
+        time.sleep(0.2)
+
+    raise TimeoutError("terminal ready was not observed")
+
+
 def inode_bytes(image: bytes, ino: int) -> bytes:
     start = P_INODE_BLOCK + (ino - 1) * INODE_SIZE
     return image[start:start + INODE_SIZE]
@@ -206,6 +230,12 @@ def assert_fs_state(fsboot: pathlib.Path) -> None:
     if inode_size(image, note[0]) != 0:
         raise AssertionError("/keep/b.txt is not empty")
 
+    cd_abs = lookup_path(image, "/etc/cd-abs-smoke.txt")
+    if cd_abs is None or cd_abs[1] != 1:
+        raise AssertionError("/etc/cd-abs-smoke.txt was not created")
+    if lookup_path(image, "/keep/etc/cd-abs-smoke.txt") is not None:
+        raise AssertionError("absolute cd resolved to /keep/etc")
+
 
 def main() -> int:
     if len(sys.argv) != 3:
@@ -245,12 +275,16 @@ def main() -> int:
 
     commands = [
         "mkdir keep\n",
+        "mkdir keep/etc\n",
         "touch keep/a.txt\n",
         "mv keep/a.txt keep/b.txt\n",
         "mkdir gone\n",
         "touch gone/tmp.txt\n",
         "rm gone/tmp.txt\n",
         "rmdir gone\n",
+        "cd keep\n",
+        "cd /etc\n",
+        "touch cd-abs-smoke.txt\n",
     ]
 
     qemu = subprocess.Popen(
@@ -263,7 +297,8 @@ def main() -> int:
     try:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_terminal_ready(monitor, prompt_ppm, reference, serial_log,
+                                timeout)
 
         for command in commands:
             monitor.send_text(command)

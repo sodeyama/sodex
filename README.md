@@ -105,6 +105,8 @@ bin/start.sh server-headless
 
 `server` / `server-headless` は既定で SSH port forward も有効にします。
 無効にしたいときは `--no-ssh` を付けてください。
+`--ssh` を付けて起動した場合は、必要なら起動前に対応 overlay 付きの `fsboot.bin` を自動再生成します。
+通常 GUI 付きで terminal を出したいときは `bin/start.sh --ssh`、headless の server runtime は `bin/start.sh server-headless` を使ってください。
 
 Docker 上で server runtime を常駐させたい場合:
 
@@ -217,6 +219,12 @@ host 側ポートを変えたいときは `SODEX_HOST_SSH_PORT=11022 make test-q
 
 ```sh
 bin/restart.sh server-headless
+```
+
+GUI terminal も使いたい場合は次でも構いません。
+
+```sh
+bin/restart.sh --ssh
 ```
 
 その後、別ターミナルから接続します。

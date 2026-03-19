@@ -8,6 +8,7 @@
 - 2026-03-17: M5 を実装し、LSB metadata / `inittab` runlevel / `jobs` `fg` `bg` を追加した
 - 2026-03-17: 追加調査で、`waitpid(-1)` の busy-loop、daemon detach の不足、`rcS` failure path、`sshd` service の前提チェック不足を後続 hardening 項目として洗い出した
 - 2026-03-17: M6 を実装し、`waitpid(-1)` の sleep/wakeup 化、`start-stop-daemon` の graceful stop / `force-reload` / prerequisite check、`rcS` failure rescue、failure-path smoke を追加した
+- 2026-03-19: `bin/start.sh --ssh` / `bin/restart.sh --ssh` が、そのモード向け overlay を自動で再生成してから起動するようにし、plain build 後に rescue shell へ落ちる導線を塞いだ
 - default rootfs は `user` runlevel の `term` を維持し、server overlay は `server-headless` で `sshd` を起動する
 - `init` は `/etc/init.d/rcS` を起動し、`sshd` は service script 経由で起動する
 - `sh` / `eshell` は共通 shell core を使い、service helper と smoke で回帰を固定した

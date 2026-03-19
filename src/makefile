@@ -9,6 +9,7 @@ KERNEL  = ${BIN}/kernel.bin
 ACIENT  = ${BIN}/boota.bin
 MIDDLE  = ${BIN}/bootm.bin
 FSBOOT  = ${BIN}/fsboot.bin
+FSBOOT_PROFILE = ${BIN}/fsboot.profile
 INIT    = ${INITDIR}/bin/ptest
 INIT2   = ${INITDIR}/bin/ptest2
 
@@ -102,6 +103,7 @@ all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} kernel-subdirs ${KERNEL} ${ACIE
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2} ${ROOTFS_OVERLAY_ARG}
+	@printf 'rootfs_overlay=%s\n' "${ROOTFS_OVERLAY_ARG}" > ${FSBOOT_PROFILE}
 
 regen-font8x16: ${FONT8X16_HEADER}
 

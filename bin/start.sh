@@ -36,6 +36,8 @@ REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")" || {
 BUILD_ROOT="${SODEX_BUILD_ROOT:-$REPO_ROOT/build}"
 BUILD_BIN="${SODEX_BUILD_BIN:-$BUILD_ROOT/bin}"
 LOG_DIR="${SODEX_LOG_DIR:-$BUILD_ROOT/log}"
+SSH_OVERLAY_DIR="${SODEX_SSH_OVERLAY_DIR:-}"
+FSBOOT_PROFILE="${SODEX_FSBOOT_PROFILE:-$BUILD_BIN/fsboot.profile}"
 QEMU_MEM_MB="${SODEX_QEMU_MEM_MB:-1024}"
 HOST_BIND_ADDR="${SODEX_HOST_BIND_ADDR:-127.0.0.1}"
 HOST_HTTP_PORT="${SODEX_HOST_HTTP_PORT:-18080}"
@@ -55,6 +57,80 @@ QEMU_SERIAL_MODE="${SODEX_QEMU_SERIAL_MODE:-stdio}"
 MODE="user"
 SSH_SELECTION="auto"
 mkdir -p "$LOG_DIR"
+
+select_ssh_overlay_dir() {
+  if [ -n "$SSH_OVERLAY_DIR" ]; then
+    printf '%s\n' "$SSH_OVERLAY_DIR"
+    return 0
+  fi
+
+  case "$MODE" in
+    server|server-headless)
+      printf '%s\n' "$LOG_DIR/ssh-rootfs-overlay-server-headless"
+      ;;
+    *)
+      printf '%s\n' "$LOG_DIR/ssh-rootfs-overlay-user"
+      ;;
+  esac
+}
+
+read_fsboot_profile_overlay() {
+  if [ ! -f "$FSBOOT_PROFILE" ]; then
+    return 1
+  fi
+  sed -n 's/^rootfs_overlay=//p' "$FSBOOT_PROFILE" | sed -n '1p'
+}
+
+build_ssh_boot_image() {
+  overlay_dir="$1"
+  initdefault_runlevel="$2"
+
+  mkdir -p "$LOG_DIR" || exit 1
+
+  if [ -f "$REPO_ROOT/.env.local" ]; then
+    make -C "$REPO_ROOT/src" inject-api-key >/dev/null 2>&1 || true
+  fi
+
+  env \
+    SODEX_ADMIN_ALLOW_IP="${SODEX_ADMIN_ALLOW_IP:-10.0.2.2}" \
+    SODEX_SSH_PORT="$GUEST_SSH_PORT" \
+    SODEX_SSH_PASSWORD="${SODEX_SSH_PASSWORD:-root-secret}" \
+    SODEX_SSH_SIGNER_PORT="${SODEX_SSH_SIGNER_PORT:-0}" \
+    SODEX_SSH_HOSTKEY_ED25519_SEED="${SODEX_SSH_HOSTKEY_ED25519_SEED:-00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff}" \
+    SODEX_SSH_RNG_SEED="${SODEX_SSH_RNG_SEED:-ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100}" \
+    SODEX_INITDEFAULT_RUNLEVEL="$initdefault_runlevel" \
+    python3 "$REPO_ROOT/src/test/write_server_runtime_overlay.py" "$overlay_dir" || exit 1
+
+  SODEX_ROOTFS_OVERLAY="$overlay_dir" make -C "$REPO_ROOT" || exit 1
+}
+
+ensure_ssh_boot_image() {
+  desired_overlay=""
+  profile_overlay=""
+  initdefault_runlevel="user"
+
+  if [ "$ENABLE_SSH" -ne 1 ]; then
+    return 0
+  fi
+
+  desired_overlay="$(select_ssh_overlay_dir)"
+  profile_overlay="$(read_fsboot_profile_overlay 2>/dev/null || true)"
+
+  if [ -f "$BUILD_BIN/fsboot.bin" ] &&
+     [ "$profile_overlay" = "$desired_overlay" ] &&
+     [ -f "$desired_overlay/etc/sodex-admin.conf" ]; then
+    return 0
+  fi
+
+  case "$MODE" in
+    server|server-headless)
+      initdefault_runlevel="server-headless"
+      ;;
+  esac
+
+  echo "[SSH] fsboot.bin を再生成します: overlay=$desired_overlay runlevel=$initdefault_runlevel"
+  build_ssh_boot_image "$desired_overlay" "$initdefault_runlevel"
+}
 
 port_is_listening() {
   python3 - "$1" "$2" <<'PY'
@@ -209,6 +285,8 @@ if [ "$ENABLE_SSH" -eq 1 ]; then
     exit 1
   fi
 fi
+
+ensure_ssh_boot_image
 
 # Check Claude API key availability
 CLAUDE_CONF="$REPO_ROOT/src/rootfs-overlay/etc/claude.conf"

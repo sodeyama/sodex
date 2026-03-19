@@ -42,12 +42,111 @@ HOST_HTTP_PORT="${SODEX_HOST_HTTP_PORT:-18080}"
 HOST_ADMIN_PORT="${SODEX_HOST_ADMIN_PORT:-10023}"
 HOST_SSH_PORT="${SODEX_HOST_SSH_PORT:-10022}"
 GUEST_SSH_PORT="${SODEX_SSH_PORT:-10022}"
+WEBFETCH_AUTO_START="${SODEX_WEBFETCH_AUTO_START-1}"
+WEBFETCH_PORT="${SODEX_WEBFETCH_PORT-8081}"
+WEBFETCH_BIND="${SODEX_WEBFETCH_BIND-0.0.0.0}"
+WEBFETCH_ALLOWLIST="${SODEX_WEBFETCH_ALLOWLIST-*}"
+WEBFETCH_LOG="${SODEX_WEBFETCH_LOG:-$LOG_DIR/web_fetch_gateway.log}"
+WEBFETCH_PID=""
+WEBFETCH_STARTED=0
 QEMU_ACCEL="${SODEX_QEMU_ACCEL:-}"
 QEMU_DEBUG_FLAGS="${SODEX_QEMU_DEBUG_FLAGS-int,cpu_reset}"
 QEMU_SERIAL_MODE="${SODEX_QEMU_SERIAL_MODE:-stdio}"
 MODE="user"
 SSH_SELECTION="auto"
 mkdir -p "$LOG_DIR"
+
+port_is_listening() {
+  python3 - "$1" "$2" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(0.2)
+try:
+    sock.connect((host, port))
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+sys.exit(0)
+PY
+}
+
+wait_for_port() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import socket
+import sys
+import time
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+timeout = float(sys.argv[3])
+deadline = time.time() + timeout
+while time.time() < deadline:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.2)
+    try:
+        sock.connect((host, port))
+    except OSError:
+        time.sleep(0.1)
+    else:
+        sock.close()
+        sys.exit(0)
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+sys.exit(1)
+PY
+}
+
+cleanup_webfetch_gateway() {
+  if [ "$WEBFETCH_STARTED" -eq 1 ] && [ -n "$WEBFETCH_PID" ]; then
+    kill "$WEBFETCH_PID" 2>/dev/null || true
+    wait "$WEBFETCH_PID" 2>/dev/null || true
+  fi
+}
+
+start_webfetch_gateway() {
+  health_host="$WEBFETCH_BIND"
+
+  if [ "$WEBFETCH_AUTO_START" != "1" ]; then
+    return 0
+  fi
+  if [ "$MODE" = "net" ]; then
+    echo "[WebFetch] vmnet-shared mode では既定の 10.0.2.2 を使えないため自動起動しません"
+    return 0
+  fi
+
+  if [ "$health_host" = "0.0.0.0" ]; then
+    health_host="127.0.0.1"
+  fi
+
+  if port_is_listening "$health_host" "$WEBFETCH_PORT"; then
+    echo "[WebFetch] 既存 gateway を使用します: $health_host:$WEBFETCH_PORT"
+    return 0
+  fi
+
+  : > "$WEBFETCH_LOG"
+  SODEX_WEBFETCH_BIND="$WEBFETCH_BIND" \
+  SODEX_WEBFETCH_ALLOWLIST="$WEBFETCH_ALLOWLIST" \
+  python3 "$REPO_ROOT/src/tools/web_fetch_gateway.py" "$WEBFETCH_PORT" \
+    >>"$WEBFETCH_LOG" 2>&1 &
+  WEBFETCH_PID=$!
+
+  if ! wait_for_port "$health_host" "$WEBFETCH_PORT" 5; then
+    echo "[WebFetch] gateway の起動に失敗しました: $WEBFETCH_LOG" >&2
+    cleanup_webfetch_gateway
+    exit 1
+  fi
+
+  WEBFETCH_STARTED=1
+  echo "[WebFetch] gateway started: $health_host:$WEBFETCH_PORT allowlist=${WEBFETCH_ALLOWLIST:-'(deny-all)'}"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -144,6 +243,9 @@ if [ "$ENABLE_SSH" -eq 1 ]; then
   SSH_HOSTFWD_OPTS=",hostfwd=tcp:$HOST_BIND_ADDR:$HOST_SSH_PORT-10.0.2.15:$GUEST_SSH_PORT"
 fi
 QEMU_DISPLAY="${QEMU_DISPLAY:-cocoa,zoom-to-fit=off}"
+
+trap cleanup_webfetch_gateway EXIT INT TERM
+start_webfetch_gateway
 
 case "$MODE" in
   server)

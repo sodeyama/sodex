@@ -246,10 +246,14 @@ host 側には `src/tools/web_fetch_gateway.py` を置き、guest からは `web
 agent の `fetch_url` tool で叩けます。`websearch` は URL 探索、`webfetch` / `fetch_url` は
 既知 URL の本文取得、`curl` は raw HTTP 確認という分担です。
 
+`bin/start.sh` / `bin/restart.sh` の `user` / `server` / `server-headless` では、
+host 側 gateway を自動起動します。既定の guest 接続先は `10.0.2.2:8081/fetch` です。
+`net` mode では `10.0.2.2` を使えないため、必要なら `webfetch -h <host-ip>:8081 ...` で上書きしてください。
+
 手で起動する最小例:
 
 ```sh
-SODEX_WEBFETCH_ALLOWLIST=127.0.0.1,localhost \
+SODEX_WEBFETCH_ALLOWLIST='*' \
 python3 src/tools/web_fetch_gateway.py 8081
 ```
 

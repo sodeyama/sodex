@@ -29,14 +29,17 @@ agent は `/etc/CLAUDE.md` を前提として扱ってください。
 
 ```sh
 websearch tokyo weather
-webfetch http://10.0.2.2:8081/article
-webfetch -m 500 http://10.0.2.2:8081/article
+webfetch https://www.jma.go.jp/
+webfetch -m 500 https://tenki.jp/forecast/3/16/4410/13101/
 curl -v http://10.0.2.2:8080/healthz
 ```
 
 ## webfetch の注意
 
 - host 側の structured web gateway を使う
+- `user` / `server` / `server-headless` の通常起動では host 側 gateway が自動起動される
+- 既定の接続先は `10.0.2.2:8081/fetch`
+- `net` mode では `10.0.2.2` が使えないため、必要なら `-h <host-ip>:8081` で上書きする
 - allowlist 外 URL や不許可 method は拒否される
 - 大きい本文は `main_text` が切り詰められる
 - `-I` で `HEAD`、`-r` で JS rendering 要求、`-m` で抽出文字数上限を指定できる

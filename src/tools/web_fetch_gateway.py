@@ -165,6 +165,8 @@ def is_url_allowed(url: str, config: GatewayConfig) -> bool:
     host_port = f"{host}:{parsed.port}" if parsed.port else host
     for rule in config.allowlist:
         item = rule.lower()
+        if item == "*":
+            return True
         if item == host or item == host_port:
             return True
         if item.startswith(".") and host.endswith(item):

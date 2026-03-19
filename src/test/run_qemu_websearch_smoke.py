@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""QEMU smoke test: websearch via SearXNG (HTTP, no TLS)."""
+"""QEMU smoke test: websearch via host-side proxy (HTTP, no TLS)."""
 
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def main() -> int:
     if serial_log.exists():
         text = serial_log.read_text(errors="replace")
         for line in text.splitlines():
-            if any(kw in line for kw in ("Search:", "[", "websearch", "init_rc",
+            if any(kw in line for kw in ("[WEBSEARCH]", "websearch", "init_rc",
                                           "http", "connect", "error")):
                 print(line)
     print(f"Logs: {serial_log}, {qemu_log}")
@@ -93,13 +93,16 @@ def main() -> int:
     init_ok = "init_rc_done ok" in text
     init_fail = "init_rc_done fail" in text
     http_ok = "200 OK" in text
+    search_ok = "[WEBSEARCH] rendered=" in text
 
-    if init_ok and http_ok:
-        print("RESULT: PASS — websearch completed successfully (HTTP 200, exit 0)")
+    if init_ok and http_ok and search_ok:
+        print("RESULT: PASS — websearch completed successfully (results parsed, exit 0)")
         return 0
 
     if init_fail:
         print("RESULT: FAIL — websearch exited with error")
+    elif not search_ok:
+        print("RESULT: FAIL — search results were not rendered")
     elif not http_ok:
         print("RESULT: FAIL — HTTP request did not succeed")
     else:

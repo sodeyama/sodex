@@ -65,6 +65,26 @@ int tool_get_system_info(const char *input_json, int input_len,
     jw_string(&jw, "pci");
     jw_array_end(&jw);
 
+    jw_key(&jw, "text_commands");
+    jw_array_start(&jw);
+    jw_string(&jw, "find");
+    jw_string(&jw, "sort");
+    jw_string(&jw, "uniq");
+    jw_string(&jw, "wc");
+    jw_string(&jw, "head");
+    jw_string(&jw, "tail");
+    jw_string(&jw, "grep");
+    jw_string(&jw, "sed");
+    jw_string(&jw, "awk");
+    jw_string(&jw, "cut");
+    jw_string(&jw, "tr");
+    jw_string(&jw, "diff");
+    jw_string(&jw, "tee");
+    jw_array_end(&jw);
+
+    jw_key(&jw, "default_cwd");
+    jw_string(&jw, "/home/user");
+
     jw_object_end(&jw);
 
     return jw_finish(&jw);

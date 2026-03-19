@@ -49,6 +49,14 @@ static int mock_handler_echo(const char *input, int input_len,
     return len;
 }
 
+static int mock_handler_json_error(const char *input, int input_len,
+                                   char *result, int cap)
+{
+    (void)input;
+    (void)input_len;
+    return snprintf(result, cap, "{\"error\":\"bad request\"}");
+}
+
 static const char *mock_schema = "{\"type\":\"object\",\"properties\":{\"cmd\":{\"type\":\"string\"}}}";
 
 /* ---- Tests ---- */
@@ -221,6 +229,31 @@ static void test_dispatch_handler_error(void)
     TEST_PASS("dispatch_handler_error");
 }
 
+static void test_dispatch_json_error_result(void)
+{
+    struct claude_tool_use tu;
+    struct tool_dispatch_result result;
+    int rc;
+
+    TEST_START("dispatch_json_error_result");
+    tool_registry_init();
+    tool_register("json_error", "Returns JSON error", NULL, mock_handler_json_error);
+
+    memset(&tu, 0, sizeof(tu));
+    strncpy(tu.id, "toolu_json_error", sizeof(tu.id) - 1);
+    strncpy(tu.name, "json_error", sizeof(tu.name) - 1);
+    strncpy(tu.input_json, "{}", sizeof(tu.input_json) - 1);
+    tu.input_json_len = 2;
+
+    rc = tool_dispatch(&tu, &result);
+    ASSERT(rc == 0, "dispatch should succeed");
+    ASSERT(result.is_error == 1, "json error should set is_error");
+    ASSERT(strstr(result.result_json, "bad request") != NULL,
+           "result should preserve handler payload");
+
+    TEST_PASS("dispatch_json_error_result");
+}
+
 static void test_dispatch_all(void)
 {
     struct claude_response resp;
@@ -311,6 +344,7 @@ int main(void)
     test_dispatch_success();
     test_dispatch_not_found();
     test_dispatch_handler_error();
+    test_dispatch_json_error_result();
     test_dispatch_all();
     test_build_definitions();
 

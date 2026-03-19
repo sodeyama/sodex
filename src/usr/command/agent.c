@@ -514,6 +514,27 @@ static void print_result(const struct agent_result *result)
     }
 }
 
+static void print_result_status_only(const struct agent_result *result)
+{
+    if (!result)
+        return;
+    clear_loading_line();
+
+    switch (result->stop_reason) {
+    case AGENT_STOP_MAX_STEPS:
+        printf("[stopped: max_steps]\n");
+        break;
+    case AGENT_STOP_TOKEN_LIMIT:
+        printf("[stopped: token_limit]\n");
+        break;
+    case AGENT_STOP_ERROR:
+        printf("[stopped: error]\n");
+        break;
+    default:
+        break;
+    }
+}
+
 static int persist_new_turns(const char *session_id,
                              const struct agent_state *state,
                              int start_turn,
@@ -844,6 +865,7 @@ static int run_single_turn(struct agent_state *state,
     if (s_streamed_chars > 0) {
         if (s_cli.layout.current_col != 0)
             render_newline();
+        print_result_status_only(&s_result);
     } else {
         print_result(&s_result);
     }
@@ -1026,6 +1048,7 @@ static int run_oneshot(const char *prompt)
     if (s_streamed_chars > 0) {
         if (s_cli.layout.current_col != 0)
             render_newline();
+        print_result_status_only(&s_result);
     } else {
         print_result(&s_result);
     }

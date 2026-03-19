@@ -31,10 +31,26 @@ REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")" || {
 }
 BUILD_ROOT="${SODEX_BUILD_ROOT:-$REPO_ROOT/build}"
 LOG_DIR="${SODEX_LOG_DIR:-$BUILD_ROOT/log}"
-SSH_OVERLAY_DIR="${SODEX_SSH_OVERLAY_DIR:-$LOG_DIR/ssh-rootfs-overlay}"
+SSH_OVERLAY_DIR="${SODEX_SSH_OVERLAY_DIR:-}"
 MODE="user"
 SSH_SELECTION="auto"
 SSH_GUEST_PORT="${SODEX_SSH_PORT:-10022}"
+
+select_ssh_overlay_dir() {
+  if [ -n "$SSH_OVERLAY_DIR" ]; then
+    printf '%s\n' "$SSH_OVERLAY_DIR"
+    return 0
+  fi
+
+  case "$MODE" in
+    server|server-headless)
+      printf '%s\n' "$LOG_DIR/ssh-rootfs-overlay-server-headless"
+      ;;
+    *)
+      printf '%s\n' "$LOG_DIR/ssh-rootfs-overlay-user"
+      ;;
+  esac
+}
 
 for arg in "$@"; do
   case "$arg" in
@@ -74,6 +90,7 @@ case "$SSH_SELECTION" in
 esac
 
 if [ "$ENABLE_SSH" -eq 1 ]; then
+  SSH_OVERLAY_DIR="$(select_ssh_overlay_dir)"
   if ! is_valid_port "$SSH_GUEST_PORT"; then
     echo "不正な guest SSH ポートです: $SSH_GUEST_PORT" >&2
     exit 1
@@ -91,6 +108,14 @@ if [ "$ENABLE_SSH" -eq 1 ]; then
   export SODEX_SSH_SIGNER_PORT
   export SODEX_SSH_HOSTKEY_ED25519_SEED
   export SODEX_SSH_RNG_SEED
+  case "$MODE" in
+    server|server-headless)
+      export SODEX_INITDEFAULT_RUNLEVEL=server-headless
+      ;;
+    *)
+      export SODEX_INITDEFAULT_RUNLEVEL=user
+      ;;
+  esac
 
   make -C "$REPO_ROOT" clean || exit 1
   mkdir -p "$LOG_DIR" || exit 1

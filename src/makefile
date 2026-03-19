@@ -9,6 +9,7 @@ KERNEL  = ${BIN}/kernel.bin
 ACIENT  = ${BIN}/boota.bin
 MIDDLE  = ${BIN}/bootm.bin
 FSBOOT  = ${BIN}/fsboot.bin
+FSBOOT_PROFILE = ${BIN}/fsboot.profile
 INIT    = ${INITDIR}/bin/ptest
 INIT2   = ${INITDIR}/bin/ptest2
 
@@ -102,6 +103,7 @@ all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} kernel-subdirs ${KERNEL} ${ACIE
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2} ${ROOTFS_OVERLAY_ARG}
+	@printf 'rootfs_overlay=%s\n' "${ROOTFS_OVERLAY_ARG}" > ${FSBOOT_PROFILE}
 
 regen-font8x16: ${FONT8X16_HEADER}
 
@@ -348,6 +350,21 @@ test-qemu-websearch:
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/websearch-overlay all
 	@echo "=== Running websearch smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_websearch_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-webfetch:
+	@$(MAKE) clean
+	@mkdir -p $(LOGDIR)/webfetch-overlay/etc/init.d
+	@printf '#!/bin/sh\nwebfetch http://127.0.0.1:18081/article\n' > $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_article $$?\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'webfetch -m 120 http://127.0.0.1:18081/long\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_long $$?\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'webfetch http://denied.invalid/article\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_deny $$?\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_smoke_done\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'console:rescue:/usr/bin/sh\nsysinit:/etc/init.d/rcS\n' > $(LOGDIR)/webfetch-overlay/etc/inittab
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/webfetch-overlay all
+	@echo "=== Running webfetch smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_webfetch_smoke.py $(FSBOOT) $(LOGDIR)
 
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<

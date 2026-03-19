@@ -522,12 +522,75 @@ static void jw_maybe_comma(struct json_writer *jw)
     jw->need_comma = 0;
 }
 
+static void jw_put_replacement_escape(struct json_writer *jw)
+{
+    jw_puts(jw, "\\ufffd");
+}
+
+static int jw_decode_utf8(const unsigned char *s, int len,
+                          u_int32_t *codepoint, int *consumed)
+{
+    u_int32_t cp;
+    int need;
+    int i;
+
+    if (!s || len <= 0 || !codepoint || !consumed)
+        return -1;
+
+    if (s[0] < 0x80) {
+        *codepoint = s[0];
+        *consumed = 1;
+        return 0;
+    }
+
+    if (s[0] >= 0xC2 && s[0] <= 0xDF) {
+        cp = (u_int32_t)(s[0] & 0x1F);
+        need = 2;
+    } else if (s[0] >= 0xE0 && s[0] <= 0xEF) {
+        cp = (u_int32_t)(s[0] & 0x0F);
+        need = 3;
+    } else if (s[0] >= 0xF0 && s[0] <= 0xF4) {
+        cp = (u_int32_t)(s[0] & 0x07);
+        need = 4;
+    } else {
+        *consumed = 1;
+        return -1;
+    }
+
+    if (len < need) {
+        *consumed = 1;
+        return -1;
+    }
+
+    for (i = 1; i < need; i++) {
+        if ((s[i] & 0xC0) != 0x80) {
+            *consumed = 1;
+            return -1;
+        }
+        cp = (cp << 6) | (u_int32_t)(s[i] & 0x3F);
+    }
+
+    if ((need == 2 && cp < 0x80) ||
+        (need == 3 && cp < 0x800) ||
+        (need == 4 && cp < 0x10000) ||
+        cp > 0x10FFFF ||
+        (cp >= 0xD800 && cp <= 0xDFFF)) {
+        *consumed = need;
+        return -1;
+    }
+
+    *codepoint = cp;
+    *consumed = need;
+    return 0;
+}
+
 static void jw_write_escaped(struct json_writer *jw, const char *s, int len)
 {
-    int i;
+    int i = 0;
     jw_putc(jw, '"');
-    for (i = 0; i < len; i++) {
+    while (i < len) {
         unsigned char c = (unsigned char)s[i];
+
         switch (c) {
         case '"':  jw_putc(jw, '\\'); jw_putc(jw, '"'); break;
         case '\\': jw_putc(jw, '\\'); jw_putc(jw, '\\'); break;
@@ -545,11 +608,28 @@ static void jw_write_escaped(struct json_writer *jw, const char *s, int len)
                 hex[5] = "0123456789abcdef"[c & 0xf];
                 hex[6] = '\0';
                 jw_puts(jw, hex);
-            } else {
+            } else if (c < 0x80) {
                 jw_putc(jw, c);
+            } else {
+                u_int32_t codepoint = 0;
+                int consumed = 1;
+                int j;
+
+                /* 不正 UTF-8 は JSON に流さず置換する */
+                if (jw_decode_utf8((const unsigned char *)s + i, len - i,
+                                   &codepoint, &consumed) < 0) {
+                    jw_put_replacement_escape(jw);
+                    i += consumed;
+                    continue;
+                }
+                for (j = 0; j < consumed; j++)
+                    jw_putc(jw, s[i + j]);
+                i += consumed;
+                continue;
             }
             break;
         }
+        i++;
     }
     jw_putc(jw, '"');
 }

@@ -371,6 +371,30 @@ static void test_writer_escape(void)
     TEST_PASS("writer_escape");
 }
 
+static void test_writer_replaces_invalid_utf8(void)
+{
+    char buf[128];
+    char bad_utf8[] = {
+        (char)0xED, (char)0xA0, (char)0x80,  /* UTF-8 形式の surrogate */
+        'X',
+        (char)0xC3,                          /* 途切れた 2-byte sequence */
+        '\0'
+    };
+    struct json_writer jw;
+
+    TEST_START("writer_replaces_invalid_utf8");
+    jw_init(&jw, buf, sizeof(buf));
+    jw_object_start(&jw);
+    jw_key(&jw, "msg");
+    jw_string(&jw, bad_utf8);
+    jw_object_end(&jw);
+    ASSERT(jw_finish(&jw) >= 0, "jw_finish failed");
+    ASSERT(strcmp(buf, "{\"msg\":\"\\ufffdX\\ufffd\"}") == 0,
+           "invalid utf8 should be replaced");
+
+    TEST_PASS("writer_replaces_invalid_utf8");
+}
+
 static void test_writer_overflow(void)
 {
     char buf[8];
@@ -429,6 +453,7 @@ int main(void)
     test_writer_empty();
     test_writer_nested();
     test_writer_escape();
+    test_writer_replaces_invalid_utf8();
     test_writer_overflow();
     test_writer_bool_null();
 

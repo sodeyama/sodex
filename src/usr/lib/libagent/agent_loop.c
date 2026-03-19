@@ -44,12 +44,93 @@ static const char DEFAULT_SYSTEM_PROMPT[] =
 
 static agent_event_fn s_event_callback = (agent_event_fn)0;
 static void *s_event_userdata = (void *)0;
+static const char FRESH_LOOKUP_PROMPT_PREFIX[] =
+    "これは時間変動する可能性が高い依頼です。"
+    "推測で終えず、少なくとも1回は tool を使って確認してください。"
+    "URL が未確定なら run_command で websearch、"
+    "URL が確定しているなら fetch_url を優先し、"
+    "source URL を含めて回答してください。\n\n"
+    "ユーザー依頼:\n";
+static const char FRESH_LOOKUP_RETRY_PROMPT[] =
+    "前の応答は調査方針の説明だけで、まだ tool で確認していません。"
+    "今のターンでは少なくとも1回 tool を使って確認し、"
+    "source URL を含めて回答してください。";
 
 PRIVATE void emit_agent_event(const struct agent_event *event)
 {
     if (!event || !s_event_callback)
         return;
     s_event_callback(event, s_event_userdata);
+}
+
+static int text_contains_any(const char *text, const char *const *needles)
+{
+    int i;
+
+    if (!text || !needles)
+        return 0;
+    for (i = 0; needles[i] != 0; i++) {
+        if (strstr(text, needles[i]) != 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int prompt_needs_fresh_lookup(const char *user_prompt)
+{
+    static const char *ja_needles[] = {
+        "天気", "気温", "予報", "最新", "現在", "今日",
+        "ニュース", "株価", "為替", "速報", 0
+    };
+    static const char *en_needles[] = {
+        "weather", "forecast", "latest", "current",
+        "today", "news", "stock", "price", 0
+    };
+
+    if (!user_prompt || !*user_prompt)
+        return 0;
+    if (text_contains_any(user_prompt, ja_needles))
+        return 1;
+    return text_contains_any(user_prompt, en_needles);
+}
+
+static const char *build_effective_user_prompt(const char *user_prompt,
+                                               char *buf, int cap)
+{
+    int prefix_len;
+    int prompt_len;
+
+    if (!user_prompt)
+        return user_prompt;
+    if (!prompt_needs_fresh_lookup(user_prompt))
+        return user_prompt;
+    if (!buf || cap <= 1)
+        return user_prompt;
+
+    prefix_len = strlen(FRESH_LOOKUP_PROMPT_PREFIX);
+    prompt_len = strlen(user_prompt);
+    if (prefix_len + prompt_len + 1 >= cap)
+        return user_prompt;
+
+    memcpy(buf, FRESH_LOOKUP_PROMPT_PREFIX, (size_t)prefix_len);
+    memcpy(buf + prefix_len, user_prompt, (size_t)prompt_len);
+    buf[prefix_len + prompt_len] = '\0';
+    return buf;
+}
+
+static int agent_turn_requires_tool_lookup(const struct agent_state *state)
+{
+    if (!state)
+        return 0;
+    return state->current_turn_requires_tool &&
+           !state->current_turn_used_tool;
+}
+
+static int append_fresh_lookup_retry(struct agent_state *state)
+{
+    if (!state)
+        return -1;
+    return conv_add_user_text(&state->conv, FRESH_LOOKUP_RETRY_PROMPT);
 }
 
 #ifndef TEST_BUILD
@@ -577,6 +658,15 @@ static int agent_run_loop(
         /* Check stop reason */
         switch (resp.stop_reason) {
         case CLAUDE_STOP_END_TURN:
+            if (agent_turn_requires_tool_lookup(state)) {
+                debug_printf("[AGENT] end_turn without tool; retrying fresh lookup\n");
+                if (append_fresh_lookup_retry(state) < 0) {
+                    fill_result(result, state, AGENT_STOP_ERROR, step + 1);
+                    debug_printf("[AGENT] failed to append retry prompt\n");
+                    return -1;
+                }
+                break;
+            }
             /* Natural completion */
             extract_final_text(&resp, result);
             fill_result(result, state, AGENT_STOP_END_TURN, step + 1);
@@ -598,6 +688,7 @@ static int agent_run_loop(
             for (i = 0; i < resp.block_count; i++) {
                 if (resp.blocks[i].type != CLAUDE_CONTENT_TOOL_USE)
                     continue;
+                state->current_turn_used_tool = 1;
 
                 /* Check terminal tool */
                 if (config->terminal_tool &&
@@ -804,10 +895,18 @@ int agent_run_turn(
     const char *user_prompt,
     struct agent_result *result)
 {
+    static char effective_prompt_buf[CONV_TEXT_BUF];
+    const char *effective_prompt;
+
     if (!config || !state || !user_prompt || !result)
         return -1;
+    effective_prompt = build_effective_user_prompt(user_prompt,
+                                                   effective_prompt_buf,
+                                                   sizeof(effective_prompt_buf));
+    state->current_turn_requires_tool = prompt_needs_fresh_lookup(user_prompt);
+    state->current_turn_used_tool = 0;
     tool_init();
-    if (conv_add_user_text(&state->conv, user_prompt) < 0)
+    if (conv_add_user_text(&state->conv, effective_prompt) < 0)
         return -1;
 
     debug_printf("[AGENT] === Agent Turn Start ===\n");
@@ -815,8 +914,8 @@ int agent_run_turn(
                 config->model, config->max_steps);
     debug_printf("[AGENT] system_prompt=%d bytes, tools=%d registered\n",
                 state->conv.system_prompt_len, tool_count());
-    debug_printf("[AGENT] prompt: %.80s%s\n", user_prompt,
-                strlen(user_prompt) > 80 ? "..." : "");
+    debug_printf("[AGENT] prompt: %.80s%s\n", effective_prompt,
+                strlen(effective_prompt) > 80 ? "..." : "");
     return agent_run_loop(config, state, result);
 }
 

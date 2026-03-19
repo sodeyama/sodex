@@ -1,0 +1,20 @@
+{
+  "bind": "0.0.0.0",
+  "port": 8081,
+  "allowlist": [
+    "127.0.0.1",
+    "localhost",
+    ".weather.go.jp"
+  ],
+  "timeout_ms": 5000,
+  "max_bytes": 262144,
+  "default_max_chars": 4000,
+  "max_chars_limit": 16000,
+  "max_links": 8,
+  "allowed_content_types": [
+    "text/html",
+    "text/plain",
+    "application/json"
+  ],
+  "render_js_command": ""
+}

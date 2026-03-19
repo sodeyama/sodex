@@ -12,7 +12,8 @@
 
 #define AGENT_DEFAULT_MAX_STEPS     10
 #define AGENT_DEFAULT_MAX_TOKENS  4096
-#define AGENT_MAX_SYSTEM_PROMPT   4096
+/* 共有指示と memory を同時に載せる余白を確保する */
+#define AGENT_MAX_SYSTEM_PROMPT   8192
 #define AGENT_MAX_RESPONSE        8192
 
 /* Stop conditions */
@@ -68,6 +69,8 @@ struct agent_state {
     int  total_api_calls;
     int  total_tool_executions;
     int  total_errors;
+    int  current_turn_requires_tool;
+    int  current_turn_used_tool;
 };
 
 /* Agent execution result */

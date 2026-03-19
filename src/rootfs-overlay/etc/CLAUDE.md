@@ -1,104 +1,62 @@
 # Sodex User Scope CLAUDE.md
 
-このファイルは Sodex guest 全体で共有する user-scope の指示です。
-agent は起動時に `/etc/CLAUDE.md` を読み、現在のシステムで出来ることの前提として扱ってください。
+Sodex guest 全体で共有する user-scope 指示です。
+agent は `/etc/CLAUDE.md` を前提として扱ってください。
 
-## 現在のシェルで出来ること
+## 基本
 
-- 既定の対話シェルは `eshell`、スクリプト実行や `-c` には `sh` が使えます
-- PTY/TTY ベースで動作し、UTF-8 表示と日本語入力に対応しています
-- shell 構文として `|`, `>`, `<`, `>>` が使えます
-- quoting、escape、複数段 pipeline を扱えます
-- `vi` でフルスクリーン編集ができます
+- 既定の対話シェルは `eshell`、スクリプト実行や `-c` は `sh`
+- PTY/TTY ベースで動作し、UTF-8 表示と日本語入力に対応
+- shell は `|`, `>`, `<`, `>>` を扱える
+- フルスクリーン編集は `vi`
+- 実行ファイルは主に `/usr/bin` に配置
 
 ## 主なコマンド
 
 - ファイル操作: `ls`, `cat`, `touch`, `mkdir`, `rm`, `rmdir`, `mv`, `cd`, `pwd`
 - プロセス確認: `ps`, `kill`, `sleep`
-- ネットワーク: `ping`, `dig`, `curl`, `websearch`
-- サービス関連: `service`, `start-stop-daemon`, `sshd`
+- ネットワーク: `ping`, `dig`, `curl`, `websearch`, `webfetch`
 - LLM/補助: `agent`, `ask`, `claude`
+- サービス関連: `service`, `start-stop-daemon`, `sshd`
 
-全コマンドは `/usr/bin/` に配置されています（PATH=/usr/bin）。
+## Web の使い分け
 
-## websearch の使い方
+- URL が未確定な調査: `websearch`
+- URL が確定しており、抽出済み本文や title が欲しい: `webfetch`
+- 生の HTTP ヘッダー、本文、API 動作確認: `curl`
 
-host 側の websearch proxy を叩いて検索結果を要約表示するコマンドです。
-検索キーワード探索や、まだURLが分からない調査に使ってください。
+### 例
 
-### 基本
-
-```
-websearch hello world
-websearch -n 3 linux kernel
-websearch -e google rust async
-```
-
-### オプション
-
-- `-n COUNT` : 表示件数（最大10）
-- `-e ENGINE` : 検索エンジン指定。既定は `all`
-- `-j` : 生JSONを表示
-- `-h HOST:PORT` : 接続先 host/port を上書き
-- `-p PATH` : proxy の path を上書き
-
-### websearch と curl の使い分け
-
-- 一般的なWeb検索、関連ページ探索、キーワード起点の調査は `websearch`
-- 既知のURLを直接取得する、HTTPヘッダーや本文を確認する、APIを叩くのは `curl`
-- 検索で候補URLを見つけてから本文取得やAPI確認に進むときは `websearch` → `curl`
-
-## curl の使い方
-
-Sodex独自実装のcurlコマンドです。HTTP/HTTPS(TLS 1.2)に対応しています。
-
-### 基本
-
-```
-curl https://httpbin.org/get
-curl http://10.0.2.2:8080/healthz
-curl -v https://example.com/api
+```sh
+websearch tokyo weather
+webfetch https://www.jma.go.jp/
+webfetch -m 500 https://tenki.jp/forecast/3/16/4410/13101/
+curl -v http://10.0.2.2:8080/healthz
 ```
 
-### オプション
+## webfetch の注意
 
-- `-X METHOD` : HTTPメソッド指定（GET/POST/PUT/DELETE）
-- `-d DATA` : リクエストボディ（指定するとPOSTがデフォルト）
-- `-H "Name: Value"` : ヘッダー追加（複数指定可）
-- `-v` : レスポンスヘッダーを表示
-- `-o FILE` : レスポンスをファイルに保存
+- host 側の structured web gateway を使う
+- `user` / `server` / `server-headless` の通常起動では host 側 gateway が自動起動される
+- 既定の接続先は `10.0.2.2:8081/fetch`
+- `net` mode では `10.0.2.2` が使えないため、必要なら `-h <host-ip>:8081` で上書きする
+- allowlist 外 URL や不許可 method は拒否される
+- 大きい本文は `main_text` が切り詰められる
+- `-I` で `HEAD`、`-r` で JS rendering 要求、`-m` で抽出文字数上限を指定できる
 
-### POST リクエスト例
+## curl の注意
 
-```
-curl -X POST -H "Content-Type: application/json" -d '{"key":"value"}' https://httpbin.org/post
-```
-
-### 制約事項
-
-- **小さいAPIレスポンス（JSON等）は完全に取得可能**
-- 大きいHTMLページ（Yahoo等）は先頭数KBで途切れる場合がある（TCP半閉鎖の制約）
-- Transfer-Encoding: chunked のチャンクサイズ値が出力に混ざることがある
-- DNS解決はQEMU SLiRPのDNS (10.0.2.3) を使用
-- ホストマシンへのアクセスは `10.0.2.2` 経由
-
-## 端末と編集
-
-- `term` 上で shell と `vi` を使えます
-- 日本語ファイル名を扱えます
-- `vi` は保存、undo/redo、検索、visual mode を含む基本編集が使えます
-
-## 制約
-
-- POSIX 完全互換ではありません
-- 外部パッケージマネージャや一般的な Unix ユーティリティ一式はありません
-- 大きい出力は扱いにくいので、短いコマンドに分けて調査してください
-- ファイル変更前は既存内容を確認してください
-- 絶対パスを優先してください
+- 小さい JSON / API 応答の確認には向く
+- 大きい HTML は途中で切れることがある
+- chunked 応答ではチャンクサイズが混ざることがある
+- host へのアクセスは `10.0.2.2`
 
 ## agent への指示
 
-- まず現在あるコマンドで確認してから推測してください
-- 不必要に長い出力を 1 回で取らず、対象を絞って段階的に確認してください
-- Web検索が必要でURL未確定なら `websearch`、URLやAPIが確定しているなら `curl` を優先してください
-- プロジェクト固有の指示は、起動ディレクトリ直下の `CLAUDE.md` を優先して従ってください
+- まず既存コマンドか tool で確認してから推測する
+- 長い出力は分割して取得する
+- URL が確定していれば `fetch_url` / `webfetch` を優先する
+- URL 探索だけが必要なら `websearch`
+- raw HTTP を見る必要があるときだけ `curl`
+- 天気、ニュース、株価、為替などの最新情報は、tool を1回以上使って確認してから答える
+- プロジェクト固有の指示は、起動ディレクトリ直下の `CLAUDE.md` を優先する

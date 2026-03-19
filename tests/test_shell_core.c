@@ -23,12 +23,44 @@ TEST(parse_lists_and_background) {
 TEST(parse_pipeline_with_redirection) {
     struct shell_program program;
     const char *text = "cat < in.txt | sh > out.txt\n";
+    struct shell_command *left;
+    struct shell_command *right;
 
     ASSERT_EQ(shell_parse_program(text, (int)strlen(text), &program), 1);
     ASSERT_EQ(program.pipeline_count, 1);
     ASSERT_EQ(program.pipelines[0].command_count, 2);
-    ASSERT_STR_EQ(program.pipelines[0].commands[0].input_path, "in.txt");
-    ASSERT_STR_EQ(program.pipelines[0].commands[1].output_path, "out.txt");
+    left = &program.pipelines[0].commands[0];
+    right = &program.pipelines[0].commands[1];
+    ASSERT_EQ(left->redirection_count, 1);
+    ASSERT_EQ(left->redirections[0].type, SHELL_REDIR_INPUT);
+    ASSERT_EQ(left->redirections[0].fd, 0);
+    ASSERT_STR_EQ(left->redirections[0].path, "in.txt");
+    ASSERT_EQ(right->redirection_count, 1);
+    ASSERT_EQ(right->redirections[0].type, SHELL_REDIR_OUTPUT);
+    ASSERT_EQ(right->redirections[0].fd, 1);
+    ASSERT_STR_EQ(right->redirections[0].path, "out.txt");
+}
+
+TEST(parse_fd_redirection_order) {
+    struct shell_program program;
+    struct shell_command *command;
+    const char *text = "sh -c \"echo ok\" > out.log 2>&1 2>> err.log 1>&2\n";
+
+    ASSERT_EQ(shell_parse_program(text, (int)strlen(text), &program), 1);
+    command = &program.pipelines[0].commands[0];
+    ASSERT_EQ(command->redirection_count, 4);
+    ASSERT_EQ(command->redirections[0].type, SHELL_REDIR_OUTPUT);
+    ASSERT_EQ(command->redirections[0].fd, 1);
+    ASSERT_STR_EQ(command->redirections[0].path, "out.log");
+    ASSERT_EQ(command->redirections[1].type, SHELL_REDIR_DUP);
+    ASSERT_EQ(command->redirections[1].fd, 2);
+    ASSERT_EQ(command->redirections[1].target_fd, 1);
+    ASSERT_EQ(command->redirections[2].type, SHELL_REDIR_APPEND);
+    ASSERT_EQ(command->redirections[2].fd, 2);
+    ASSERT_STR_EQ(command->redirections[2].path, "err.log");
+    ASSERT_EQ(command->redirections[3].type, SHELL_REDIR_DUP);
+    ASSERT_EQ(command->redirections[3].fd, 1);
+    ASSERT_EQ(command->redirections[3].target_fd, 2);
 }
 
 TEST(parse_long_command_arguments) {
@@ -66,6 +98,7 @@ int main(void)
 
     RUN_TEST(parse_lists_and_background);
     RUN_TEST(parse_pipeline_with_redirection);
+    RUN_TEST(parse_fd_redirection_order);
     RUN_TEST(parse_long_command_arguments);
     RUN_TEST(shell_vars_and_params);
 

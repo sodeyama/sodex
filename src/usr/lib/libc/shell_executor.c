@@ -12,14 +12,14 @@ struct shell_expanded_command {
   char assign_name[SHELL_MAX_ASSIGNMENTS][SHELL_VAR_NAME_MAX];
   char assign_value[SHELL_MAX_ASSIGNMENTS][SHELL_VAR_VALUE_MAX];
   int assignment_count;
-  char input_path[SHELL_WORD_SIZE];
-  char output_path[SHELL_WORD_SIZE];
-  int has_input;
-  int has_output;
-  int append_output;
+  struct shell_redirection redirections[SHELL_MAX_REDIRECTIONS];
+  char redirection_storage[SHELL_MAX_REDIRECTIONS][SHELL_WORD_SIZE];
+  int redirection_count;
 };
 
+static int shell_write_fd_text(int fd, const char *text);
 static int shell_write_text(const char *text);
+static int shell_write_error_text(const char *text);
 
 static void shell_copy_text(char *dst, int cap, const char *src)
 {
@@ -273,13 +273,13 @@ static int shell_expand_command(const struct shell_state *state,
                                 const struct shell_command *command,
                                 struct shell_expanded_command *out)
 {
+  struct shell_redirection *redirection;
   int i;
 
   if (command == 0 || out == 0)
     return -1;
 
   memset(out, 0, sizeof(*out));
-  out->append_output = command->append_output;
   for (i = 0; i < command->assignment_count; i++) {
     char text[SHELL_WORD_SIZE];
 
@@ -306,44 +306,53 @@ static int shell_expand_command(const struct shell_state *state,
   }
   out->argv[out->argc] = 0;
 
-  if (command->input_path != 0) {
-    if (shell_expand_word(state, command->input_path,
-                          out->input_path, sizeof(out->input_path)) < 0)
+  for (i = 0; i < command->redirection_count; i++) {
+    if (i >= SHELL_MAX_REDIRECTIONS)
       return -1;
-    out->has_input = 1;
-  }
-  if (command->output_path != 0) {
-    if (shell_expand_word(state, command->output_path,
-                          out->output_path, sizeof(out->output_path)) < 0)
-      return -1;
-    out->has_output = 1;
+    redirection = &out->redirections[i];
+    redirection->type = command->redirections[i].type;
+    redirection->fd = command->redirections[i].fd;
+    redirection->target_fd = command->redirections[i].target_fd;
+    redirection->path = 0;
+    if (command->redirections[i].path != 0) {
+      if (shell_expand_word(state, command->redirections[i].path,
+                            out->redirection_storage[i],
+                            sizeof(out->redirection_storage[i])) < 0)
+        return -1;
+      redirection->path = out->redirection_storage[i];
+    }
+    out->redirection_count++;
   }
 
   return 0;
 }
 
-static int shell_swap_fd(int target_fd, int next_fd)
+static int shell_save_fd_once(int target_fd, int *saved_fds)
 {
-  int saved_fd;
-  int new_fd;
-
-  saved_fd = dup(target_fd);
-  if (saved_fd < 0)
+  if (saved_fds == 0 || target_fd < 0 || target_fd > STDERR_FILENO)
     return -1;
-  close(target_fd);
-  new_fd = dup(next_fd);
-  if (new_fd != target_fd)
+  if (saved_fds[target_fd] >= 0)
+    return 0;
+  saved_fds[target_fd] = dup(target_fd);
+  if (saved_fds[target_fd] < 0)
     return -1;
-  return saved_fd;
+  return 0;
 }
 
-static void shell_restore_fd(int target_fd, int saved_fd)
+static int shell_dup_to_target(int source_fd, int target_fd)
 {
-  if (saved_fd < 0)
-    return;
+  int new_fd;
+
+  if (source_fd == target_fd)
+    return 0;
   close(target_fd);
-  dup(saved_fd);
-  close(saved_fd);
+  new_fd = dup(source_fd);
+  if (new_fd != target_fd) {
+    if (new_fd >= 0)
+      close(new_fd);
+    return -1;
+  }
+  return 0;
 }
 
 static void shell_append_job_text(char *dst, int cap, int *len, const char *src)
@@ -356,6 +365,49 @@ static void shell_append_job_text(char *dst, int cap, int *len, const char *src)
   for (i = 0; src[i] != '\0' && *len < cap - 1; i++)
     dst[(*len)++] = src[i];
   dst[*len] = '\0';
+}
+
+static void shell_append_number(char *dst, int cap, int *len, int value)
+{
+  char buf[16];
+
+  shell_status_text(value, buf, sizeof(buf));
+  shell_append_job_text(dst, cap, len, buf);
+}
+
+static void shell_describe_redirection(char *dst, int cap, int *len,
+                                       struct shell_redirection *redirection)
+{
+  if (redirection == 0)
+    return;
+
+  if (*len > 0 && *len < cap - 1)
+    dst[(*len)++] = ' ';
+
+  if (redirection->type == SHELL_REDIR_INPUT) {
+    if (redirection->fd != STDIN_FILENO)
+      shell_append_number(dst, cap, len, redirection->fd);
+    shell_append_job_text(dst, cap, len, "< ");
+    shell_append_job_text(dst, cap, len, redirection->path);
+    return;
+  }
+
+  if (redirection->type == SHELL_REDIR_OUTPUT ||
+      redirection->type == SHELL_REDIR_APPEND) {
+    if (redirection->fd != STDOUT_FILENO)
+      shell_append_number(dst, cap, len, redirection->fd);
+    if (redirection->type == SHELL_REDIR_APPEND)
+      shell_append_job_text(dst, cap, len, ">> ");
+    else
+      shell_append_job_text(dst, cap, len, "> ");
+    shell_append_job_text(dst, cap, len, redirection->path);
+    return;
+  }
+
+  if (redirection->fd != STDOUT_FILENO)
+    shell_append_number(dst, cap, len, redirection->fd);
+  shell_append_job_text(dst, cap, len, ">&");
+  shell_append_number(dst, cap, len, redirection->target_fd);
 }
 
 static void shell_describe_command(char *dst, int cap, int *len,
@@ -372,21 +424,8 @@ static void shell_describe_command(char *dst, int cap, int *len,
       dst[(*len)++] = ' ';
     shell_append_job_text(dst, cap, len, command->argv[i]);
   }
-  if (command->has_input) {
-    if (*len > 0 && *len < cap - 1)
-      dst[(*len)++] = ' ';
-    shell_append_job_text(dst, cap, len, "< ");
-    shell_append_job_text(dst, cap, len, command->input_path);
-  }
-  if (command->has_output) {
-    if (*len > 0 && *len < cap - 1)
-      dst[(*len)++] = ' ';
-    if (command->append_output)
-      shell_append_job_text(dst, cap, len, ">> ");
-    else
-      shell_append_job_text(dst, cap, len, "> ");
-    shell_append_job_text(dst, cap, len, command->output_path);
-  }
+  for (i = 0; i < command->redirection_count; i++)
+    shell_describe_redirection(dst, cap, len, &command->redirections[i]);
   if (add_pipe != 0)
     shell_append_job_text(dst, cap, len, " |");
   dst[*len] = '\0';
@@ -535,11 +574,21 @@ void shell_reap_background(struct shell_state *state)
   }
 }
 
-static int shell_write_text(const char *text)
+static int shell_write_fd_text(int fd, const char *text)
 {
   if (text == 0)
     return 0;
-  return (int)write(STDOUT_FILENO, text, strlen(text));
+  return (int)write(fd, text, strlen(text));
+}
+
+static int shell_write_text(const char *text)
+{
+  return shell_write_fd_text(STDOUT_FILENO, text);
+}
+
+static int shell_write_error_text(const char *text)
+{
+  return shell_write_fd_text(STDERR_FILENO, text);
 }
 
 static void shell_debug_audit(struct shell_expanded_command *command)
@@ -596,7 +645,7 @@ static int shell_builtin_cd(struct shell_state *state,
   if (command->argc > 1)
     path = command->argv[1];
   if (chdir((char *)path) < 0) {
-    shell_write_text("sh: cd failed\n");
+    shell_write_error_text("sh: cd failed\n");
     return 1;
   }
   return 0;
@@ -701,7 +750,7 @@ static int shell_builtin_fg(struct shell_state *state,
 
   job = shell_resolve_job(state, command);
   if (job == 0) {
-    shell_write_text("sh: fg: job not found\n");
+    shell_write_error_text("sh: fg: job not found\n");
     return 1;
   }
 
@@ -725,7 +774,7 @@ static int shell_builtin_bg(struct shell_state *state,
 
   job = shell_resolve_job(state, command);
   if (job == 0) {
-    shell_write_text("sh: bg: job not found\n");
+    shell_write_error_text("sh: bg: job not found\n");
     return 1;
   }
   if (kill(job->pid, SIGCONT) < 0) {
@@ -995,48 +1044,92 @@ static int shell_command_needs_builtin_parent(struct shell_expanded_command *com
   return 0;
 }
 
+static void shell_restore_saved_fds(int *saved_fds)
+{
+  int fd;
+
+  if (saved_fds == 0)
+    return;
+  for (fd = STDIN_FILENO; fd <= STDERR_FILENO; fd++) {
+    if (saved_fds[fd] < 0)
+      continue;
+    close(fd);
+    dup(saved_fds[fd]);
+    close(saved_fds[fd]);
+    saved_fds[fd] = -1;
+  }
+}
+
+static int shell_assign_fd(int target_fd, int source_fd, int *saved_fds)
+{
+  if (shell_save_fd_once(target_fd, saved_fds) < 0)
+    return -1;
+  return shell_dup_to_target(source_fd, target_fd);
+}
+
+static int shell_apply_redirections(struct shell_expanded_command *command,
+                                    int *saved_fds)
+{
+  int i;
+
+  if (command == 0)
+    return -1;
+
+  for (i = 0; i < command->redirection_count; i++) {
+    struct shell_redirection *redirection = &command->redirections[i];
+    int fd;
+    int flags;
+
+    if (redirection->fd < STDIN_FILENO || redirection->fd > STDERR_FILENO)
+      return -1;
+    if (redirection->type == SHELL_REDIR_DUP) {
+      if (redirection->target_fd < STDIN_FILENO ||
+          redirection->target_fd > STDERR_FILENO)
+        return -1;
+      if (shell_assign_fd(redirection->fd, redirection->target_fd, saved_fds) < 0)
+        return -1;
+      continue;
+    }
+
+    if (redirection->path == 0)
+      return -1;
+    if (redirection->type == SHELL_REDIR_INPUT) {
+      flags = O_RDONLY;
+    } else {
+      flags = O_CREAT | O_WRONLY;
+      if (redirection->type == SHELL_REDIR_APPEND)
+        flags |= O_APPEND;
+      else
+        flags |= O_TRUNC;
+    }
+
+    fd = open(redirection->path, flags, 0644);
+    if (fd < 0)
+      return -1;
+    if (shell_assign_fd(redirection->fd, fd, saved_fds) < 0) {
+      close(fd);
+      return -1;
+    }
+    close(fd);
+  }
+
+  return 0;
+}
+
 static int shell_run_parent_command(struct shell_state *state,
                                     struct shell_expanded_command *command)
 {
-  int saved_stdin = -1;
-  int saved_stdout = -1;
-  int input_fd = -1;
-  int output_fd = -1;
-  int flags;
+  int saved_fds[3] = {-1, -1, -1};
   int status;
 
-  if (command->has_input) {
-    input_fd = open(command->input_path, O_RDONLY, 0);
-    if (input_fd < 0)
-      return 1;
-    saved_stdin = shell_swap_fd(STDIN_FILENO, input_fd);
-    close(input_fd);
-    if (saved_stdin < 0)
-      return 1;
-  }
-
-  if (command->has_output) {
-    flags = O_CREAT | O_WRONLY;
-    if (command->append_output)
-      flags |= O_APPEND;
-    else
-      flags |= O_TRUNC;
-    output_fd = open(command->output_path, flags, 0644);
-    if (output_fd < 0) {
-      shell_restore_fd(STDIN_FILENO, saved_stdin);
-      return 1;
-    }
-    saved_stdout = shell_swap_fd(STDOUT_FILENO, output_fd);
-    close(output_fd);
-    if (saved_stdout < 0) {
-      shell_restore_fd(STDIN_FILENO, saved_stdin);
-      return 1;
-    }
+  if (shell_apply_redirections(command, saved_fds) < 0) {
+    shell_restore_saved_fds(saved_fds);
+    shell_write_error_text("sh: redirection failed\n");
+    return 1;
   }
 
   status = shell_builtin_run(state, command);
-  shell_restore_fd(STDIN_FILENO, saved_stdin);
-  shell_restore_fd(STDOUT_FILENO, saved_stdout);
+  shell_restore_saved_fds(saved_fds);
   return status;
 }
 
@@ -1074,11 +1167,7 @@ static int shell_execute_pipeline(struct shell_state *state,
   for (i = 0; i < pipeline->command_count; i++) {
     struct shell_expanded_command *command;
     int pipefd[2] = {-1, -1};
-    int saved_stdin = -1;
-    int saved_stdout = -1;
-    int input_fd = -1;
-    int output_fd = -1;
-    int flags;
+    int saved_fds[3] = {-1, -1, -1};
     pid_t pid;
 
     command = (struct shell_expanded_command *)malloc(sizeof(*command));
@@ -1102,78 +1191,48 @@ static int shell_execute_pipeline(struct shell_state *state,
     }
 
     if (command->argc > 0 && shell_command_needs_builtin_parent(command) != 0) {
-      shell_write_text("sh: builtin in pipeline/background is unsupported\n");
+      shell_write_error_text("sh: builtin in pipeline/background is unsupported\n");
       free(command);
       return 1;
     }
 
-    if (prev_input_fd >= 0 && command->has_input == 0) {
-      saved_stdin = shell_swap_fd(STDIN_FILENO, prev_input_fd);
+    if (prev_input_fd >= 0) {
+      if (shell_assign_fd(STDIN_FILENO, prev_input_fd, saved_fds) < 0) {
+        close(prev_input_fd);
+        free(command);
+        return 1;
+      }
       close(prev_input_fd);
       prev_input_fd = -1;
-      if (saved_stdin < 0) {
-        free(command);
-        return 1;
-      }
-    } else if (prev_input_fd >= 0) {
-      close(prev_input_fd);
-      prev_input_fd = -1;
-    }
-
-    if (command->has_input) {
-      input_fd = open(command->input_path, O_RDONLY, 0);
-      if (input_fd < 0) {
-        shell_restore_fd(STDIN_FILENO, saved_stdin);
-        free(command);
-        return 1;
-      }
-      shell_restore_fd(STDIN_FILENO, saved_stdin);
-      saved_stdin = shell_swap_fd(STDIN_FILENO, input_fd);
-      close(input_fd);
-      if (saved_stdin < 0) {
-        free(command);
-        return 1;
-      }
     }
 
     if (i + 1 < pipeline->command_count) {
       if (pipe(pipefd) < 0) {
-        shell_restore_fd(STDIN_FILENO, saved_stdin);
+        shell_restore_saved_fds(saved_fds);
         free(command);
         return 1;
       }
-      saved_stdout = shell_swap_fd(STDOUT_FILENO, pipefd[1]);
-      close(pipefd[1]);
-      if (saved_stdout < 0) {
+      if (shell_assign_fd(STDOUT_FILENO, pipefd[1], saved_fds) < 0) {
         close(pipefd[0]);
-        shell_restore_fd(STDIN_FILENO, saved_stdin);
+        close(pipefd[1]);
+        shell_restore_saved_fds(saved_fds);
         free(command);
         return 1;
       }
-    } else if (command->has_output) {
-      flags = O_CREAT | O_WRONLY;
-      if (command->append_output)
-        flags |= O_APPEND;
-      else
-        flags |= O_TRUNC;
-      output_fd = open(command->output_path, flags, 0644);
-      if (output_fd < 0) {
-        shell_restore_fd(STDIN_FILENO, saved_stdin);
-        free(command);
-        return 1;
-      }
-      saved_stdout = shell_swap_fd(STDOUT_FILENO, output_fd);
-      close(output_fd);
-      if (saved_stdout < 0) {
-        shell_restore_fd(STDIN_FILENO, saved_stdin);
-        free(command);
-        return 1;
-      }
+      close(pipefd[1]);
+    }
+
+    if (shell_apply_redirections(command, saved_fds) < 0) {
+      shell_restore_saved_fds(saved_fds);
+      if (pipefd[0] >= 0)
+        close(pipefd[0]);
+      shell_write_error_text("sh: redirection failed\n");
+      free(command);
+      return 1;
     }
 
     if (shell_apply_assignments(state, command) != 0) {
-      shell_restore_fd(STDIN_FILENO, saved_stdin);
-      shell_restore_fd(STDOUT_FILENO, saved_stdout);
+      shell_restore_saved_fds(saved_fds);
       if (pipefd[0] >= 0)
         close(pipefd[0]);
       free(command);
@@ -1181,8 +1240,7 @@ static int shell_execute_pipeline(struct shell_state *state,
     }
 
     if (command->argc == 0) {
-      shell_restore_fd(STDIN_FILENO, saved_stdin);
-      shell_restore_fd(STDOUT_FILENO, saved_stdout);
+      shell_restore_saved_fds(saved_fds);
       if (pipefd[0] >= 0)
         close(pipefd[0]);
       free(command);
@@ -1190,12 +1248,11 @@ static int shell_execute_pipeline(struct shell_state *state,
     }
 
     pid = shell_spawn_external(state, command);
-    shell_restore_fd(STDIN_FILENO, saved_stdin);
-    shell_restore_fd(STDOUT_FILENO, saved_stdout);
+    shell_restore_saved_fds(saved_fds);
     if (pid < 0) {
       if (pipefd[0] >= 0)
         close(pipefd[0]);
-      shell_write_text("sh: command not found\n");
+      shell_write_error_text("sh: command not found\n");
       free(command);
       return 127;
     }

@@ -8,16 +8,19 @@ enum shell_token_type {
   SHELL_TOKEN_INPUT = 3,
   SHELL_TOKEN_OUTPUT = 4,
   SHELL_TOKEN_APPEND = 5,
-  SHELL_TOKEN_AND = 6,
-  SHELL_TOKEN_OR = 7,
-  SHELL_TOKEN_AMP = 8,
-  SHELL_TOKEN_SEMI = 9,
-  SHELL_TOKEN_NEWLINE = 10
+  SHELL_TOKEN_DUP = 6,
+  SHELL_TOKEN_AND = 7,
+  SHELL_TOKEN_OR = 8,
+  SHELL_TOKEN_AMP = 9,
+  SHELL_TOKEN_SEMI = 10,
+  SHELL_TOKEN_NEWLINE = 11
 };
 
 struct shell_token {
   enum shell_token_type type;
   char *text;
+  int fd;
+  int target_fd;
 };
 
 static int shell_space(char ch)
@@ -41,6 +44,16 @@ static int shell_name_char(char ch)
   return ch >= '0' && ch <= '9';
 }
 
+static int shell_digit(char ch)
+{
+  return ch >= '0' && ch <= '9';
+}
+
+static int shell_supported_fd(int fd)
+{
+  return fd >= 0 && fd <= 2;
+}
+
 static int shell_assignment_word(const char *text)
 {
   int i;
@@ -58,13 +71,95 @@ static int shell_assignment_word(const char *text)
 }
 
 static int shell_push_token(struct shell_token *tokens, int count,
-                            enum shell_token_type type, char *text)
+                            enum shell_token_type type, char *text,
+                            int fd, int target_fd)
 {
   if (count >= SHELL_MAX_TOKENS)
     return -1;
   tokens[count].type = type;
   tokens[count].text = text;
+  tokens[count].fd = fd;
+  tokens[count].target_fd = target_fd;
   return count + 1;
+}
+
+static int shell_push_redirection(struct shell_command *command,
+                                  enum shell_redirection_type type,
+                                  int fd, int target_fd, char *path)
+{
+  struct shell_redirection *redirection;
+
+  if (command == 0)
+    return -1;
+  if (command->redirection_count >= SHELL_MAX_REDIRECTIONS)
+    return -1;
+
+  redirection = &command->redirections[command->redirection_count++];
+  redirection->type = type;
+  redirection->fd = fd;
+  redirection->target_fd = target_fd;
+  redirection->path = path;
+  return 0;
+}
+
+static int shell_tokenize_redirection(const char **src_ptr, const char *end,
+                                      struct shell_token *tokens, int count)
+{
+  const char *src = *src_ptr;
+  const char *p = src;
+  enum shell_token_type token_type;
+  int fd = 0;
+  int has_fd = 0;
+  int target_fd = -1;
+
+  while (p < end && shell_digit(*p)) {
+    has_fd = 1;
+    fd = fd * 10 + (*p - '0');
+    p++;
+  }
+  if (p >= end)
+    return count;
+  if (*p != '<' && *p != '>')
+    return count;
+
+  if (*p == '<') {
+    if (has_fd == 0)
+      fd = 0;
+    if (shell_supported_fd(fd) == 0)
+      return -1;
+    token_type = SHELL_TOKEN_INPUT;
+    p++;
+  } else {
+    if (has_fd == 0)
+      fd = 1;
+    if (shell_supported_fd(fd) == 0)
+      return -1;
+    p++;
+    if (p < end && *p == '>') {
+      token_type = SHELL_TOKEN_APPEND;
+      p++;
+    } else if (p < end && *p == '&') {
+      token_type = SHELL_TOKEN_DUP;
+      p++;
+      if (p >= end || shell_digit(*p) == 0)
+        return -1;
+      target_fd = 0;
+      while (p < end && shell_digit(*p)) {
+        target_fd = target_fd * 10 + (*p - '0');
+        p++;
+      }
+      if (shell_supported_fd(target_fd) == 0)
+        return -1;
+    } else {
+      token_type = SHELL_TOKEN_OUTPUT;
+    }
+  }
+
+  count = shell_push_token(tokens, count, token_type, 0, fd, target_fd);
+  if (count < 0)
+    return -1;
+  *src_ptr = p;
+  return count;
 }
 
 static int shell_tokenize(const char *text, int len,
@@ -85,6 +180,7 @@ static int shell_tokenize(const char *text, int len,
   while (src < end && *src != '\0') {
     char *word_start;
     char quote = '\0';
+    int next_count;
 
     while (src < end && shell_space(*src))
       src++;
@@ -92,14 +188,14 @@ static int shell_tokenize(const char *text, int len,
       break;
 
     if (*src == '\n') {
-      count = shell_push_token(tokens, count, SHELL_TOKEN_NEWLINE, 0);
+      count = shell_push_token(tokens, count, SHELL_TOKEN_NEWLINE, 0, -1, -1);
       if (count < 0)
         return -1;
       src++;
       continue;
     }
     if (*src == ';') {
-      count = shell_push_token(tokens, count, SHELL_TOKEN_SEMI, 0);
+      count = shell_push_token(tokens, count, SHELL_TOKEN_SEMI, 0, -1, -1);
       if (count < 0)
         return -1;
       src++;
@@ -107,10 +203,10 @@ static int shell_tokenize(const char *text, int len,
     }
     if (*src == '&') {
       if (src + 1 < end && src[1] == '&') {
-        count = shell_push_token(tokens, count, SHELL_TOKEN_AND, 0);
+        count = shell_push_token(tokens, count, SHELL_TOKEN_AND, 0, -1, -1);
         src += 2;
       } else {
-        count = shell_push_token(tokens, count, SHELL_TOKEN_AMP, 0);
+        count = shell_push_token(tokens, count, SHELL_TOKEN_AMP, 0, -1, -1);
         src++;
       }
       if (count < 0)
@@ -119,35 +215,25 @@ static int shell_tokenize(const char *text, int len,
     }
     if (*src == '|') {
       if (src + 1 < end && src[1] == '|') {
-        count = shell_push_token(tokens, count, SHELL_TOKEN_OR, 0);
+        count = shell_push_token(tokens, count, SHELL_TOKEN_OR, 0, -1, -1);
         src += 2;
       } else {
-        count = shell_push_token(tokens, count, SHELL_TOKEN_PIPE, 0);
+        count = shell_push_token(tokens, count, SHELL_TOKEN_PIPE, 0, -1, -1);
         src++;
       }
       if (count < 0)
         return -1;
       continue;
     }
-    if (*src == '<') {
-      count = shell_push_token(tokens, count, SHELL_TOKEN_INPUT, 0);
-      if (count < 0)
-        return -1;
-      src++;
+
+    next_count = shell_tokenize_redirection(&src, end, tokens, count);
+    if (next_count < 0)
+      return -1;
+    if (next_count != count) {
+      count = next_count;
       continue;
     }
-    if (*src == '>') {
-      if (src + 1 < end && src[1] == '>') {
-        count = shell_push_token(tokens, count, SHELL_TOKEN_APPEND, 0);
-        src += 2;
-      } else {
-        count = shell_push_token(tokens, count, SHELL_TOKEN_OUTPUT, 0);
-        src++;
-      }
-      if (count < 0)
-        return -1;
-      continue;
-    }
+
     if (*src == '#') {
       while (src < end && *src != '\n' && *src != '\0')
         src++;
@@ -172,7 +258,7 @@ static int shell_tokenize(const char *text, int len,
         continue;
       }
 
-      if ((*src == '\'' || *src == '"')) {
+      if (*src == '\'' || *src == '"') {
         if (quote == '\0')
           quote = *src;
         else if (quote == *src)
@@ -194,7 +280,7 @@ static int shell_tokenize(const char *text, int len,
       continue;
     }
     *dst++ = '\0';
-    count = shell_push_token(tokens, count, SHELL_TOKEN_WORD, word_start);
+    count = shell_push_token(tokens, count, SHELL_TOKEN_WORD, word_start, -1, -1);
     if (count < 0)
       return -1;
   }
@@ -227,7 +313,9 @@ static int shell_command_has_content(const struct shell_command *command)
 {
   if (command == 0)
     return 0;
-  return command->argc > 0 || command->assignment_count > 0;
+  return command->argc > 0 ||
+         command->assignment_count > 0 ||
+         command->redirection_count > 0;
 }
 
 int shell_parse_program(const char *text, int len, struct shell_program *program)
@@ -236,6 +324,7 @@ int shell_parse_program(const char *text, int len, struct shell_program *program
   struct shell_pipeline *pipeline = 0;
   struct shell_command *command = 0;
   enum shell_token_type pending_redir = SHELL_TOKEN_NONE;
+  int pending_fd = -1;
   int token_count = 0;
   int i;
 
@@ -310,6 +399,14 @@ int shell_parse_program(const char *text, int len, struct shell_program *program
       if (pending_redir != SHELL_TOKEN_NONE)
         return -1;
       pending_redir = token->type;
+      pending_fd = token->fd;
+      continue;
+    }
+
+    if (token->type == SHELL_TOKEN_DUP) {
+      if (shell_push_redirection(command, SHELL_REDIR_DUP,
+                                 token->fd, token->target_fd, 0) < 0)
+        return -1;
       continue;
     }
 
@@ -317,18 +414,21 @@ int shell_parse_program(const char *text, int len, struct shell_program *program
       return -1;
 
     if (pending_redir == SHELL_TOKEN_INPUT) {
-      if (command->input_path != 0)
+      if (shell_push_redirection(command, SHELL_REDIR_INPUT,
+                                 pending_fd, -1, token->text) < 0)
         return -1;
-      command->input_path = token->text;
       pending_redir = SHELL_TOKEN_NONE;
+      pending_fd = -1;
       continue;
     }
     if (pending_redir == SHELL_TOKEN_OUTPUT || pending_redir == SHELL_TOKEN_APPEND) {
-      if (command->output_path != 0)
+      if (shell_push_redirection(command,
+                                 pending_redir == SHELL_TOKEN_APPEND ?
+                                 SHELL_REDIR_APPEND : SHELL_REDIR_OUTPUT,
+                                 pending_fd, -1, token->text) < 0)
         return -1;
-      command->output_path = token->text;
-      command->append_output = (pending_redir == SHELL_TOKEN_APPEND);
       pending_redir = SHELL_TOKEN_NONE;
+      pending_fd = -1;
       continue;
     }
 

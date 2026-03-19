@@ -68,7 +68,7 @@ int main(int argc, char **argv)
 
     status = shell_execute_string(state, buf);
     if (status == 2)
-      printf("eshell: parse error\n");
+      write(STDERR_FILENO, "eshell: parse error\n", 20);
     if (state->exit_requested != 0)
       exit(state->exit_status);
     set_prompt(prompt);

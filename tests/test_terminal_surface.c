@@ -172,6 +172,41 @@ TEST(scroll_preserves_shifted_dirty_cells_and_marks_exposed_rows) {
     terminal_surface_free(&surface);
 }
 
+TEST(full_screen_scroll_captures_scrollback_row) {
+    struct terminal_surface surface;
+
+    ASSERT_EQ(terminal_surface_init(&surface, 3, 2), 0);
+
+    terminal_surface_write_char(&surface, 'a', NULL);
+    terminal_surface_write_char(&surface, 'b', NULL);
+    terminal_surface_write_char(&surface, 'c', NULL);
+    terminal_surface_write_char(&surface, 'd', NULL);
+    terminal_surface_write_char(&surface, 'e', NULL);
+    terminal_surface_write_char(&surface, 'f', NULL);
+    terminal_surface_write_char(&surface, 'g', NULL);
+
+    ASSERT_EQ(terminal_surface_scrollback_rows(&surface), 1);
+    ASSERT_EQ(terminal_surface_scrollback_cell(&surface, 0, 0)->ch, 'a');
+    ASSERT_EQ(terminal_surface_scrollback_cell(&surface, 0, 1)->ch, 'b');
+    ASSERT_EQ(terminal_surface_scrollback_cell(&surface, 0, 2)->ch, 'c');
+
+    terminal_surface_free(&surface);
+}
+
+TEST(scroll_region_scroll_does_not_capture_scrollback) {
+    struct terminal_surface surface;
+
+    ASSERT_EQ(terminal_surface_init(&surface, 3, 3), 0);
+    terminal_surface_set_scroll_region(&surface, 1, 2);
+    terminal_surface_set_cursor(&surface, 0, 2);
+    terminal_surface_write_char(&surface, 'x', NULL);
+    terminal_surface_newline(&surface, NULL);
+
+    ASSERT_EQ(terminal_surface_scrollback_rows(&surface), 0);
+
+    terminal_surface_free(&surface);
+}
+
 int main(void)
 {
   printf("=== terminal surface tests ===\n");
@@ -183,6 +218,8 @@ int main(void)
     RUN_TEST(writing_last_column_waits_for_next_character_before_scrolling);
     RUN_TEST(alternate_buffer_preserves_primary_screen);
     RUN_TEST(scroll_preserves_shifted_dirty_cells_and_marks_exposed_rows);
+    RUN_TEST(full_screen_scroll_captures_scrollback_row);
+    RUN_TEST(scroll_region_scroll_does_not_capture_scrollback);
 
     TEST_REPORT();
 }

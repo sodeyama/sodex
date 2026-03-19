@@ -90,9 +90,11 @@
 #define KEY_SCANCODE_HENKAN      0x79
 #define KEY_SCANCODE_MUHENKAN    0x7B
 #define KEY_SCANCODE_UP          0x48
+#define KEY_SCANCODE_PAGE_UP     0x49
 #define KEY_SCANCODE_LEFT        0x4B
 #define KEY_SCANCODE_RIGHT       0x4D
 #define KEY_SCANCODE_DOWN        0x50
+#define KEY_SCANCODE_PAGE_DOWN   0x51
 
 #define KEY_MOD_SHIFT 0x01
 #define KEY_MOD_CTRL  0x02

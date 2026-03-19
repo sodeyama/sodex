@@ -23,6 +23,14 @@ static int terminal_surface_resize_buffer(struct term_cell **cells,
                                           int old_cols, int old_rows,
                                           int new_cols, int new_rows,
                                           const struct term_cell *fill);
+static int terminal_surface_init_scrollback(struct terminal_surface *surface);
+static void terminal_surface_clear_scrollback(struct terminal_surface *surface);
+static int terminal_surface_scrollback_row_index(
+    const struct terminal_surface *surface,
+    int row);
+static void terminal_surface_capture_scrollback_row(
+    struct terminal_surface *surface,
+    int row);
 static void terminal_surface_blank_out(struct terminal_surface *surface,
                                        int col, int row,
                                        const struct term_cell *fill);
@@ -146,6 +154,90 @@ static int terminal_surface_resize_buffer(struct term_cell **cells,
   return 0;
 }
 
+static int terminal_surface_init_scrollback(struct terminal_surface *surface)
+{
+  size_t total;
+
+  if (surface == NULL)
+    return -1;
+
+  total = (size_t)(TERM_SCROLLBACK_ROWS * TERM_SCROLLBACK_MAX_COLS);
+  if (surface->scrollback_cells == NULL) {
+    surface->scrollback_cells =
+      (struct term_cell *)malloc(sizeof(struct term_cell) * total);
+    if (surface->scrollback_cells == NULL)
+      return -1;
+  }
+  terminal_surface_clear_scrollback(surface);
+  return 0;
+}
+
+static void terminal_surface_clear_scrollback(struct terminal_surface *surface)
+{
+  if (surface == NULL)
+    return;
+
+  surface->scrollback_head = 0;
+  surface->scrollback_len = 0;
+  memset(surface->scrollback_row_cols, 0, sizeof(surface->scrollback_row_cols));
+}
+
+static int terminal_surface_scrollback_row_index(
+    const struct terminal_surface *surface,
+    int row)
+{
+  if (surface == NULL || row < 0 || row >= surface->scrollback_len)
+    return -1;
+  return (surface->scrollback_head + row) % TERM_SCROLLBACK_ROWS;
+}
+
+static void terminal_surface_capture_scrollback_row(
+    struct terminal_surface *surface,
+    int row)
+{
+  int dst_row;
+  int copy_cols;
+  int dst_base;
+  int src_base;
+
+  if (surface == NULL || surface->cells == NULL || surface->scrollback_cells == NULL)
+    return;
+  if (row < 0 || row >= surface->rows)
+    return;
+
+  if (surface->scrollback_len < TERM_SCROLLBACK_ROWS) {
+    dst_row = (surface->scrollback_head + surface->scrollback_len) %
+              TERM_SCROLLBACK_ROWS;
+    surface->scrollback_len++;
+  } else {
+    dst_row = surface->scrollback_head;
+    surface->scrollback_head = (surface->scrollback_head + 1) %
+                               TERM_SCROLLBACK_ROWS;
+  }
+
+  copy_cols = surface->cols;
+  if (copy_cols > TERM_SCROLLBACK_MAX_COLS)
+    copy_cols = TERM_SCROLLBACK_MAX_COLS;
+  if (copy_cols < 0)
+    copy_cols = 0;
+
+  dst_base = dst_row * TERM_SCROLLBACK_MAX_COLS;
+  src_base = row * surface->cols;
+  if (copy_cols > 0) {
+    memcpy(&surface->scrollback_cells[dst_base],
+           &surface->cells[src_base],
+           sizeof(struct term_cell) * (size_t)copy_cols);
+  }
+  if (copy_cols < TERM_SCROLLBACK_MAX_COLS) {
+    struct term_cell blank = terminal_surface_blank_cell(NULL);
+    int col;
+
+    for (col = copy_cols; col < TERM_SCROLLBACK_MAX_COLS; col++)
+      surface->scrollback_cells[dst_base + col] = blank;
+  }
+  surface->scrollback_row_cols[dst_row] = (u_int16_t)copy_cols;
+}
+
 static void terminal_surface_blank_out(struct terminal_surface *surface,
                                        int col, int row,
                                        const struct term_cell *fill)
@@ -205,6 +297,10 @@ int terminal_surface_init(struct terminal_surface *surface, int cols, int rows)
     terminal_surface_free(surface);
     return -1;
   }
+  if (terminal_surface_init_scrollback(surface) < 0) {
+    terminal_surface_free(surface);
+    return -1;
+  }
 
   surface->cols = cols;
   surface->rows = rows;
@@ -228,6 +324,8 @@ void terminal_surface_free(struct terminal_surface *surface)
     free(surface->alternate_cells);
   if (surface->alternate_dirty != NULL)
     free(surface->alternate_dirty);
+  if (surface->scrollback_cells != NULL)
+    free(surface->scrollback_cells);
   memset(surface, 0, sizeof(struct terminal_surface));
 }
 
@@ -256,6 +354,7 @@ int terminal_surface_resize(struct terminal_surface *surface, int cols, int rows
       return -1;
     }
   }
+  terminal_surface_clear_scrollback(surface);
 
   surface->cols = cols;
   surface->rows = rows;
@@ -306,6 +405,7 @@ void terminal_surface_reset(struct terminal_surface *surface,
   surface->scroll_count = 0;
   surface->scroll_top = 0;
   surface->scroll_bottom = surface->rows - 1;
+  terminal_surface_clear_scrollback(surface);
   terminal_surface_clear(surface, fill);
 }
 
@@ -571,6 +671,17 @@ void terminal_surface_scroll_up(struct terminal_surface *surface, int lines,
     region_bottom = surface->rows - 1;
   region_size = region_bottom - region_top + 1;
 
+  if (surface->alternate_active == 0 &&
+      region_top == 0 &&
+      region_bottom == surface->rows - 1) {
+    int capture_lines = lines;
+
+    if (capture_lines > region_size)
+      capture_lines = region_size;
+    for (row = region_top; row < region_top + capture_lines; row++)
+      terminal_surface_capture_scrollback_row(surface, row);
+  }
+
   if (lines >= region_size) {
     surface->scroll_count += lines;
     terminal_surface_clear_region(surface, 0, region_top,
@@ -755,4 +866,40 @@ void terminal_surface_tab(struct terminal_surface *surface,
     if (surface->cursor_col == 0)
       break;
   }
+}
+
+int terminal_surface_scrollback_rows(const struct terminal_surface *surface)
+{
+  if (surface == NULL)
+    return 0;
+  return surface->scrollback_len;
+}
+
+const struct term_cell *terminal_surface_scrollback_cell(
+    const struct terminal_surface *surface,
+    int row, int col)
+{
+  static struct term_cell blank = {
+    ' ',
+    TERM_COLOR_LIGHT_GRAY,
+    TERM_COLOR_BLACK,
+    0,
+    1
+  };
+  int physical_row;
+  int row_cols;
+
+  if (surface == NULL || surface->scrollback_cells == NULL)
+    return &blank;
+  if (col < 0 || col >= TERM_SCROLLBACK_MAX_COLS)
+    return &blank;
+
+  physical_row = terminal_surface_scrollback_row_index(surface, row);
+  if (physical_row < 0)
+    return &blank;
+  row_cols = surface->scrollback_row_cols[physical_row];
+  if (col >= row_cols)
+    return &blank;
+  return &surface->scrollback_cells[physical_row * TERM_SCROLLBACK_MAX_COLS +
+                                    col];
 }

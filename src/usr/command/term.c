@@ -78,6 +78,7 @@ struct term_app {
   int last_ime_overlay_width;
   int last_ime_overlay_start_col;
   int last_scroll_count;
+  int scroll_view_rows;
   int present_left;
   int present_top;
   int present_right;
@@ -145,6 +146,12 @@ PRIVATE char render_char(const struct term_cell *cell);
 PRIVATE void reset_surface(struct term_app *app);
 PRIVATE void append_scrollback(struct term_app *app, const char *buf, int len);
 PRIVATE void replay_scrollback(struct term_app *app);
+PRIVATE int term_scrollback_max_offset(const struct term_app *app);
+PRIVATE int term_view_active(const struct term_app *app);
+PRIVATE void term_scroll_view(struct term_app *app, int delta);
+PRIVATE void term_scroll_view_to_bottom(struct term_app *app);
+PRIVATE const struct term_cell *term_view_cell(const struct term_app *app,
+                                               int col, int row);
 PRIVATE char *metric_append_text(char *dst, const char *text);
 PRIVATE char *metric_append_uint(char *dst, u_int32_t value);
 PRIVATE void emit_metric(struct term_app *app, const char *point,
@@ -283,6 +290,7 @@ PRIVATE int term_init(struct term_app *app)
   app->last_ime_overlay_width = 0;
   app->last_ime_overlay_start_col = 0;
   app->last_scroll_count = 0;
+  app->scroll_view_rows = 0;
   app->long_output_base = 0;
   ime_init(&app->ime);
   shell_completion_state_init(&app->completion);
@@ -555,6 +563,8 @@ PRIVATE int sync_viewport(struct term_app *app)
   replay_scrollback(app);
   if (app->use_framebuffer != 0)
     term_prepare_back_buffer(app);
+  if (app->scroll_view_rows > term_scrollback_max_offset(app))
+    app->scroll_view_rows = term_scrollback_max_offset(app);
   winsize.cols = cols;
   winsize.rows = rows;
   set_winsize(app->master_fd, &winsize);
@@ -646,6 +656,31 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
     *needs_redraw = 0;
   if (event->flags & KEY_EVENT_RELEASE)
     return 0;
+  if ((event->flags & KEY_EVENT_EXTENDED) != 0 &&
+      terminal_surface_is_alternate(&app->surface) == 0) {
+    int page_rows = app->surface.rows > 0 ? app->surface.rows : 1;
+
+    if (event->scancode == KEY_SCANCODE_PAGE_UP) {
+      term_scroll_view(app, page_rows);
+      if (needs_redraw != NULL)
+        *needs_redraw = 1;
+      return 0;
+    }
+    if (event->scancode == KEY_SCANCODE_PAGE_DOWN) {
+      if (app->scroll_view_rows <= page_rows)
+        term_scroll_view_to_bottom(app);
+      else
+        term_scroll_view(app, -page_rows);
+      if (needs_redraw != NULL)
+        *needs_redraw = 1;
+      return 0;
+    }
+  }
+  if (term_view_active(app) != 0) {
+    term_scroll_view_to_bottom(app);
+    if (needs_redraw != NULL)
+      *needs_redraw = 1;
+  }
 
   len = term_handle_completion(app, event, foreground_pid, lflag,
                                buf, &handled, needs_redraw);
@@ -911,13 +946,22 @@ PRIVATE void render_surface(struct term_app *app, int force)
   u_int32_t rendered = 0;
   int scroll_delta;
   int apply_scroll_fast_path = FALSE;
+  int view_active;
   int row;
   int col;
 
   app->metrics.render_start_tick = get_kernel_tick();
   if (dirty_before > (int)app->metrics.max_dirty_cells)
     app->metrics.max_dirty_cells = (u_int32_t)dirty_before;
+  if (app->scroll_view_rows > term_scrollback_max_offset(app))
+    app->scroll_view_rows = term_scrollback_max_offset(app);
+  view_active = term_view_active(app);
   scroll_delta = app->surface.scroll_count - app->last_scroll_count;
+  if (view_active != 0) {
+    force = TRUE;
+    dirty_before = total_cells;
+    scroll_delta = 0;
+  }
 
   if (app->use_framebuffer != 0) {
     const struct term_cell *cell;
@@ -942,16 +986,22 @@ PRIVATE void render_surface(struct term_app *app, int force)
 
     for (row = 0; row < app->surface.rows; row++) {
       for (col = 0; col < app->surface.cols; col++) {
-        if (force == FALSE &&
+        if (view_active == 0 &&
+            force == FALSE &&
             terminal_surface_is_dirty(&app->surface, col, row) == FALSE)
           continue;
 
-        cell = terminal_surface_cell(&app->surface, col, row);
+        if (view_active != 0)
+          cell = term_view_cell(app, col, row);
+        else
+          cell = terminal_surface_cell(&app->surface, col, row);
         if (cell == NULL)
           continue;
         if ((cell->attr & TERM_ATTR_CONTINUATION) != 0 && col > 0) {
           const struct term_cell *lead =
-              terminal_surface_cell(&app->surface, col - 1, row);
+              view_active != 0 ?
+                term_view_cell(app, col - 1, row) :
+                terminal_surface_cell(&app->surface, col - 1, row);
           if (lead != NULL &&
               (lead->attr & TERM_ATTR_CONTINUATION) == 0 &&
               lead->width > 1) {
@@ -965,7 +1015,8 @@ PRIVATE void render_surface(struct term_app *app, int force)
       }
     }
 
-    if (app->cursor_valid != 0 &&
+    if (view_active == 0 &&
+        app->cursor_valid != 0 &&
         (app->last_cursor_col != app->surface.cursor_col ||
          app->last_cursor_row != app->surface.cursor_row)) {
       cell = terminal_surface_cell(&app->surface,
@@ -980,21 +1031,25 @@ PRIVATE void render_surface(struct term_app *app, int force)
       }
     }
 
-    cell = terminal_surface_cell(&app->surface,
-                                 app->surface.cursor_col,
-                                 app->surface.cursor_row);
-    render_conversion_target(app);
-    if (cell != NULL) {
-      term_draw_cell(app,
-                     app->surface.cursor_col,
-                     app->surface.cursor_row,
-                     cell, TRUE);
-      rendered++;
+    if (view_active == 0) {
+      cell = terminal_surface_cell(&app->surface,
+                                   app->surface.cursor_col,
+                                   app->surface.cursor_row);
+      render_conversion_target(app);
+      if (cell != NULL) {
+        term_draw_cell(app,
+                       app->surface.cursor_col,
+                       app->surface.cursor_row,
+                       cell, TRUE);
+        rendered++;
+      }
+      app->last_cursor_col = app->surface.cursor_col;
+      app->last_cursor_row = app->surface.cursor_row;
+      app->cursor_valid = 1;
+      render_ime_overlay(app, force);
+    } else {
+      app->cursor_valid = 0;
     }
-    app->last_cursor_col = app->surface.cursor_col;
-    app->last_cursor_row = app->surface.cursor_row;
-    app->cursor_valid = 1;
-    render_ime_overlay(app, force);
     term_present(app, apply_scroll_fast_path != FALSE ? scroll_delta : 0);
     app->metrics.render_end_tick = get_kernel_tick();
     app->metrics.render_cells += rendered;
@@ -1002,12 +1057,12 @@ PRIVATE void render_surface(struct term_app *app, int force)
       app->metrics.full_redraws++;
     else
       app->metrics.partial_redraws++;
-    if (scroll_delta > 0) {
+    if (view_active == 0 && scroll_delta > 0) {
       app->metrics.scroll_events++;
       app->metrics.scroll_lines += (u_int32_t)scroll_delta;
-      app->last_scroll_count = app->surface.scroll_count;
       emit_metric(app, "scroll", 0, rendered);
     }
+    app->last_scroll_count = app->surface.scroll_count;
     if (app->metrics.pty_bytes - app->long_output_base >= TERM_LONG_OUTPUT_THRESHOLD) {
       app->metrics.long_output_marks++;
       app->long_output_base = app->metrics.pty_bytes;
@@ -1023,11 +1078,15 @@ PRIVATE void render_surface(struct term_app *app, int force)
     for (col = 0; col < app->surface.cols; col++) {
       const struct term_cell *cell;
 
-      if (force == FALSE &&
+      if (view_active == 0 &&
+          force == FALSE &&
           terminal_surface_is_dirty(&app->surface, col, row) == FALSE)
         continue;
 
-      cell = terminal_surface_cell(&app->surface, col, row);
+      if (view_active != 0)
+        cell = term_view_cell(app, col, row);
+      else
+        cell = terminal_surface_cell(&app->surface, col, row);
       if (cell == NULL)
         continue;
       console_putc_at(col, row, render_color(cell), render_char(cell));
@@ -1042,12 +1101,12 @@ PRIVATE void render_surface(struct term_app *app, int force)
   else
     app->metrics.partial_redraws++;
   scroll_delta = app->surface.scroll_count - app->last_scroll_count;
-  if (scroll_delta > 0) {
+  if (view_active == 0 && scroll_delta > 0) {
     app->metrics.scroll_events++;
     app->metrics.scroll_lines += (u_int32_t)scroll_delta;
-    app->last_scroll_count = app->surface.scroll_count;
     emit_metric(app, "scroll", 0, rendered);
   }
+  app->last_scroll_count = app->surface.scroll_count;
   if (app->metrics.pty_bytes - app->long_output_base >= TERM_LONG_OUTPUT_THRESHOLD) {
     app->metrics.long_output_marks++;
     app->long_output_base = app->metrics.pty_bytes;
@@ -1056,9 +1115,13 @@ PRIVATE void render_surface(struct term_app *app, int force)
   if (force != FALSE || dirty_before == total_cells)
     emit_metric(app, "full_redraw", 0, rendered);
   terminal_surface_clear_damage(&app->surface);
-  render_conversion_target(app);
-  render_ime_overlay(app, force);
-  console_set_cursor(app->surface.cursor_col, app->surface.cursor_row);
+  if (view_active == 0) {
+    render_conversion_target(app);
+    render_ime_overlay(app, force);
+    console_set_cursor(app->surface.cursor_col, app->surface.cursor_row);
+  } else {
+    app->cursor_valid = 0;
+  }
 }
 
 PRIVATE char render_color(const struct term_cell *cell)
@@ -1124,6 +1187,77 @@ PRIVATE void replay_scrollback(struct term_app *app)
   }
   app->last_scroll_count = app->surface.scroll_count;
   terminal_surface_mark_all_dirty(&app->surface);
+}
+
+PRIVATE int term_scrollback_max_offset(const struct term_app *app)
+{
+  if (app == NULL)
+    return 0;
+  return terminal_surface_scrollback_rows(&app->surface);
+}
+
+PRIVATE int term_view_active(const struct term_app *app)
+{
+  if (app == NULL)
+    return 0;
+  if (app->scroll_view_rows <= 0)
+    return 0;
+  return terminal_surface_is_alternate(&app->surface) == 0;
+}
+
+PRIVATE void term_scroll_view(struct term_app *app, int delta)
+{
+  int next;
+  int max_offset;
+
+  if (app == NULL || delta == 0)
+    return;
+
+  max_offset = term_scrollback_max_offset(app);
+  next = app->scroll_view_rows + delta;
+  if (next < 0)
+    next = 0;
+  if (next > max_offset)
+    next = max_offset;
+  if (next == app->scroll_view_rows)
+    return;
+
+  app->scroll_view_rows = next;
+  app->cursor_valid = 0;
+  app->ime_overlay_valid = 0;
+  terminal_surface_mark_all_dirty(&app->surface);
+}
+
+PRIVATE void term_scroll_view_to_bottom(struct term_app *app)
+{
+  if (app == NULL || app->scroll_view_rows == 0)
+    return;
+  app->scroll_view_rows = 0;
+  app->cursor_valid = 0;
+  app->ime_overlay_valid = 0;
+  terminal_surface_mark_all_dirty(&app->surface);
+}
+
+PRIVATE const struct term_cell *term_view_cell(const struct term_app *app,
+                                               int col, int row)
+{
+  int scrollback_rows;
+  int top_row;
+  int source_row;
+
+  if (app == NULL)
+    return NULL;
+  if (col < 0 || row < 0 || col >= app->surface.cols || row >= app->surface.rows)
+    return NULL;
+
+  scrollback_rows = terminal_surface_scrollback_rows(&app->surface);
+  top_row = scrollback_rows - app->scroll_view_rows;
+  if (top_row < 0)
+    top_row = 0;
+  source_row = top_row + row;
+  if (source_row < scrollback_rows)
+    return terminal_surface_scrollback_cell(&app->surface, source_row, col);
+  return terminal_surface_cell(&app->surface, col, source_row - scrollback_rows);
 }
 
 PRIVATE char *metric_append_text(char *dst, const char *text)

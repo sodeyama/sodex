@@ -25,6 +25,8 @@
 #define TERM_ATTR_CONTINUATION 0x04
 
 #define TERM_TAB_WIDTH 8
+#define TERM_SCROLLBACK_ROWS 512
+#define TERM_SCROLLBACK_MAX_COLS 320
 
 struct term_cell {
   u_int32_t ch;
@@ -60,6 +62,10 @@ struct terminal_surface {
   int primary_saved_wrap_pending;
   int scroll_top;     /* top row of scroll region (0-based, inclusive) */
   int scroll_bottom;  /* bottom row of scroll region (0-based, inclusive) */
+  struct term_cell *scrollback_cells;
+  u_int16_t scrollback_row_cols[TERM_SCROLLBACK_ROWS];
+  int scrollback_head;
+  int scrollback_len;
 };
 
 int terminal_surface_init(struct terminal_surface *surface, int cols, int rows);
@@ -108,5 +114,9 @@ void terminal_surface_carriage_return(struct terminal_surface *surface);
 void terminal_surface_backspace(struct terminal_surface *surface);
 void terminal_surface_tab(struct terminal_surface *surface,
                           const struct term_cell *style);
+int terminal_surface_scrollback_rows(const struct terminal_surface *surface);
+const struct term_cell *terminal_surface_scrollback_cell(
+    const struct terminal_surface *surface,
+    int row, int col);
 
 #endif /* _USR_TERMINAL_SURFACE_H */

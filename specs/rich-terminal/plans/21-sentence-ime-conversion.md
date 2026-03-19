@@ -37,7 +37,16 @@ Plan 17/18 で guest 内 IME のかな入力、単一読みの漢字変換、大
   - shell と `vi` の両方で multi-clause UTF-8 commit が破綻しない
   - host test と QEMU smoke で全文変換、`Enter` 確定、キャンセル、文節移動の回帰を検知できる
 
-## 現状
+## 実装後の状態
+
+- `ime_state` は composition 全体、clause 配列、focused clause、phase を保持し、従来の単一 clause 変換もその特殊ケースとして扱える
+- 辞書 blob は v3 で candidate cost を保持し、exact lookup と segmentation 用 lookup の両方で使える
+- `term` は `Space` / `Left` / `Right` / `Shift+Left` / `Shift+Right` / `Enter` / `Esc` で全文変換、文節移動、境界調整、全文確定、ひらがな復帰を扱える
+- shell / `vi` への commit は 1 回の UTF-8 burst で流し、composition 中の `Enter` は改行より IME commit を優先する
+- host test では分節、候補切り替え、境界調整、全文 commit、cancel を固定済みである
+- QEMU smoke script 側の追従は入っているが、通常 runlevel に入らず rescue 経由になる既知問題のため end-to-end の安定化は GitHub Issue #24 で追跡中である
+
+## 着手前の現状
 
 - `ime_state` は `reading`, `candidates`, `candidate_index`, `conversion_active` しか持たない
 - `ime_conversion.c` は「完全一致の読み 1 件 -> 候補列 1 組」の helper であり、

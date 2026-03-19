@@ -61,7 +61,7 @@ void conv_init(struct conversation *conv, const char *system_prompt)
     memset(conv, 0, sizeof(*conv));
     if (system_prompt) {
         conv->system_prompt_len = safe_copy(
-            conv->system_prompt, CONV_TEXT_BUF,
+            conv->system_prompt, CONV_SYSTEM_PROMPT_BUF,
             system_prompt, strlen(system_prompt));
     }
 }
@@ -76,7 +76,7 @@ int conv_append_system_text(struct conversation *conv,
     if (!conv || !text)
         return -1;
 
-    remaining = CONV_TEXT_BUF - conv->system_prompt_len - 1;
+    remaining = CONV_SYSTEM_PROMPT_BUF - conv->system_prompt_len - 1;
     if (remaining <= 0)
         return -1;
 
@@ -99,7 +99,7 @@ int conv_append_system_text(struct conversation *conv,
         memcpy(conv->system_prompt + conv->system_prompt_len,
                suffix, suffix_len);
         conv->system_prompt_len += suffix_len;
-        remaining = CONV_TEXT_BUF - conv->system_prompt_len - 1;
+        remaining = CONV_SYSTEM_PROMPT_BUF - conv->system_prompt_len - 1;
     }
 
     add_len = strlen(text);

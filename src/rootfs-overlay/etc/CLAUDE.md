@@ -58,4 +58,5 @@ curl -v http://10.0.2.2:8080/healthz
 - URL が確定していれば `fetch_url` / `webfetch` を優先する
 - URL 探索だけが必要なら `websearch`
 - raw HTTP を見る必要があるときだけ `curl`
+- 天気、ニュース、株価、為替などの最新情報は、tool を1回以上使って確認してから答える
 - プロジェクト固有の指示は、起動ディレクトリ直下の `CLAUDE.md` を優先する

@@ -12,6 +12,7 @@
 #define CONV_MAX_TURNS       32
 #define CONV_MAX_BLOCKS       8  /* Max content blocks per turn */
 #define CONV_TEXT_BUF       4096 /* Per-block text buffer for conversation history */
+#define CONV_SYSTEM_PROMPT_BUF 8192 /* system prompt 専用 */
 
 /* Content block types (superset of claude_content_type) */
 enum conv_block_type {
@@ -52,7 +53,7 @@ struct conv_turn {
 
 /* Conversation state */
 struct conversation {
-    char system_prompt[CONV_TEXT_BUF];
+    char system_prompt[CONV_SYSTEM_PROMPT_BUF];
     int system_prompt_len;
     struct conv_turn turns[CONV_MAX_TURNS];
     int turn_count;

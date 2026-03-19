@@ -57,6 +57,7 @@ struct agent_cli_render_state {
     int terminal_cols;
     int loading_visible;
     int spinner_index;
+    char last_loading_label[96];
     int last_failure_valid;
     int last_failure_is_error;
     int last_failure_result_len;
@@ -100,13 +101,10 @@ static void render_newline(void)
 
 static void clear_loading_line(void)
 {
-    static const char clear_seq[] = "\r\033[2K\r";
-
     if (!s_cli.loading_visible)
         return;
-
-    write(STDOUT_FILENO, clear_seq, sizeof(clear_seq) - 1);
     s_cli.loading_visible = 0;
+    s_cli.last_loading_label[0] = '\0';
 }
 
 static int is_same_tool_failure(const struct agent_event *event)
@@ -181,10 +179,13 @@ static void show_loading_line(const char *label)
 
     if (s_cli.terminal_cols <= 0)
         reset_render_state();
-    if (!s_cli.loading_visible && s_cli.layout.current_col != 0)
+    if (s_cli.loading_visible != 0 &&
+        strcmp(s_cli.last_loading_label, label) == 0) {
+        return;
+    }
+    if (s_cli.layout.current_col != 0)
         render_newline();
 
-    clear_loading_line();
     frame = s_loading_frames[s_cli.spinner_index % 4];
     s_cli.spinner_index++;
     len = snprintf(line, sizeof(line), "[%c] %s", frame, label);
@@ -193,6 +194,10 @@ static void show_loading_line(const char *label)
     if (len >= (int)sizeof(line))
         len = sizeof(line) - 1;
     write(STDOUT_FILENO, line, (size_t)len);
+    render_newline();
+    strncpy(s_cli.last_loading_label, label,
+            sizeof(s_cli.last_loading_label) - 1);
+    s_cli.last_loading_label[sizeof(s_cli.last_loading_label) - 1] = '\0';
     s_cli.loading_visible = 1;
 }
 

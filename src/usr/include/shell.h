@@ -7,6 +7,7 @@
 #define SHELL_MAX_ASSIGNMENTS 8
 #define SHELL_MAX_COMMANDS 8
 #define SHELL_MAX_PIPELINES 32
+#define SHELL_MAX_REDIRECTIONS 16
 #define SHELL_MAX_TOKENS 256
 #define SHELL_STORAGE_SIZE 4096
 #define SHELL_WORD_SIZE 512
@@ -25,14 +26,27 @@ enum shell_next_type {
   SHELL_NEXT_BACKGROUND = 4
 };
 
+enum shell_redirection_type {
+  SHELL_REDIR_INPUT = 0,
+  SHELL_REDIR_OUTPUT = 1,
+  SHELL_REDIR_APPEND = 2,
+  SHELL_REDIR_DUP = 3
+};
+
+struct shell_redirection {
+  enum shell_redirection_type type;
+  int fd;
+  int target_fd;
+  char *path;
+};
+
 struct shell_command {
   char *argv[SHELL_MAX_ARGS];
   int argc;
   char *assignments[SHELL_MAX_ASSIGNMENTS];
   int assignment_count;
-  char *input_path;
-  char *output_path;
-  int append_output;
+  struct shell_redirection redirections[SHELL_MAX_REDIRECTIONS];
+  int redirection_count;
 };
 
 struct shell_pipeline {

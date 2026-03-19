@@ -45,6 +45,8 @@ RMDIR   = ${USRDIR}/bin/rmdir
 MV      = ${USRDIR}/bin/mv
 SLEEP   = ${USRDIR}/bin/sleep
 VI      = ${USRDIR}/bin/vi
+MORE    = ${USRDIR}/bin/more
+LESS    = ${USRDIR}/bin/less
 UTF8DEMO = ${USRDIR}/bin/utf8demo
 MEMGROW = ${USRDIR}/bin/memgrow
 FSLARGE = ${USRDIR}/bin/fslarge
@@ -84,6 +86,8 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/mv.o -o ${MV} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/sleep.o -o ${SLEEP} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/vi.o -o ${VI} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/more.o -o ${MORE} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/less.o -o ${LESS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/utf8demo.o -o ${UTF8DEMO} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/memgrow.o -o ${MEMGROW} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/fslarge.o -o ${FSLARGE} ${STATIC_LIBS}

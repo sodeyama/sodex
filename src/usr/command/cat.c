@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <sodex/list.h>
 #include <stdio.h>
 #include <process.h>
@@ -14,7 +15,9 @@ int main(int argc, char **argv)
   if (argc >= 2) {
     fd = open(argv[1], 0, 0);
     if (fd < 0) {
-      printf("cat: open failed %s\n", argv[1]);
+      write(2, "cat: open failed ", 17);
+      write(2, argv[1], strlen(argv[1]));
+      write(2, "\n", 1);
       exit(1);
       return 1;
     }

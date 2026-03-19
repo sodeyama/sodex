@@ -54,7 +54,7 @@ int main(int argc, char **argv)
         break;
       status = shell_execute_string(state, buf);
       if (status == 2)
-        printf("sh: parse error\n");
+        write(STDERR_FILENO, "sh: parse error\n", 16);
       if (state->exit_requested != 0)
         break;
     }

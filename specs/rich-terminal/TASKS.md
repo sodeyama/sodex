@@ -20,6 +20,7 @@
 13. 日本語 IME の漢字変換と候補 UI
 14. フル IME 辞書と大規模候補対応
 15. IME の連文節 / 全文変換
+16. shell の stderr redirection と pager
 
 ## M0: 互換を壊さない基盤化
 
@@ -241,6 +242,20 @@
 | [ ] | RT-124 | QEMU smoke と reference data を追加し、shell / `vi` の全文変換と保存を固定する | RT-119, RT-122, RT-123 | multi-clause IME の主要導線を QEMU 上で回帰検知できる |
 
 - `RT-124` の tracking は GitHub Issue #25 とし、`test-qemu-ime` が通常 runlevel に入らず rescue 経由で不安定になる blocker は GitHub Issue #24 で追跡する
+
+## M19: shell の stderr redirection と pager
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | RT-125 | `shell_command` を順序付き redirection action 配列へ拡張し、fd 指定 redirection を表現できるようにする | RT-40, RT-70 | `input_path` / `output_path` 固定 model なしで `2>&1` 系を保持できる |
+| [ ] | RT-126 | tokenizer / parser を更新し、`2>`, `2>>`, `2>&1`, `1>&2` を左から右の順序付き action として解釈できるようにする | RT-125 | shell AST 上で advanced redirection の順序差を失わない |
+| [ ] | RT-127 | shell executor に fd remap / dup / restore helper を追加し、builtin / pipeline / background 実行で advanced redirection を通す | RT-126 | `cmd > out 2>&1` と `cmd 2>&1 > out` の差を実行時に再現できる |
+| [ ] | RT-128 | shell 本体と代表 command 群の診断を stderr へ寄せ、stdout / stderr 分離の意味を揃える | RT-127 | `2>` と `2>&1` が代表 command 群で期待通り効く |
+| [ ] | RT-129 | shell parser / executor の host/QEMU smoke を拡張し、stdout / stderr 分離、merge、append の回帰を検知できるようにする | RT-128 | `2>`, `2>>`, `2>&1`, `> file 2>&1` の主要導線を固定できる |
+| [ ] | RT-130 | reusable な pager core を追加し、UTF-8 / wide char 前提の page 単位表示、prompt、stdin/file source を扱えるようにする | RT-129, RT-52 | `more` / `less` から共有できる paging 基盤が揃う |
+| [ ] | RT-131 | `/usr/bin/more` を追加し、`Space`, `Enter`, `b`, `q` の最小操作で pipe / file の長文を読めるようにする | RT-130 | `cmd | more` と `more file.log` が guest 内で成立する |
+| [ ] | RT-132 | `/usr/bin/less` の最小 subset を追加し、後退、先頭/末尾移動、検索の基本操作を通す | RT-130, RT-131 | `less file.log` で前後移動と検索が成立する |
+| [ ] | RT-133 | pager の host test と QEMU smoke / reference data を追加し、長文閲覧と shell 復帰を回帰検知できるようにする | RT-131, RT-132 | pager workflow を host / QEMU の両方で固定できる |
 
 ## 先送りする項目
 

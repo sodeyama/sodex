@@ -298,6 +298,93 @@ TEST(utf8_filename_completion_keeps_utf8) {
     cleanup_tree(case_dir);
 }
 
+TEST(dot_relative_path_completion_keeps_prefix) {
+    struct shell_completion_state state;
+    char case_dir[256];
+    char path[320];
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(path, sizeof(path), case_dir, "alpha.txt"));
+    ASSERT(write_text_file(path, ""));
+
+    shell_completion_state_init(&state);
+    shell_completion_state_set_shell_pid(&state, 42);
+    observe_prompt(&state, case_dir);
+
+    ASSERT_EQ(feed_text(&state, "cat ./alp"), 9);
+    ASSERT(complete_once(&state, 0) > 0);
+    ASSERT_STR_EQ(shell_completion_state_line(&state), "cat ./alpha.txt ");
+
+    cleanup_tree(case_dir);
+}
+
+TEST(parent_relative_path_completion_keeps_prefix) {
+    struct shell_completion_state state;
+    char case_dir[256];
+    char child_dir[320];
+    char path[320];
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(child_dir, sizeof(child_dir), case_dir, "child"));
+    ASSERT_EQ(mkdir(child_dir, 0755), 0);
+    ASSERT(join_path(path, sizeof(path), case_dir, "parent.txt"));
+    ASSERT(write_text_file(path, ""));
+
+    shell_completion_state_init(&state);
+    shell_completion_state_set_shell_pid(&state, 42);
+    observe_prompt(&state, child_dir);
+
+    ASSERT_EQ(feed_text(&state, "cat ../par"), 10);
+    ASSERT(complete_once(&state, 0) > 0);
+    ASSERT_STR_EQ(shell_completion_state_line(&state), "cat ../parent.txt ");
+
+    cleanup_tree(case_dir);
+}
+
+TEST(absolute_path_completion_keeps_prefix) {
+    struct shell_completion_state state;
+    char case_dir[256];
+    char path[320];
+    char input[384];
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(path, sizeof(path), case_dir, "absolute.txt"));
+    ASSERT(write_text_file(path, ""));
+    ASSERT(snprintf(input, sizeof(input), "cat %s/abs", case_dir) < (int)sizeof(input));
+
+    shell_completion_state_init(&state);
+    shell_completion_state_set_shell_pid(&state, 42);
+    observe_prompt(&state, "/home/user");
+
+    ASSERT_EQ(feed_text(&state, input), (int)strlen(input));
+    ASSERT(complete_once(&state, 0) > 0);
+    ASSERT(snprintf(input, sizeof(input), "cat %s/absolute.txt ", case_dir) <
+           (int)sizeof(input));
+    ASSERT_STR_EQ(shell_completion_state_line(&state), input);
+
+    cleanup_tree(case_dir);
+}
+
+TEST(hidden_file_completion_requires_dot_prefix) {
+    struct shell_completion_state state;
+    char case_dir[256];
+    char path[320];
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(path, sizeof(path), case_dir, ".hidden.txt"));
+    ASSERT(write_text_file(path, ""));
+
+    shell_completion_state_init(&state);
+    shell_completion_state_set_shell_pid(&state, 42);
+    observe_prompt(&state, case_dir);
+
+    ASSERT_EQ(feed_text(&state, "cat .hi"), 7);
+    ASSERT(complete_once(&state, 0) > 0);
+    ASSERT_STR_EQ(shell_completion_state_line(&state), "cat .hidden.txt ");
+
+    cleanup_tree(case_dir);
+}
+
 TEST(unsupported_control_invalidates_until_newline_output) {
     struct shell_completion_state state;
     char ctrl_a = 0x01;
@@ -345,6 +432,10 @@ int main(void)
     RUN_TEST(quoted_completion_preserves_open_quote);
     RUN_TEST(redirection_completion_targets_last_word);
     RUN_TEST(utf8_filename_completion_keeps_utf8);
+    RUN_TEST(dot_relative_path_completion_keeps_prefix);
+    RUN_TEST(parent_relative_path_completion_keeps_prefix);
+    RUN_TEST(absolute_path_completion_keeps_prefix);
+    RUN_TEST(hidden_file_completion_requires_dot_prefix);
     RUN_TEST(unsupported_control_invalidates_until_newline_output);
     RUN_TEST(foreground_child_output_invalidates_tracking);
 

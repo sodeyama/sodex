@@ -14,6 +14,9 @@ termios / foreground pid の問い合わせをすでに持っている。
 この plan では初期実装のタブ補完を `term` 側へ置き、
 shell prompt 上の canonical 入力に対してだけ
 path 補完と候補巡回を提供する。
+あわせて実運用の `ssh -tt` 経路では overlay を持たない
+inline 補完を relay 側に追加し、
+local `term` と同じ path completion を遠隔 shell でも使えるようにする。
 最初のゴールは `cat hoge_` で Tab を押すと候補が絞られ、
 一意ならその場で補完され、複数候補なら Tab / Shift+Tab で巡回できる状態。
 
@@ -56,6 +59,9 @@ path 補完と候補巡回を提供する。
 - 候補 UI は `term` overlay を再利用する
   - 一意補完時は inline 更新だけ
   - 複数候補時は overlay で件数と現在候補を見せる
+- `ssh` relay は framebuffer overlay を持たないため
+  - `Tab` による inline 補完だけを受け持つ
+  - 候補 UI や `Shift+Tab` は `term` 側の責務に残す
 
 ## 非ゴール
 
@@ -114,10 +120,12 @@ path 補完と候補巡回を提供する。
 - 既存
   - `src/usr/command/term.c`
   - `src/usr/command/eshell.c`
+  - `src/net/ssh_server.c`
   - `src/usr/include/key.h`
   - `src/usr/include/termios.h`
   - `src/usr/lib/libagent/tool_list_dir.c`
   - `src/test/run_qemu_shell_io_smoke.py`
+  - `src/test/run_qemu_ssh_smoke.py`
   - `tests/Makefile`
 - 新規候補
   - `src/usr/lib/libc/shell_completion.c`
@@ -134,6 +142,7 @@ path 補完と候補巡回を提供する。
 - `Esc` で補完 state を破棄し、元の prefix に戻せる
 - 日本語 filename の prefix でも UTF-8 を壊さず補完できる
 - `vi` 起動中や IME conversion 中には補完が誤発火しない
+- `ssh -tt` で開いた shell prompt でも `cat hoge_` + `Tab` が補完される
 - QEMU 上でも screenshot / 実ファイル操作の両方で回帰を検知できる
 
 ## 完了条件

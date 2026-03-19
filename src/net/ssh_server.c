@@ -549,6 +549,10 @@ PUBLIC int sys_kill(pid_t pid, int sig)
 #include <ssh_channel_core.h>
 #include <ssh_crypto.h>
 #include <ssh_runtime_policy.h>
+#ifdef USERLAND_SSHD_BUILD
+#include "../usr/include/key.h"
+#include "../usr/include/shell_completion.h"
+#endif
 
 #ifndef TEST_BUILD
 
@@ -655,6 +659,9 @@ struct ssh_channel_state {
   u_int16_t rows;
   struct tty *tty;
   pid_t shell_pid;
+#ifdef USERLAND_SSHD_BUILD
+  struct shell_completion_state completion;
+#endif
 };
 
 struct ssh_connection {
@@ -752,6 +759,23 @@ PRIVATE void ssh_output_metrics_feed_bytes(struct ssh_connection *conn,
                                            const char *data, int len);
 PRIVATE void ssh_output_metrics_note_packet(struct ssh_connection *conn,
                                             int len);
+#ifdef USERLAND_SSHD_BUILD
+PRIVATE int ssh_completion_context(struct ssh_connection *conn,
+                                   pid_t *foreground_pid,
+                                   u_int32_t *lflag);
+PRIVATE void ssh_completion_feed_input(struct ssh_connection *conn,
+                                       const char *buf, int len,
+                                       pid_t foreground_pid,
+                                       u_int32_t lflag);
+PRIVATE void ssh_completion_write(struct ssh_connection *conn,
+                                  const char *buf, int len,
+                                  pid_t foreground_pid,
+                                  u_int32_t lflag);
+PRIVATE int ssh_handle_completion_input(struct ssh_connection *conn,
+                                        u_int8_t ch,
+                                        pid_t foreground_pid,
+                                        u_int32_t lflag);
+#endif
 
 PRIVATE u_int32_t ssh_runtime_random_rotl(u_int32_t value, int bits)
 {
@@ -1224,6 +1248,10 @@ PRIVATE int ssh_reset_channel(struct ssh_channel_state *channel)
   channel->peer_max_packet = SSH_CHANNEL_MAX_PACKET;
   channel->local_id = 0;
   channel->shell_pid = -1;
+#ifdef USERLAND_SSHD_BUILD
+  shell_completion_state_init(&channel->completion);
+  shell_completion_state_set_shell_pid(&channel->completion, -1);
+#endif
   return 0;
 }
 
@@ -2199,6 +2227,10 @@ PRIVATE int ssh_start_pending_shell(struct ssh_connection *conn)
   conn->channel.shell_start_tick = 0;
   conn->channel.shell_started_tick = kernel_tick;
   conn->channel.prompt_kick_pending = TRUE;
+#ifdef USERLAND_SSHD_BUILD
+  shell_completion_state_reset(&conn->channel.completion);
+  shell_completion_state_set_shell_pid(&conn->channel.completion, pid);
+#endif
   server_audit_line("ssh_spawn_ok");
   ssh_audit_start(conn->peer_addr, pid);
   if (conn->channel.shell_reply_pending) {
@@ -2437,11 +2469,31 @@ PRIVATE int ssh_handle_channel_data(struct ssh_connection *conn,
 
   conn->last_activity_tick = kernel_tick;
   {
+#ifdef USERLAND_SSHD_BUILD
+    pid_t foreground_pid = -1;
+    u_int32_t lflag = 0;
+#endif
     int i;
 
+#ifdef USERLAND_SSHD_BUILD
+    ssh_completion_context(conn, &foreground_pid, &lflag);
+#endif
     for (i = 0; i < request.data_len; i++) {
       if (request.data[i] == 0x03)
         ssh_interrupt_foreground(conn);
+#ifdef USERLAND_SSHD_BUILD
+      if (ssh_handle_completion_input(conn,
+                                      request.data[i],
+                                      foreground_pid,
+                                      lflag) != 0) {
+        continue;
+      }
+      ssh_completion_feed_input(conn,
+                                (const char *)(request.data + i),
+                                1,
+                                foreground_pid,
+                                lflag);
+#endif
       tty_master_write(conn->channel.tty, request.data + i, 1);
     }
   }
@@ -2697,6 +2749,93 @@ PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn)
   sys_kill(pid, SIGINT);
 }
 
+#ifdef USERLAND_SSHD_BUILD
+PRIVATE int ssh_completion_context(struct ssh_connection *conn,
+                                   pid_t *foreground_pid,
+                                   u_int32_t *lflag)
+{
+  struct termios termios;
+
+  if (conn == 0 || conn->channel.tty == 0 ||
+      foreground_pid == 0 || lflag == 0) {
+    return -1;
+  }
+
+  *foreground_pid = tty_get_foreground_pid(conn->channel.tty);
+  if (tcgetattr(conn->channel.tty->fd, &termios) < 0)
+    return -1;
+  *lflag = termios.c_lflag;
+  return 0;
+}
+
+PRIVATE void ssh_completion_feed_input(struct ssh_connection *conn,
+                                       const char *buf, int len,
+                                       pid_t foreground_pid,
+                                       u_int32_t lflag)
+{
+  if (conn == 0 || buf == 0 || len <= 0)
+    return;
+
+  if (shell_completion_state_can_track(&conn->channel.completion,
+                                       foreground_pid,
+                                       lflag) == 0) {
+    return;
+  }
+  shell_completion_state_feed_input(&conn->channel.completion, buf, len);
+}
+
+PRIVATE void ssh_completion_write(struct ssh_connection *conn,
+                                  const char *buf, int len,
+                                  pid_t foreground_pid,
+                                  u_int32_t lflag)
+{
+  if (conn == 0 || conn->channel.tty == 0 || buf == 0 || len <= 0)
+    return;
+
+  ssh_completion_feed_input(conn, buf, len, foreground_pid, lflag);
+  tty_master_write(conn->channel.tty, buf, (size_t)len);
+}
+
+PRIVATE int ssh_handle_completion_input(struct ssh_connection *conn,
+                                        u_int8_t ch,
+                                        pid_t foreground_pid,
+                                        u_int32_t lflag)
+{
+  char buf[SHELL_COMPLETION_LINE_MAX * 2];
+  int len;
+
+  if (conn == 0 || conn->channel.tty == 0)
+    return 0;
+
+  if (shell_completion_state_active(&conn->channel.completion) != 0) {
+    if (ch == KEY_TAB) {
+      len = shell_completion_state_complete(&conn->channel.completion,
+                                            FALSE,
+                                            buf, sizeof(buf));
+      ssh_completion_write(conn, buf, len, foreground_pid, lflag);
+      return 1;
+    }
+    shell_completion_state_finish_completion(&conn->channel.completion);
+    return 0;
+  }
+
+  if (ch != KEY_TAB)
+    return 0;
+  if (shell_completion_state_can_complete(&conn->channel.completion,
+                                          foreground_pid,
+                                          lflag,
+                                          FALSE) == 0) {
+    return 0;
+  }
+
+  len = shell_completion_state_complete(&conn->channel.completion,
+                                        FALSE,
+                                        buf, sizeof(buf));
+  ssh_completion_write(conn, buf, len, foreground_pid, lflag);
+  return 1;
+}
+#endif
+
 PRIVATE int ssh_translate_tty_chunk(struct ssh_connection *conn,
                                     const char *src, int src_len,
                                     char *dest, int dest_cap,
@@ -2813,6 +2952,12 @@ PRIVATE void ssh_pump_tty_to_channel(struct ssh_connection *conn)
                                          &consumed_len);
       if (send_len <= 0 || consumed_len <= 0)
         break;
+#ifdef USERLAND_SSHD_BUILD
+      shell_completion_state_observe_output(&conn->channel.completion,
+                                            ssh_tty_raw_chunk + raw_offset,
+                                            consumed_len,
+                                            tty_get_foreground_pid(conn->channel.tty));
+#endif
       raw_offset += consumed_len;
       ssh_output_metrics_feed_bytes(conn, ssh_tty_cooked_chunk, send_len);
       if (ssh_queue_channel_data(conn,

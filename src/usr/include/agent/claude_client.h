@@ -25,7 +25,7 @@ typedef void (*claude_stream_text_fn)(const char *text,
  * 複数 tool を往復する調査ターンで会話が膨らみやすいので、
  * compact 前でも十分持てるよう大きめに確保する。 */
 #define CLAUDE_SINGLE_REQUEST_BUF        16384
-#define CLAUDE_CONVERSATION_REQUEST_BUF 131072
+#define CLAUDE_CONVERSATION_REQUEST_BUF 1048576
 
 /*
  * Send a simple text message and receive streaming response.

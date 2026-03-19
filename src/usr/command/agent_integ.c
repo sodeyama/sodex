@@ -569,6 +569,42 @@ static void test_scenario_current_weather_requires_tool(void)
     }
 }
 
+/* ----- Scenario 12: text-only planning must retry through tools ----- */
+static void test_scenario_current_weather_retry_after_text_only(void)
+{
+    int ret;
+
+    agent_config_init(&s_config);
+    s_config.max_steps = 5;
+    s_config.api_key = "test-key-mock";
+    s_config.provider = &mock_prov;
+
+    debug_printf("[AGENT-INTEG] scenario 12: retry after text-only plan\n");
+    printf("[AGENT-INTEG] scenario 12: retry after text-only plan\n");
+
+    ret = agent_run(&s_config,
+                    "東京の天気しらべて test_current_weather_retry_after_text_only",
+                    &s_result);
+
+    if (ret == 0 && s_result.stop_reason == AGENT_STOP_END_TURN) {
+        if (s_result.steps_executed == 3 &&
+            s_result.total_tool_calls == 1 &&
+            strstr(s_result.final_text, "http://127.0.0.1:18081/weather/tokyo") != 0) {
+            TEST_PASS("scenario_12_current_weather_retry_after_text_only");
+        } else {
+            char msg[192];
+            snprintf(msg, sizeof(msg), "steps=%d tools=%d text=%s",
+                     s_result.steps_executed, s_result.total_tool_calls,
+                     s_result.final_text);
+            TEST_FAIL("scenario_12_current_weather_retry_after_text_only", msg);
+        }
+    } else {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "ret=%d, stop=%d", ret, s_result.stop_reason);
+        TEST_FAIL("scenario_12_current_weather_retry_after_text_only", msg);
+    }
+}
+
 /* ---- Main ---- */
 int main(int argc, char *argv[])
 {
@@ -604,6 +640,7 @@ int main(int argc, char *argv[])
     test_scenario_perm_blocked();
     test_scenario_fetch_url_weather();
     test_scenario_current_weather_requires_tool();
+    test_scenario_current_weather_retry_after_text_only();
 
     /* Summary */
     debug_printf("[AGENT-INTEG] === RESULT: %d/%d passed ===\n",

@@ -51,6 +51,10 @@ static const char FRESH_LOOKUP_PROMPT_PREFIX[] =
     "URL が確定しているなら fetch_url を優先し、"
     "source URL を含めて回答してください。\n\n"
     "ユーザー依頼:\n";
+static const char FRESH_LOOKUP_RETRY_PROMPT[] =
+    "前の応答は調査方針の説明だけで、まだ tool で確認していません。"
+    "今のターンでは少なくとも1回 tool を使って確認し、"
+    "source URL を含めて回答してください。";
 
 PRIVATE void emit_agent_event(const struct agent_event *event)
 {
@@ -112,6 +116,21 @@ static const char *build_effective_user_prompt(const char *user_prompt,
     memcpy(buf + prefix_len, user_prompt, (size_t)prompt_len);
     buf[prefix_len + prompt_len] = '\0';
     return buf;
+}
+
+static int agent_turn_requires_tool_lookup(const struct agent_state *state)
+{
+    if (!state)
+        return 0;
+    return state->current_turn_requires_tool &&
+           !state->current_turn_used_tool;
+}
+
+static int append_fresh_lookup_retry(struct agent_state *state)
+{
+    if (!state)
+        return -1;
+    return conv_add_user_text(&state->conv, FRESH_LOOKUP_RETRY_PROMPT);
 }
 
 #ifndef TEST_BUILD
@@ -639,6 +658,15 @@ static int agent_run_loop(
         /* Check stop reason */
         switch (resp.stop_reason) {
         case CLAUDE_STOP_END_TURN:
+            if (agent_turn_requires_tool_lookup(state)) {
+                debug_printf("[AGENT] end_turn without tool; retrying fresh lookup\n");
+                if (append_fresh_lookup_retry(state) < 0) {
+                    fill_result(result, state, AGENT_STOP_ERROR, step + 1);
+                    debug_printf("[AGENT] failed to append retry prompt\n");
+                    return -1;
+                }
+                break;
+            }
             /* Natural completion */
             extract_final_text(&resp, result);
             fill_result(result, state, AGENT_STOP_END_TURN, step + 1);
@@ -660,6 +688,7 @@ static int agent_run_loop(
             for (i = 0; i < resp.block_count; i++) {
                 if (resp.blocks[i].type != CLAUDE_CONTENT_TOOL_USE)
                     continue;
+                state->current_turn_used_tool = 1;
 
                 /* Check terminal tool */
                 if (config->terminal_tool &&
@@ -874,6 +903,8 @@ int agent_run_turn(
     effective_prompt = build_effective_user_prompt(user_prompt,
                                                    effective_prompt_buf,
                                                    sizeof(effective_prompt_buf));
+    state->current_turn_requires_tool = prompt_needs_fresh_lookup(user_prompt);
+    state->current_turn_used_tool = 0;
     tool_init();
     if (conv_add_user_text(&state->conv, effective_prompt) < 0)
         return -1;

@@ -69,6 +69,8 @@ struct agent_state {
     int  total_api_calls;
     int  total_tool_executions;
     int  total_errors;
+    int  current_turn_requires_tool;
+    int  current_turn_used_tool;
 };
 
 /* Agent execution result */

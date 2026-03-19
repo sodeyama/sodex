@@ -238,3 +238,37 @@ int agent_tool_result_is_failure(const char *result_json, int result_len,
     }
     return 0;
 }
+
+int agent_tool_result_same_failure(const char *tool_name_a,
+                                   const char *result_json_a,
+                                   int result_len_a,
+                                   int is_error_a,
+                                   const char *tool_name_b,
+                                   const char *result_json_b,
+                                   int result_len_b,
+                                   int is_error_b)
+{
+    if (is_error_a != is_error_b)
+        return 0;
+
+    if (!tool_name_a)
+        tool_name_a = "";
+    if (!tool_name_b)
+        tool_name_b = "";
+    if (strcmp(tool_name_a, tool_name_b) != 0)
+        return 0;
+
+    if (!result_json_a)
+        result_json_a = "";
+    if (!result_json_b)
+        result_json_b = "";
+    if (result_len_a < 0)
+        result_len_a = strlen(result_json_a);
+    if (result_len_b < 0)
+        result_len_b = strlen(result_json_b);
+    if (result_len_a != result_len_b)
+        return 0;
+    if (result_len_a <= 0)
+        return 1;
+    return memcmp(result_json_a, result_json_b, (size_t)result_len_a) == 0;
+}

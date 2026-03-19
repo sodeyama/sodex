@@ -120,6 +120,49 @@ static void test_tool_result_failure_detection(void)
     TEST_PASS("tool_result_failure_detection");
 }
 
+static void test_same_failure_detection(void)
+{
+    static const char failure_a[] =
+        "{\"command\":\"websearch 立川 天気\",\"exit_code\":1,"
+        "\"output\":\"websearch: JSON parse error (-2)\"}";
+    static const char failure_b[] =
+        "{\"command\":\"websearch 立川 天気\",\"exit_code\":1,"
+        "\"output\":\"websearch: JSON parse error (-2)\"}";
+    static const char failure_c[] =
+        "{\"command\":\"websearch 東京 天気\",\"exit_code\":1,"
+        "\"output\":\"websearch: JSON parse error (-2)\"}";
+
+    TEST_START("same_failure_detection");
+    ASSERT(agent_tool_result_same_failure("run_command",
+                                          failure_a,
+                                          strlen(failure_a),
+                                          0,
+                                          "run_command",
+                                          failure_b,
+                                          strlen(failure_b),
+                                          0) == 1,
+           "same failure should match");
+    ASSERT(agent_tool_result_same_failure("run_command",
+                                          failure_a,
+                                          strlen(failure_a),
+                                          0,
+                                          "run_command",
+                                          failure_c,
+                                          strlen(failure_c),
+                                          0) == 0,
+           "different command should not match");
+    ASSERT(agent_tool_result_same_failure("run_command",
+                                          failure_a,
+                                          strlen(failure_a),
+                                          0,
+                                          "fetch_url",
+                                          failure_b,
+                                          strlen(failure_b),
+                                          0) == 0,
+           "different tool should not match");
+    TEST_PASS("same_failure_detection");
+}
+
 int main(void)
 {
     printf("=== agent repl cli tests ===\n\n");
@@ -127,6 +170,7 @@ int main(void)
     test_text_layout_wraps_sentences();
     test_text_layout_wraps_ascii_width();
     test_tool_result_failure_detection();
+    test_same_failure_detection();
     printf("\n=== RESULT: %d passed, %d failed ===\n", passed, failed);
     return failed ? 1 : 0;
 }

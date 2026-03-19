@@ -25,11 +25,12 @@
 #define API_KEY_PATH       "/etc/claude.conf"
 #define API_KEY_MAX        256
 #define PROMPT_MAX         2048
-#define AGENT_PATH_MAX     PATHNAME_MAX
+#define AGENT_CLI_PATH_MAX PATHNAME_MAX
 #define REPL_PROMPT_MAX    384
 #define COMPACT_KEEP_TURNS 8
 #define COMPACT_SUMMARY_MAX 1024
 #define AGENT_RENDER_BUF_MAX ((AGENT_MAX_RESPONSE * 2) + 64)
+#define AGENT_FAILURE_RESULT_MAX 4096
 
 enum agent_cli_mode {
     AGENT_MODE_REPL = 0,
@@ -56,6 +57,11 @@ struct agent_cli_render_state {
     int terminal_cols;
     int loading_visible;
     int spinner_index;
+    int last_failure_valid;
+    int last_failure_is_error;
+    int last_failure_result_len;
+    char last_failure_tool[CLAUDE_MAX_TOOL_NAME];
+    char last_failure_result[AGENT_FAILURE_RESULT_MAX];
 };
 
 static struct agent_cli_render_state s_cli;
@@ -76,6 +82,15 @@ static void reset_render_state(void)
     agent_text_layout_init(&s_cli.layout, s_cli.terminal_cols);
 }
 
+static void clear_last_failure(void)
+{
+    s_cli.last_failure_valid = 0;
+    s_cli.last_failure_is_error = 0;
+    s_cli.last_failure_result_len = 0;
+    s_cli.last_failure_tool[0] = '\0';
+    s_cli.last_failure_result[0] = '\0';
+}
+
 static void render_newline(void)
 {
     write(STDOUT_FILENO, "\n", 1);
@@ -85,25 +100,54 @@ static void render_newline(void)
 
 static void clear_loading_line(void)
 {
-    char spaces[64];
-    int remain;
+    static const char clear_seq[] = "\r\033[2K\r";
 
     if (!s_cli.loading_visible)
         return;
 
-    write(STDOUT_FILENO, "\r", 1);
-    memset(spaces, ' ', sizeof(spaces));
-    remain = s_cli.terminal_cols;
-    while (remain > 0) {
-        int chunk = remain;
-
-        if (chunk > (int)sizeof(spaces))
-            chunk = sizeof(spaces);
-        write(STDOUT_FILENO, spaces, (size_t)chunk);
-        remain -= chunk;
-    }
-    write(STDOUT_FILENO, "\r", 1);
+    write(STDOUT_FILENO, clear_seq, sizeof(clear_seq) - 1);
     s_cli.loading_visible = 0;
+}
+
+static int is_same_tool_failure(const struct agent_event *event)
+{
+    if (!event || !s_cli.last_failure_valid)
+        return 0;
+
+    return agent_tool_result_same_failure(s_cli.last_failure_tool,
+                                          s_cli.last_failure_result,
+                                          s_cli.last_failure_result_len,
+                                          s_cli.last_failure_is_error,
+                                          event->tool_name,
+                                          event->tool_result_json,
+                                          event->tool_result_len,
+                                          event->tool_is_error);
+}
+
+static void remember_tool_failure(const struct agent_event *event)
+{
+    int copy_len = 0;
+
+    clear_last_failure();
+    if (!event)
+        return;
+
+    if (event->tool_name) {
+        strncpy(s_cli.last_failure_tool, event->tool_name,
+                sizeof(s_cli.last_failure_tool) - 1);
+        s_cli.last_failure_tool[sizeof(s_cli.last_failure_tool) - 1] = '\0';
+    }
+    if (event->tool_result_json && event->tool_result_len > 0) {
+        copy_len = event->tool_result_len;
+        if (copy_len >= AGENT_FAILURE_RESULT_MAX)
+            copy_len = AGENT_FAILURE_RESULT_MAX - 1;
+        memcpy(s_cli.last_failure_result, event->tool_result_json,
+               (size_t)copy_len);
+        s_cli.last_failure_result[copy_len] = '\0';
+    }
+    s_cli.last_failure_result_len = copy_len;
+    s_cli.last_failure_is_error = event->tool_is_error;
+    s_cli.last_failure_valid = 1;
 }
 
 static void write_rendered_text(const char *text, int text_len)
@@ -152,7 +196,7 @@ static void show_loading_line(const char *label)
     s_cli.loading_visible = 1;
 }
 
-static void print_tool_failure(const struct agent_event *event)
+static int print_tool_failure(const struct agent_event *event)
 {
     static char command[256];
     static char message[1024];
@@ -163,9 +207,15 @@ static void print_tool_failure(const struct agent_event *event)
     int len;
 
     if (!event)
-        return;
+        return 0;
+
+    if (is_same_tool_failure(event)) {
+        clear_loading_line();
+        return 1;
+    }
 
     clear_loading_line();
+    remember_tool_failure(event);
     command[0] = '\0';
     message[0] = '\0';
 
@@ -229,6 +279,7 @@ static void print_tool_failure(const struct agent_event *event)
         if (s_cli.layout.current_col != 0)
             render_newline();
     }
+    return 0;
 }
 
 static void repl_agent_event(const struct agent_event *event, void *userdata)
@@ -252,9 +303,12 @@ static void repl_agent_event(const struct agent_event *event, void *userdata)
         if (agent_tool_result_is_failure(event->tool_result_json,
                                          event->tool_result_len,
                                          event->tool_is_error)) {
-            print_tool_failure(event);
-            show_loading_line("再調査中...");
+            if (print_tool_failure(event) != 0)
+                show_loading_line("同じ失敗を再試行中...");
+            else
+                show_loading_line("再調査中...");
         } else {
+            clear_last_failure();
             show_loading_line("応答を整理中...");
         }
         break;
@@ -593,7 +647,7 @@ static void print_sessions(void)
 
 static int resolve_continue_session(char *session_id, int cap)
 {
-    static char cwd[AGENT_PATH_MAX];
+    static char cwd[AGENT_CLI_PATH_MAX];
 
     if (!session_id || cap <= 0)
         return -1;
@@ -633,7 +687,7 @@ static int pick_resume_session(char *session_id, int cap)
 static int start_new_session(struct agent_state *state,
                              struct session_meta *session)
 {
-    static char cwd[AGENT_PATH_MAX];
+    static char cwd[AGENT_CLI_PATH_MAX];
 
     if (!state || !session)
         return -1;
@@ -684,7 +738,7 @@ static void print_status(const struct agent_state *state,
 static void print_memory_sources(void)
 {
     static struct agent_memory_source sources[AGENT_MEMORY_SOURCE_MAX];
-    static char cwd[AGENT_PATH_MAX];
+    static char cwd[AGENT_CLI_PATH_MAX];
     static char buf[512];
     int count;
     int i;
@@ -711,8 +765,8 @@ static int append_workspace_memory_note(struct agent_state *state,
                                         const char *note,
                                         int quiet)
 {
-    static char cwd[AGENT_PATH_MAX];
-    static char path[AGENT_PATH_MAX];
+    static char cwd[AGENT_CLI_PATH_MAX];
+    static char path[AGENT_CLI_PATH_MAX];
     int ret;
 
     if (!state || !note || !*note)
@@ -881,7 +935,7 @@ static int run_single_turn(struct agent_state *state,
 static int print_repl_prompt(const struct agent_state *state,
                              const struct session_meta *session)
 {
-    static char cwd[AGENT_PATH_MAX];
+    static char cwd[AGENT_CLI_PATH_MAX];
     static char prompt[REPL_PROMPT_MAX];
     int total_tokens;
     int ctx_percent;

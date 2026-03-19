@@ -137,6 +137,14 @@ int agent_tool_result_get_exit_code(const char *result_json, int result_len,
                                     int *exit_code);
 int agent_tool_result_is_failure(const char *result_json, int result_len,
                                  int is_error);
+int agent_tool_result_same_failure(const char *tool_name_a,
+                                   const char *result_json_a,
+                                   int result_len_a,
+                                   int is_error_a,
+                                   const char *tool_name_b,
+                                   const char *result_json_b,
+                                   int result_len_b,
+                                   int is_error_b);
 
 /* Single step (for testing) */
 int agent_step(

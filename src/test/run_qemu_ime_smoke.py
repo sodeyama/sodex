@@ -379,7 +379,7 @@ def main() -> int:
 
         monitor.send_text("touch ")
         monitor.send_hankaku_zenkaku()
-        monitor.send_text("kanji")
+        monitor.send_text("kannji")
         monitor.send_key("spc")
         wait_for_screen_best_effort(monitor, overlay_ppm, conversion_overlay_reference, timeout, "conversion overlay")
         monitor.send_key("ret")
@@ -411,7 +411,7 @@ def main() -> int:
         monitor.send_muhenkan()
         monitor.send_text(" ")
         monitor.send_henkan()
-        monitor.send_text("kanji")
+        monitor.send_text("kannji")
         monitor.send_key("spc")
         monitor.send_key("right")
         monitor.send_key("ret")

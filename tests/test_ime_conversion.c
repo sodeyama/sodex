@@ -203,7 +203,7 @@ TEST(common_city_and_weather_terms_convert_from_expanded_dictionary) {
 
     ime_init(&ime);
     ime_set_mode(&ime, IME_MODE_HIRAGANA);
-    ASSERT_EQ(feed_text(&ime, "tenki", out), 9);
+    ASSERT_EQ(feed_text(&ime, "tennki", out), 9);
     ASSERT_STR_EQ(ime_reading(&ime), "てんき");
     ASSERT_EQ(ime_start_conversion(&ime), 1);
     ASSERT_STR_EQ(ime_current_candidate(&ime), "天気");
@@ -261,7 +261,7 @@ TEST(backspace_drops_last_reading_char_and_cancels_conversion) {
     ASSERT_EQ(configure_dictionary(), 0);
     ime_init(&ime);
     ime_set_mode(&ime, IME_MODE_HIRAGANA);
-    ASSERT_EQ(feed_text(&ime, "kanji", out), 9);
+    ASSERT_EQ(feed_text(&ime, "kannji", out), 9);
     ASSERT_EQ(ime_start_conversion(&ime), 1);
     ASSERT_EQ(ime_drop_last_reading_char(&ime), 1);
     ASSERT_EQ(ime_conversion_active(&ime), 0);

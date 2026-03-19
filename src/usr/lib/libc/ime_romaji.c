@@ -351,20 +351,20 @@ static int ime_process_preedit(struct ime_state *state, int force,
       }
       if (state->preedit_len >= 2 && state->preedit[1] == 'n') {
         if (state->preedit_len >= 3 || force != 0) {
+          int consumed = 1;
+
+          if (state->preedit_len >= 3) {
+            if (ime_is_vowel(state->preedit[2]) == 0)
+              consumed = 2;
+          } else if (force != 0) {
+            consumed = 2;
+          }
           out_len = ime_emit_codepoint(state, 0x3093U, out, out_len, out_cap);
           if (out_len < 0)
             return -1;
-          ime_consume_preedit(state, force != 0 && state->preedit_len == 2 ? 2 : 1);
+          ime_consume_preedit(state, consumed);
           continue;
         }
-      } else if (state->preedit_len >= 2 &&
-                 ime_is_consonant(state->preedit[1]) != 0 &&
-                 state->preedit[1] != 'y') {
-        out_len = ime_emit_codepoint(state, 0x3093U, out, out_len, out_cap);
-        if (out_len < 0)
-          return -1;
-        ime_consume_preedit(state, 1);
-        continue;
       } else if (force != 0 && state->preedit_len == 1) {
         out_len = ime_emit_codepoint(state, 0x3093U, out, out_len, out_cap);
         if (out_len < 0)

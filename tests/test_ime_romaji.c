@@ -37,7 +37,7 @@ static void assert_codepoints(const char *text, int len,
     ASSERT_EQ(index, len);
 }
 
-TEST(nihongo_becomes_hiragana) {
+TEST(nihonngo_becomes_hiragana) {
     struct ime_state ime;
     char out[TEST_BUF_SIZE];
     int len;
@@ -45,7 +45,7 @@ TEST(nihongo_becomes_hiragana) {
 
     ime_init(&ime);
     ime_cycle_mode(&ime);
-    len = feed_text(&ime, "nihongo", out);
+    len = feed_text(&ime, "nihonngo", out);
     ASSERT_EQ(len, 12);
     ASSERT_STR_EQ(ime_preedit(&ime), "");
     assert_codepoints(out, len, expected, 4);
@@ -76,6 +76,34 @@ TEST(double_consonant_becomes_small_tsu) {
     len = feed_text(&ime, "kitte", out);
     ASSERT_EQ(len, 9);
     assert_codepoints(out, len, expected, 3);
+}
+
+TEST(double_n_before_consonant_becomes_n) {
+    struct ime_state ime;
+    char out[TEST_BUF_SIZE];
+    int len;
+    const unsigned int expected[] = {0x3066, 0x3093, 0x304D};
+
+    ime_init(&ime);
+    ime_cycle_mode(&ime);
+    len = feed_text(&ime, "tennki", out);
+    ASSERT_EQ(len, 9);
+    ASSERT_STR_EQ(ime_preedit(&ime), "");
+    assert_codepoints(out, len, expected, 3);
+}
+
+TEST(double_n_before_vowel_keeps_n_row) {
+    struct ime_state ime;
+    char out[TEST_BUF_SIZE];
+    int len;
+    const unsigned int expected[] = {0x3093, 0x306A};
+
+    ime_init(&ime);
+    ime_cycle_mode(&ime);
+    len = feed_text(&ime, "nna", out);
+    ASSERT_EQ(len, 6);
+    ASSERT_STR_EQ(ime_preedit(&ime), "");
+    assert_codepoints(out, len, expected, 2);
 }
 
 TEST(single_n_flushes_to_n) {
@@ -129,9 +157,11 @@ int main(void)
 {
     printf("=== ime romaji tests ===\n");
 
-    RUN_TEST(nihongo_becomes_hiragana);
+    RUN_TEST(nihonngo_becomes_hiragana);
     RUN_TEST(katakana_mode_uses_same_romaji_table);
     RUN_TEST(double_consonant_becomes_small_tsu);
+    RUN_TEST(double_n_before_consonant_becomes_n);
+    RUN_TEST(double_n_before_vowel_keeps_n_row);
     RUN_TEST(single_n_flushes_to_n);
     RUN_TEST(backspace_removes_pending_preedit);
     RUN_TEST(set_mode_switches_directly);

@@ -6,6 +6,7 @@
 #define ICANON 0x0001
 #define ECHO   0x0002
 #define ISIG   0x0004
+#define ECHONL 0x0008
 
 #define TCSANOW 0
 

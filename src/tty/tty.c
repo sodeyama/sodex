@@ -258,6 +258,8 @@ PUBLIC int tty_get_termios(struct tty *tty, struct termios *termios)
     termios->c_lflag |= ECHO;
   if (tty->flags & TTY_FLAG_ISIG)
     termios->c_lflag |= ISIG;
+  if (tty->flags & TTY_FLAG_ECHONL)
+    termios->c_lflag |= ECHONL;
   return 0;
 }
 
@@ -444,6 +446,8 @@ PRIVATE void tty_reset(struct tty *tty, int has_master)
   memset(tty, 0, sizeof(struct tty));
   tty->has_master = has_master;
   tty->flags = TTY_FLAG_ICANON | TTY_FLAG_ECHO | TTY_FLAG_ISIG;
+  if (has_master == FALSE)
+    tty->flags |= TTY_FLAG_ECHONL;
   tty->cols = screen_cols();
   tty->rows = screen_rows();
 }
@@ -546,6 +550,8 @@ PRIVATE u_int8_t tty_termios_flags(u_int32_t lflag)
     flags |= TTY_FLAG_ECHO;
   if (lflag & ISIG)
     flags |= TTY_FLAG_ISIG;
+  if (lflag & ECHONL)
+    flags |= TTY_FLAG_ECHONL;
   return flags;
 }
 
@@ -630,9 +636,11 @@ PRIVATE void tty_receive_char(struct tty *tty, char c)
     for (i = 0; i < tty->canon_len; i++) {
       tty_push_slave_byte(tty, tty->canon_buf[i]);
     }
+    tty_push_slave_byte(tty, '\n');
     tty_push_slave_byte(tty, '\0');
     tty->canon_len = 0;
-    if (tty->flags & TTY_FLAG_ECHO)
+    if ((tty->flags & TTY_FLAG_ECHO) &&
+        (tty->flags & TTY_FLAG_ECHONL))
       tty_emit_output(tty, '\n');
     return;
   }

@@ -233,6 +233,13 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 # === QEMU integration tests ===
 
 .PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-term-scrollback test-qemu-fs test-qemu-shell-io test-qemu-shell-completion test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-agent-bringup test-claude-smoke test-agent-full ktest-build
+TERM_ROOTFS_OVERLAY = $(LOGDIR)/term-rootfs-overlay
+TERM_FSBOOT = $(LOGDIR)/term-fsboot.bin
+TERM_FSBOOT_PROFILE = $(LOGDIR)/term-fsboot.profile
+TERM_SCROLLBACK_ROOTFS_OVERLAY = $(LOGDIR)/term-scrollback-rootfs-overlay
+TERM_SCROLLBACK_FSBOOT = $(LOGDIR)/term-scrollback-fsboot.bin
+TERM_SCROLLBACK_FSBOOT_PROFILE = $(LOGDIR)/term-scrollback-fsboot.profile
+
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -247,13 +254,17 @@ test-qemu-user-memory:
 	@echo "=== Running user memory smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_user_memory_smoke.py $(FSBOOT) $(LOGDIR)
 
-test-qemu-term: all
+test-qemu-term:
+	@python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(TERM_ROOTFS_OVERLAY)
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(TERM_ROOTFS_OVERLAY) FSBOOT=$(TERM_FSBOOT) FSBOOT_PROFILE=$(TERM_FSBOOT_PROFILE) all
 	@echo "=== Running rich terminal smoke in QEMU ==="
-	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_terminal_smoke.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_terminal_smoke.py $(TERM_FSBOOT) $(LOGDIR)
 
-test-qemu-term-scrollback: all
+test-qemu-term-scrollback:
+	@python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(TERM_SCROLLBACK_ROOTFS_OVERLAY)
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(TERM_SCROLLBACK_ROOTFS_OVERLAY) FSBOOT=$(TERM_SCROLLBACK_FSBOOT) FSBOOT_PROFILE=$(TERM_SCROLLBACK_FSBOOT_PROFILE) all
 	@echo "=== Running terminal scrollback smoke in QEMU ==="
-	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_terminal_scrollback_smoke.py $(FSBOOT) $(LOGDIR)
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_terminal_scrollback_smoke.py $(TERM_SCROLLBACK_FSBOOT) $(LOGDIR)
 
 test-qemu-fs: all
 	@echo "=== Running fs CRUD smoke in QEMU ==="

@@ -5,6 +5,7 @@
 #include <fs.h>
 #include <eshell.h>
 #include <debug.h>
+#include <termios.h>
 #include <winsize.h>
 #include <shell.h>
 
@@ -13,6 +14,7 @@ static char *get_path_recursively(ext3_dentry *dentry);
 static int shell_buf_size(void);
 static int refresh_shell_buffer(char **buf, int *buf_size);
 static int clamp_copy_len(int len, int max_len);
+static int shell_tty_echoes_newline(void);
 
 char g_pathname[PATH_MAX];
 static struct shell_state g_shell_state;
@@ -23,6 +25,7 @@ int main(int argc, char **argv)
   char *buf;
   char prompt[PROMPT_BUF];
   int input_buf_size;
+  int tty_echoes_newline;
 
   (void)argc;
   (void)argv;
@@ -31,6 +34,7 @@ int main(int argc, char **argv)
   memset(prompt, 0, sizeof(prompt));
   set_prompt(prompt);
   input_buf_size = shell_buf_size();
+  tty_echoes_newline = shell_tty_echoes_newline();
   buf = (char *)malloc((size_t)input_buf_size);
   if (buf == NULL)
     return 1;
@@ -47,11 +51,17 @@ int main(int argc, char **argv)
       break;
     write(STDOUT_FILENO, prompt, strlen(prompt));
     read_len = (int)read(STDIN_FILENO, buf, (size_t)input_buf_size);
-    if (read_len <= 1)
+    if (read_len <= 0)
       continue;
     input_len = read_len;
     if (input_len > 0 && buf[input_len - 1] == '\0')
       input_len--;
+    if (input_len > 0 &&
+        (buf[input_len - 1] == '\r' || buf[input_len - 1] == '\n')) {
+      if (tty_echoes_newline == 0)
+        write(STDOUT_FILENO, "\n", 1);
+      input_len--;
+    }
     if (input_len <= 0)
       continue;
     buf[input_len] = '\0';
@@ -82,6 +92,15 @@ static int shell_buf_size(void)
   if (size > 255)
     size = 255;
   return size;
+}
+
+static int shell_tty_echoes_newline(void)
+{
+  struct termios termios;
+
+  if (tcgetattr(STDIN_FILENO, &termios) < 0)
+    return 1;
+  return (termios.c_lflag & ECHONL) != 0;
 }
 
 static int refresh_shell_buffer(char **buf, int *buf_size)

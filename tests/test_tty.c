@@ -43,6 +43,7 @@ struct file;
 #define ICANON 0x0001
 #define ECHO   0x0002
 #define ISIG   0x0004
+#define ECHONL 0x0008
 
 int files_alloc_fd(struct files_struct *files, struct file *file) {
     static int next_fd = 0;
@@ -83,11 +84,12 @@ TEST(canonical_input_waits_for_enter) {
     ASSERT_EQ(tty_master_write(tty, "abc", 3), 3);
     ASSERT_EQ(tty_slave_read(tty, buf, sizeof(buf), 0), 0);
     ASSERT_EQ(tty_master_write(tty, "\r", 1), 1);
-    ASSERT_EQ(tty_slave_read(tty, buf, sizeof(buf), 0), 4);
+    ASSERT_EQ(tty_slave_read(tty, buf, sizeof(buf), 0), 5);
     ASSERT_EQ(buf[0], 'a');
     ASSERT_EQ(buf[1], 'b');
     ASSERT_EQ(buf[2], 'c');
-    ASSERT_EQ(buf[3], '\0');
+    ASSERT_EQ(buf[3], '\n');
+    ASSERT_EQ(buf[4], '\0');
     tty_release(tty);
 }
 
@@ -102,12 +104,11 @@ TEST(canonical_backspace_echo_erases_on_master) {
     ASSERT_EQ(tty_master_write(tty, "a", 1), 1);
     ASSERT_EQ(tty_master_write(tty, "\b", 1), 1);
     ASSERT_EQ(tty_master_write(tty, "\r", 1), 1);
-    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 5);
+    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 4);
     ASSERT_EQ(buf[0], 'a');
     ASSERT_EQ(buf[1], '\b');
     ASSERT_EQ(buf[2], ' ');
     ASSERT_EQ(buf[3], '\b');
-    ASSERT_EQ(buf[4], '\n');
     tty_release(tty);
 }
 
@@ -124,16 +125,16 @@ TEST(canonical_delete_key_erases_on_master) {
     ASSERT_EQ(tty_master_write(tty, "ab", 2), 2);
     ASSERT_EQ(tty_master_write(tty, &del, 1), 1);
     ASSERT_EQ(tty_master_write(tty, "\r", 1), 1);
-    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 2);
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 3);
     ASSERT_EQ(slave_buf[0], 'a');
-    ASSERT_EQ(slave_buf[1], '\0');
-    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 6);
+    ASSERT_EQ(slave_buf[1], '\n');
+    ASSERT_EQ(slave_buf[2], '\0');
+    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 5);
     ASSERT_EQ(buf[0], 'a');
     ASSERT_EQ(buf[1], 'b');
     ASSERT_EQ(buf[2], '\b');
     ASSERT_EQ(buf[3], ' ');
     ASSERT_EQ(buf[4], '\b');
-    ASSERT_EQ(buf[5], '\n');
     tty_release(tty);
 }
 
@@ -157,7 +158,7 @@ TEST(canonical_utf8_backspace_erases_whole_character) {
     ASSERT_EQ(tty_master_write(tty, e_utf8, sizeof(e_utf8)), (ssize_t)sizeof(e_utf8));
     ASSERT_EQ(tty_master_write(tty, "\r", 1), 1);
 
-    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 10);
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 11);
     ASSERT_EQ((unsigned char)slave_buf[0], 0xe3);
     ASSERT_EQ((unsigned char)slave_buf[1], 0x81);
     ASSERT_EQ((unsigned char)slave_buf[2], 0x82);
@@ -167,9 +168,10 @@ TEST(canonical_utf8_backspace_erases_whole_character) {
     ASSERT_EQ((unsigned char)slave_buf[6], 0xe3);
     ASSERT_EQ((unsigned char)slave_buf[7], 0x81);
     ASSERT_EQ((unsigned char)slave_buf[8], 0x88);
-    ASSERT_EQ(slave_buf[9], '\0');
+    ASSERT_EQ(slave_buf[9], '\n');
+    ASSERT_EQ(slave_buf[10], '\0');
 
-    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 19);
+    ASSERT_EQ(tty_master_read(tty, buf, sizeof(buf)), 18);
     ASSERT_EQ((unsigned char)buf[0], 0xe3);
     ASSERT_EQ((unsigned char)buf[1], 0x81);
     ASSERT_EQ((unsigned char)buf[2], 0x82);
@@ -188,7 +190,6 @@ TEST(canonical_utf8_backspace_erases_whole_character) {
     ASSERT_EQ((unsigned char)buf[15], 0xe3);
     ASSERT_EQ((unsigned char)buf[16], 0x81);
     ASSERT_EQ((unsigned char)buf[17], 0x88);
-    ASSERT_EQ(buf[18], '\n');
     tty_release(tty);
 }
 
@@ -251,7 +252,7 @@ TEST(termios_can_switch_console_tty_to_raw_noecho) {
     ASSERT_NOT_NULL(tty);
 
     ASSERT_EQ(tty_get_termios(tty, &termios), 0);
-    ASSERT_EQ(termios.c_lflag, ICANON | ECHO | ISIG);
+    ASSERT_EQ(termios.c_lflag, ICANON | ECHO | ISIG | ECHONL);
 
     termios.c_lflag = 0;
     ASSERT_EQ(tty_set_termios(tty, &termios), 0);
@@ -287,6 +288,41 @@ TEST(ctrl_c_discards_pending_line) {
     tty_release(tty);
 }
 
+TEST(pty_empty_lines_keep_prompts_separated) {
+    struct tty *tty;
+    char line_buf[8];
+    char master_buf[128];
+    const char *prompt = "sodex /home/user> ";
+    ssize_t len;
+
+    init_tty();
+    tty = tty_alloc_pty();
+    ASSERT_NOT_NULL(tty);
+
+    ASSERT_EQ(tty_master_read(tty, master_buf, sizeof(master_buf)), 0);
+    ASSERT_EQ(tty_slave_write(tty, prompt, strlen(prompt)), (ssize_t)strlen(prompt));
+    ASSERT_EQ(tty_master_write(tty, "\r\r", 2), 2);
+
+    ASSERT_EQ(tty_slave_read(tty, line_buf, sizeof(line_buf), 0), 2);
+    ASSERT_EQ(line_buf[0], '\n');
+    ASSERT_EQ(line_buf[1], '\0');
+    ASSERT_EQ(tty_slave_write(tty, "\n", 1), 1);
+    ASSERT_EQ(tty_slave_write(tty, prompt, strlen(prompt)), (ssize_t)strlen(prompt));
+
+    ASSERT_EQ(tty_slave_read(tty, line_buf, sizeof(line_buf), 0), 2);
+    ASSERT_EQ(line_buf[0], '\n');
+    ASSERT_EQ(line_buf[1], '\0');
+    ASSERT_EQ(tty_slave_write(tty, "\n", 1), 1);
+    ASSERT_EQ(tty_slave_write(tty, prompt, strlen(prompt)), (ssize_t)strlen(prompt));
+
+    len = tty_master_read(tty, master_buf, sizeof(master_buf) - 1);
+    ASSERT_EQ(len, (ssize_t)(strlen(prompt) * 3 + 2));
+    master_buf[len] = '\0';
+    ASSERT_STR_EQ(master_buf, "sodex /home/user> \nsodex /home/user> \nsodex /home/user> ");
+
+    tty_release(tty);
+}
+
 int main(void)
 {
     printf("=== tty / pty tests ===\n");
@@ -300,6 +336,7 @@ int main(void)
     RUN_TEST(pty_winsize_can_be_updated);
     RUN_TEST(termios_can_switch_console_tty_to_raw_noecho);
     RUN_TEST(ctrl_c_discards_pending_line);
+    RUN_TEST(pty_empty_lines_keep_prompts_separated);
 
     TEST_REPORT();
 }

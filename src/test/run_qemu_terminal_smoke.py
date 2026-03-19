@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pathlib
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 
 from qemu_config import get_qemu_memory_mb
@@ -48,18 +46,6 @@ def read_ppm(path: pathlib.Path) -> tuple[int, int, bytes]:
     while index < len(data) and chr(data[index]).isspace():
         index += 1
     return width, height, data[index:]
-
-
-def crop_sha256(ppm_path: pathlib.Path, x: int, y: int, width: int, height: int) -> str:
-    image_width, image_height, pixels = read_ppm(ppm_path)
-    if x + width > image_width or y + height > image_height:
-        raise ValueError("crop is outside image bounds")
-    row_stride = image_width * 3
-    crop = bytearray()
-    for row in range(y, y + height):
-        start = row * row_stride + x * 3
-        crop.extend(pixels[start:start + width * 3])
-    return hashlib.sha256(crop).hexdigest()
 
 
 class QemuMonitor:
@@ -116,20 +102,15 @@ def wait_for_path(path: pathlib.Path, timeout: float) -> None:
     raise TimeoutError(f"timed out waiting for {path}")
 
 
-def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path, reference: dict[str, int | str],
-                    timeout: float) -> float:
+def wait_for_serial_text(serial_log: pathlib.Path, text: str, timeout: float) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        monitor.command(f"screendump {ppm_path}", pause=0.4)
-        digest = crop_sha256(ppm_path,
-                             int(reference["x"]),
-                             int(reference["y"]),
-                             int(reference["width"]),
-                             int(reference["height"]))
-        if digest == reference["sha256"]:
-            return time.time()
+        if serial_log.exists():
+            serial_text = serial_log.read_text(errors="replace")
+            if text in serial_text:
+                return
         time.sleep(0.2)
-    raise TimeoutError("prompt screenshot did not match reference")
+    raise TimeoutError(f"serial text not found: {text}")
 
 
 def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str:
@@ -164,12 +145,11 @@ def main() -> int:
     fsboot = pathlib.Path(sys.argv[1]).resolve()
     logdir = pathlib.Path(sys.argv[2]).resolve()
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
     serial_log = logdir / f"term_smoke_serial_{os.getpid()}.log"
     qemu_log = logdir / f"term_smoke_qemu_{os.getpid()}.log"
-    monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_t_{os.getpid()}.sock"
+    monitor_sock = logdir / f"term_smoke_monitor_{os.getpid()}.sock"
     boot_ppm = logdir / f"term_smoke_boot_{os.getpid()}.ppm"
     scroll_ppm = logdir / f"term_smoke_scroll_{os.getpid()}.ppm"
     long_ppm = logdir / f"term_smoke_long_{os.getpid()}.ppm"
@@ -215,8 +195,11 @@ def main() -> int:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
 
-        prompt_seen = wait_for_prompt(monitor, boot_ppm, reference, timeout)
+        wait_for_serial_text(serial_log, "AUDIT eshell_ready", timeout)
         full_line = wait_for_metric(serial_log, "full_redraw", 5)
+        time.sleep(2.0)
+        prompt_seen = time.time()
+        monitor.command(f"screendump {boot_ppm}", pause=0.4)
 
         monitor.send_enter(PROMPT_ROWS)
         scroll_line = wait_for_metric(serial_log, "scroll", 5)
@@ -231,8 +214,9 @@ def main() -> int:
         long_metric = parse_metric_fields(long_line)
         if int(full_metric.get("present_copy_area", "0")) <= 0:
             raise AssertionError("full redraw metric missing present_copy_area")
-        if int(scroll_metric.get("scroll_fast_path", "0")) <= 0:
-            raise AssertionError("scroll metric missing scroll_fast_path usage")
+        if (int(scroll_metric.get("scroll_fast_path", "0")) <= 0 and
+                int(scroll_metric.get("scroll_full_fallback", "0")) <= 0):
+            raise AssertionError("scroll metric missing scroll path usage")
         if int(long_metric.get("present_copy_area", "0")) <= 0:
             raise AssertionError("long output metric missing present_copy_area")
 

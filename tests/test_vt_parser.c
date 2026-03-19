@@ -4,6 +4,40 @@
 #include <stdio.h>
 #include <string.h>
 
+static void row_text(const struct terminal_surface *surface,
+                     int row,
+                     char *out,
+                     int out_cap)
+{
+    int col;
+    int len = 0;
+
+    if (out == NULL || out_cap <= 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (surface == NULL || row < 0 || row >= surface->rows) {
+        return;
+    }
+
+    for (col = 0; col < surface->cols && len + 1 < out_cap; col++) {
+        const struct term_cell *cell = terminal_surface_cell(surface, col, row);
+        char ch = ' ';
+
+        if (cell != NULL &&
+            (cell->attr & TERM_ATTR_CONTINUATION) == 0 &&
+            cell->ch >= 0x20 &&
+            cell->ch <= 0x7e) {
+            ch = (char)cell->ch;
+        }
+        out[len++] = ch;
+    }
+    while (len > 0 && out[len - 1] == ' ') {
+        len--;
+    }
+    out[len] = '\0';
+}
+
 TEST(plain_text_and_newline) {
     struct terminal_surface surface;
     struct vt_parser parser;
@@ -321,6 +355,34 @@ TEST(decstbm_reset_region) {
     terminal_surface_free(&surface);
 }
 
+TEST(prompt_scroll_does_not_duplicate_same_row_content) {
+    struct terminal_surface surface;
+    struct vt_parser parser;
+    const char prompt[] = "sodex /home/user> ";
+    char row[128];
+    int i;
+
+    ASSERT_EQ(terminal_surface_init(&surface, 80, 12), 0);
+    vt_parser_init(&parser, &surface);
+
+    vt_parser_feed(&parser, prompt, strlen(prompt));
+    for (i = 0; i < 24; i++) {
+        vt_parser_feed(&parser, "\n", 1);
+        vt_parser_feed(&parser, prompt, strlen(prompt));
+    }
+    vt_parser_feed(&parser, "ls\n14 d .\n02 d ..\n", 18);
+    vt_parser_feed(&parser, prompt, strlen(prompt));
+    vt_parser_feed(&parser, "pwd\n/home/user\n", 15);
+    vt_parser_feed(&parser, prompt, strlen(prompt));
+
+    for (i = 0; i < surface.rows; i++) {
+        row_text(&surface, i, row, sizeof(row));
+        ASSERT(strstr(row, "> sodex ") == NULL);
+    }
+
+    terminal_surface_free(&surface);
+}
+
 int main(void)
 {
     printf("=== vt parser tests ===\n");
@@ -338,6 +400,7 @@ int main(void)
     RUN_TEST(decstbm_scroll_region_basic);
     RUN_TEST(decstbm_scroll_within_region);
     RUN_TEST(decstbm_reset_region);
+    RUN_TEST(prompt_scroll_does_not_duplicate_same_row_content);
 
     TEST_REPORT();
 }

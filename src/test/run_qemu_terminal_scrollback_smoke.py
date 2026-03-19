@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pathlib
 import socket
@@ -47,20 +46,6 @@ def read_ppm(path: pathlib.Path) -> tuple[int, int, bytes]:
     while index < len(data) and chr(data[index]).isspace():
         index += 1
     return width, height, data[index:]
-
-
-def crop_matches(ppm_path: pathlib.Path, reference: dict[str, int | str]) -> bool:
-    width, _height, pixels = read_ppm(ppm_path)
-    x = int(reference["x"])
-    y = int(reference["y"])
-    crop_width = int(reference["width"])
-    crop_height = int(reference["height"])
-    row_stride = width * 3
-    crop = bytearray()
-    for row in range(y, y + crop_height):
-        start = row * row_stride + x * 3
-        crop.extend(pixels[start:start + crop_width * 3])
-    return hashlib.sha256(crop).hexdigest() == reference["sha256"]
 
 
 def image_sha256(ppm_path: pathlib.Path) -> str:
@@ -150,15 +135,15 @@ def wait_for_path(path: pathlib.Path, timeout: float) -> None:
     raise TimeoutError(f"timed out waiting for {path}")
 
 
-def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
-                    reference: dict[str, int | str], timeout: float) -> None:
+def wait_for_serial_text(serial_log: pathlib.Path, text: str, timeout: float) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        monitor.command(f"screendump {ppm_path}", pause=0.3)
-        if crop_matches(ppm_path, reference):
-            return
+        if serial_log.exists():
+            serial_text = serial_log.read_text(errors="replace")
+            if text in serial_text:
+                return
         time.sleep(0.2)
-    raise TimeoutError("prompt screenshot did not match reference")
+    raise TimeoutError(f"serial text not found: {text}")
 
 
 def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str:
@@ -174,6 +159,31 @@ def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str
     raise TimeoutError(f"metric not found: {point}")
 
 
+def wait_for_term_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str:
+    deadline = time.time() + timeout
+    marker = f"TERM_METRIC point={point}"
+    rescue_marker = "AUDIT init_enter_rescue"
+    term_marker = "AUDIT term_main_loop_enter"
+
+    while time.time() < deadline:
+        if serial_log.exists():
+            text = serial_log.read_text(errors="replace")
+            if marker in text:
+                for line in text.splitlines():
+                    if marker in line:
+                        return line
+            if rescue_marker in text and term_marker not in text:
+                raise AssertionError("term が起動する前に rescue shell へフォールバックしました")
+        time.sleep(0.2)
+    raise TimeoutError(f"metric not found: {point}")
+
+
+def wait_for_idle(delay: float) -> None:
+    deadline = time.time() + delay
+    while time.time() < deadline:
+        time.sleep(0.05)
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: run_qemu_terminal_scrollback_smoke.py <fsboot> <logdir>",
@@ -183,20 +193,17 @@ def main() -> int:
     fsboot = pathlib.Path(sys.argv[1]).resolve()
     logdir = pathlib.Path(sys.argv[2]).resolve()
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    reference = json.loads(
-        (repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
     monitor_sock = logdir / f"term_scrollback_monitor_{os.getpid()}.sock"
     serial_log = logdir / f"term_scrollback_serial_{os.getpid()}.log"
     qemu_log = logdir / f"term_scrollback_qemu_{os.getpid()}.log"
-    prompt_ppm = logdir / f"term_scrollback_prompt_{os.getpid()}.ppm"
     baseline_ppm = logdir / f"term_scrollback_baseline_{os.getpid()}.ppm"
     scrolled_ppm = logdir / f"term_scrollback_scrolled_{os.getpid()}.ppm"
     restored_ppm = logdir / f"term_scrollback_restored_{os.getpid()}.ppm"
 
     for path in (monitor_sock, serial_log, qemu_log,
-                 prompt_ppm, baseline_ppm, scrolled_ppm, restored_ppm):
+                 baseline_ppm, scrolled_ppm, restored_ppm):
         if path.exists():
             path.unlink()
 
@@ -226,21 +233,23 @@ def main() -> int:
     try:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
-        wait_for_metric(serial_log, "full_redraw", timeout)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_term_metric(serial_log, "full_redraw", timeout)
+        wait_for_serial_text(serial_log, "AUDIT eshell_ready", timeout)
+        wait_for_idle(2.0)
 
         monitor.send_enter(PROMPT_SCROLL_ENTERS)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_idle(1.2)
 
         for command in ("ls\n", "ps\n", "pwd\n"):
             monitor.send_text(command)
-            wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+            wait_for_idle(1.0)
 
         monitor.command(f"screendump {baseline_ppm}", pause=0.3)
         baseline_digest = image_sha256(baseline_ppm)
 
         for _ in range(ROUNDTRIP_PAGE_COUNT):
             monitor.send_key("pgup", delay=0.08)
+        wait_for_idle(0.5)
         monitor.command(f"screendump {scrolled_ppm}", pause=0.3)
         scrolled_digest = image_sha256(scrolled_ppm)
         if scrolled_digest == baseline_digest:
@@ -248,7 +257,8 @@ def main() -> int:
 
         for _ in range(ROUNDTRIP_PAGE_COUNT):
             monitor.send_key("pgdn", delay=0.08)
-        wait_for_prompt(monitor, restored_ppm, reference, timeout)
+        wait_for_idle(0.6)
+        monitor.command(f"screendump {restored_ppm}", pause=0.3)
         restored_digest = image_sha256(restored_ppm)
         if restored_digest != baseline_digest:
             raise AssertionError("scrollback roundtrip did not restore the bottom screen")

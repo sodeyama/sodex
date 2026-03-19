@@ -139,7 +139,6 @@ PRIVATE void term_draw_cell(struct term_app *app,
                             int col, int row,
                             const struct term_cell *cell,
                             int cursor);
-PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta);
 PRIVATE void term_present(struct term_app *app, int scroll_delta);
 PRIVATE char render_color(const struct term_cell *cell);
 PRIVATE char render_char(const struct term_cell *cell);
@@ -468,26 +467,6 @@ PRIVATE void term_draw_cell(struct term_app *app,
     width_cells = cell->width;
   cell_renderer_draw_cell(&app->renderer, col, row, cell, cursor);
   term_mark_cell_rect(app, col, row, width_cells);
-}
-
-PRIVATE void term_scroll_back_buffer(struct term_app *app, int scroll_delta)
-{
-  int pixel_rows;
-  int copy_bytes;
-
-  if (app == NULL || app->back_buffer == NULL || scroll_delta <= 0)
-    return;
-
-  pixel_rows = scroll_delta * term_cell_height(app);
-  if (pixel_rows <= 0 || pixel_rows >= app->fb.height)
-    return;
-
-  copy_bytes = (app->fb.height - pixel_rows) * app->fb.pitch;
-  memmove(app->back_buffer,
-          app->back_buffer + pixel_rows * app->fb.pitch,
-          (size_t)copy_bytes);
-  memset(app->back_buffer + copy_bytes, 0,
-         (size_t)(pixel_rows * app->fb.pitch));
 }
 
 PRIVATE void term_present(struct term_app *app, int scroll_delta)
@@ -970,12 +949,6 @@ PRIVATE void render_surface(struct term_app *app, int force)
     if (force != FALSE) {
       cell_renderer_clear(&app->renderer, 0x000000);
       term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);
-    } else if (scroll_delta > 0 &&
-               scroll_delta < app->surface.rows &&
-               app->back_buffer != NULL) {
-      term_scroll_back_buffer(app, scroll_delta);
-      app->metrics.scroll_fast_path_count++;
-      apply_scroll_fast_path = TRUE;
     } else if (scroll_delta > 0) {
       cell_renderer_clear(&app->renderer, 0x000000);
       term_mark_present_rect(app, 0, 0, app->fb.width, app->fb.height);

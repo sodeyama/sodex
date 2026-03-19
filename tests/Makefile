@@ -454,8 +454,8 @@ test_http_client_json.o: $(SRC)/usr/lib/libagent/json.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # REPL helper tests (Plan 20)
-test_agent_repl_cli: test_agent_repl_cli.c test_agent_repl_cli_repl.o test_agent_repl_cli_session.o test_agent_repl_cli_conversation.o test_agent_repl_cli_json.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_agent_repl_cli.c test_agent_repl_cli_repl.o test_agent_repl_cli_session.o test_agent_repl_cli_conversation.o test_agent_repl_cli_json.o
+test_agent_repl_cli: test_agent_repl_cli.c test_agent_repl_cli_repl.o test_agent_repl_cli_session.o test_agent_repl_cli_conversation.o test_agent_repl_cli_json.o test_agent_repl_cli_utf8.o test_agent_repl_cli_wcwidth.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_agent_repl_cli.c test_agent_repl_cli_repl.o test_agent_repl_cli_session.o test_agent_repl_cli_conversation.o test_agent_repl_cli_json.o test_agent_repl_cli_utf8.o test_agent_repl_cli_wcwidth.o
 
 test_agent_repl_cli_repl.o: $(SRC)/usr/lib/libagent/repl.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
@@ -467,6 +467,12 @@ test_agent_repl_cli_conversation.o: $(SRC)/usr/lib/libagent/conversation.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_agent_repl_cli_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_agent_repl_cli_utf8.o: $(SRC)/usr/lib/libc/utf8.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_agent_repl_cli_wcwidth.o: $(SRC)/usr/lib/libc/wcwidth.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Full-fidelity session restore tests (Plan 20)

@@ -42,6 +42,16 @@ static const char DEFAULT_SYSTEM_PROMPT[] =
     "You can use tools to read/write files, list directories, get system info, "
     "and run commands. Be concise and helpful.";
 
+static agent_event_fn s_event_callback = (agent_event_fn)0;
+static void *s_event_userdata = (void *)0;
+
+PRIVATE void emit_agent_event(const struct agent_event *event)
+{
+    if (!event || !s_event_callback)
+        return;
+    s_event_callback(event, s_event_userdata);
+}
+
 #ifndef TEST_BUILD
 static int prompt_append_chunk(struct agent_config *config,
                                const char *text, int text_len)
@@ -356,6 +366,12 @@ static void append_memory_files(struct agent_config *config)
 }
 #endif
 
+void agent_set_event_callback(agent_event_fn callback, void *userdata)
+{
+    s_event_callback = callback;
+    s_event_userdata = userdata;
+}
+
 void agent_config_init(struct agent_config *config)
 {
     memset(config, 0, sizeof(*config));
@@ -526,8 +542,15 @@ static int agent_run_loop(
 
     /* Main loop */
     for (step = 0; step < config->max_steps; step++) {
+        struct agent_event event;
+
         state->current_step = step;
         debug_printf("[AGENT] step %d/%d\n", step + 1, config->max_steps);
+
+        memset(&event, 0, sizeof(event));
+        event.type = AGENT_EVENT_STEP_START;
+        event.step = step + 1;
+        emit_agent_event(&event);
 
         /* Brief delay between steps to let TCP/TLS state settle */
         if (step > 0) {
@@ -593,6 +616,14 @@ static int agent_run_loop(
                 debug_printf("[AGENT] executing tool: %s\n",
                             resp.blocks[i].tool_use.name);
 
+                memset(&event, 0, sizeof(event));
+                event.type = AGENT_EVENT_TOOL_START;
+                event.step = step + 1;
+                event.tool_name = resp.blocks[i].tool_use.name;
+                event.tool_input_json = resp.blocks[i].tool_use.input_json;
+                event.tool_input_len = resp.blocks[i].tool_use.input_json_len;
+                emit_agent_event(&event);
+
                 /* AT-97: Permission check */
                 {
                     static struct permission_policy s_policy;
@@ -617,6 +648,20 @@ static int agent_run_loop(
                                 resp.blocks[i].tool_use.id, 63);
                         tool_results[tool_count_exec].is_error = 1;
                         state->total_errors++;
+                        memset(&event, 0, sizeof(event));
+                        event.type = AGENT_EVENT_TOOL_FINISH;
+                        event.step = step + 1;
+                        event.tool_name = resp.blocks[i].tool_use.name;
+                        event.tool_input_json = resp.blocks[i].tool_use.input_json;
+                        event.tool_input_len =
+                            resp.blocks[i].tool_use.input_json_len;
+                        event.tool_result_json =
+                            tool_results[tool_count_exec].result_json;
+                        event.tool_result_len =
+                            tool_results[tool_count_exec].result_len;
+                        event.tool_is_error =
+                            tool_results[tool_count_exec].is_error;
+                        emit_agent_event(&event);
                         tool_count_exec++;
                         if (tool_count_exec >= CLAUDE_MAX_BLOCKS) break;
                         continue;
@@ -646,6 +691,20 @@ static int agent_run_loop(
                                 resp.blocks[i].tool_use.id, 63);
                         tool_results[tool_count_exec].is_error = 1;
                         state->total_errors++;
+                        memset(&event, 0, sizeof(event));
+                        event.type = AGENT_EVENT_TOOL_FINISH;
+                        event.step = step + 1;
+                        event.tool_name = resp.blocks[i].tool_use.name;
+                        event.tool_input_json = resp.blocks[i].tool_use.input_json;
+                        event.tool_input_len =
+                            resp.blocks[i].tool_use.input_json_len;
+                        event.tool_result_json =
+                            tool_results[tool_count_exec].result_json;
+                        event.tool_result_len =
+                            tool_results[tool_count_exec].result_len;
+                        event.tool_is_error =
+                            tool_results[tool_count_exec].is_error;
+                        emit_agent_event(&event);
                         tool_count_exec++;
                         if (tool_count_exec >= CLAUDE_MAX_BLOCKS) break;
                         continue;
@@ -660,6 +719,17 @@ static int agent_run_loop(
                     debug_printf("[AGENT] tool error: %.80s\n",
                                 tool_results[tool_count_exec].result_json);
                 }
+
+                memset(&event, 0, sizeof(event));
+                event.type = AGENT_EVENT_TOOL_FINISH;
+                event.step = step + 1;
+                event.tool_name = resp.blocks[i].tool_use.name;
+                event.tool_input_json = resp.blocks[i].tool_use.input_json;
+                event.tool_input_len = resp.blocks[i].tool_use.input_json_len;
+                event.tool_result_json = tool_results[tool_count_exec].result_json;
+                event.tool_result_len = tool_results[tool_count_exec].result_len;
+                event.tool_is_error = tool_results[tool_count_exec].is_error;
+                emit_agent_event(&event);
 
                 state->total_tool_executions++;
                 tool_count_exec++;

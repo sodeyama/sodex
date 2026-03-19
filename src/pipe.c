@@ -1,6 +1,7 @@
 #include <pipe.h>
 #include <io.h>
 #include <memory.h>
+#include <poll.h>
 #include <process.h>
 
 struct pipe_info {
@@ -66,6 +67,7 @@ PRIVATE ssize_t pipe_read(struct file *file, void *buf, size_t count)
 
   pipe->read_pos = (pipe->read_pos + total) % PIPE_BUFFER_SIZE;
   pipe->data_size -= total;
+  poll_notify_all();
   return (ssize_t)total;
 }
 
@@ -100,6 +102,7 @@ PRIVATE ssize_t pipe_write(struct file *file, const void *buf, size_t count)
   pipe->write_pos = (pipe->write_pos + total) % PIPE_BUFFER_SIZE;
   pipe->data_size += total;
   wakeup(&pipe->read_wq);
+  poll_notify_all();
   return (ssize_t)total;
 }
 
@@ -121,6 +124,7 @@ PRIVATE int pipe_close(struct file *file)
     if (pipe->write_open == 0)
       wakeup(&pipe->read_wq);
   }
+  poll_notify_all();
 
   if (pipe->read_open == 0 && pipe->write_open == 0) {
     if (pipe->buffer != NULL)
@@ -147,6 +151,39 @@ PRIVATE struct file *pipe_new_file(int stdioflag, struct pipe_info *pipe)
   else
     file->f_ops = &g_pipe_write_ops;
   return file;
+}
+
+PUBLIC short pipe_poll_events(struct file *file, short events)
+{
+  struct pipe_info *pipe;
+  short revents = 0;
+
+  if (file == NULL)
+    return 0;
+
+  pipe = (struct pipe_info *)file->private_data;
+  if (pipe == NULL)
+    return 0;
+
+  if (file->f_stdioflag == FLAG_PIPE_READ) {
+    if ((events & POLLIN) != 0 && pipe->data_size > 0)
+      revents |= POLLIN;
+    if (pipe->write_open == 0)
+      revents |= POLLHUP;
+    return revents;
+  }
+
+  if (file->f_stdioflag == FLAG_PIPE_WRITE) {
+    if ((events & POLLOUT) != 0 &&
+        pipe->read_open > 0 &&
+        pipe->data_size < PIPE_BUFFER_SIZE) {
+      revents |= POLLOUT;
+    }
+    if (pipe->read_open == 0)
+      revents |= POLLHUP;
+  }
+
+  return revents;
 }
 
 PUBLIC int pipe(int fd[2])

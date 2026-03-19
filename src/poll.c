@@ -1,6 +1,7 @@
 #include <poll.h>
 #include <process.h>
 #include <fs.h>
+#include <pipe.h>
 #include <socket.h>
 #include <tty.h>
 
@@ -106,6 +107,11 @@ PRIVATE short poll_scan_fd(struct pollfd *pfd)
   if (file->f_stdioflag == FLAG_TTY_MASTER ||
       file->f_stdioflag == FLAG_TTY_SLAVE) {
     return poll_scan_tty(file, pfd->events);
+  }
+
+  if (file->f_stdioflag == FLAG_PIPE_READ ||
+      file->f_stdioflag == FLAG_PIPE_WRITE) {
+    return pipe_poll_events(file, pfd->events);
   }
 
   return 0;

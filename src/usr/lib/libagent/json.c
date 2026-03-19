@@ -324,6 +324,77 @@ int json_array_get(const struct json_token *tokens, int token_count,
     return cur;
 }
 
+static int json_hex_value(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+static int json_parse_hex4(const char *src, u_int32_t *out)
+{
+    u_int32_t value = 0;
+    int i;
+
+    if (!src || !out)
+        return -1;
+
+    for (i = 0; i < 4; i++) {
+        int digit = json_hex_value(src[i]);
+        if (digit < 0)
+            return -1;
+        value = (value << 4) | (u_int32_t)digit;
+    }
+
+    *out = value;
+    return 0;
+}
+
+static int json_append_utf8(char *out, int out_cap, int *pos, u_int32_t codepoint)
+{
+    int j;
+
+    if (!out || !pos || out_cap <= 0)
+        return -1;
+
+    j = *pos;
+    if (codepoint > 0x10FFFF ||
+        (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+        codepoint = '?';
+    }
+
+    if (codepoint <= 0x7F) {
+        if (j + 1 >= out_cap)
+            return -1;
+        out[j++] = (char)codepoint;
+    } else if (codepoint <= 0x7FF) {
+        if (j + 2 >= out_cap)
+            return -1;
+        out[j++] = (char)(0xC0 | (codepoint >> 6));
+        out[j++] = (char)(0x80 | (codepoint & 0x3F));
+    } else if (codepoint <= 0xFFFF) {
+        if (j + 3 >= out_cap)
+            return -1;
+        out[j++] = (char)(0xE0 | (codepoint >> 12));
+        out[j++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[j++] = (char)(0x80 | (codepoint & 0x3F));
+    } else {
+        if (j + 4 >= out_cap)
+            return -1;
+        out[j++] = (char)(0xF0 | (codepoint >> 18));
+        out[j++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        out[j++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[j++] = (char)(0x80 | (codepoint & 0x3F));
+    }
+
+    *pos = j;
+    return 0;
+}
+
 int json_token_str(const char *js, const struct json_token *tok,
                    char *out, int out_cap)
 {
@@ -349,11 +420,34 @@ int json_token_str(const char *js, const struct json_token *tok,
             case 'n':  out[j++] = '\n'; break;
             case 'r':  out[j++] = '\r'; break;
             case 't':  out[j++] = '\t'; break;
-            case 'u':
-                /* Skip \uXXXX - output '?' for now */
-                if (i + 4 < toklen) i += 4;
-                out[j++] = '?';
+            case 'u': {
+                u_int32_t codepoint = 0;
+
+                if (i + 4 >= toklen ||
+                    json_parse_hex4(js + tok->start + i + 1, &codepoint) < 0) {
+                    out[j++] = '?';
+                    break;
+                }
+                i += 4;
+
+                if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
+                    u_int32_t low = 0;
+
+                    if (i + 6 < toklen &&
+                        js[tok->start + i + 1] == '\\' &&
+                        js[tok->start + i + 2] == 'u' &&
+                        json_parse_hex4(js + tok->start + i + 3, &low) == 0 &&
+                        low >= 0xDC00 && low <= 0xDFFF) {
+                        codepoint = 0x10000 +
+                            (((codepoint - 0xD800) << 10) | (low - 0xDC00));
+                        i += 6;
+                    }
+                }
+
+                if (json_append_utf8(out, out_cap, &j, codepoint) < 0)
+                    goto done;
                 break;
+            }
             default:
                 out[j++] = c;
                 break;
@@ -362,6 +456,7 @@ int json_token_str(const char *js, const struct json_token *tok,
             out[j++] = c;
         }
     }
+done:
     out[j] = '\0';
     return j;
 }

@@ -43,6 +43,7 @@ static int exec_and_capture_bounded(const char *cmd,
 {
     int pipefd[2];
     int saved_stdout;
+    int saved_stderr;
     pid_t pid;
     char *argv[4];
     int ret;
@@ -63,18 +64,42 @@ static int exec_and_capture_bounded(const char *cmd,
         return -1;
     }
 
+    saved_stderr = dup(STDERR_FILENO);
+    if (saved_stderr < 0) {
+        close(saved_stdout);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        debug_printf("[TOOL run_command] dup(stderr) failed\n");
+        return -1;
+    }
+
     close(STDOUT_FILENO);
     if (dup(pipefd[1]) != STDOUT_FILENO) {
         /* Restore stdout */
         close(STDOUT_FILENO);
         dup(saved_stdout);
         close(saved_stdout);
+        close(saved_stderr);
         close(pipefd[0]);
         close(pipefd[1]);
         debug_printf("[TOOL run_command] dup(pipefd[1]) != STDOUT\n");
         return -1;
     }
-    close(pipefd[1]);  /* Close original write end; child inherits STDOUT */
+
+    close(STDERR_FILENO);
+    if (dup(pipefd[1]) != STDERR_FILENO) {
+        close(STDERR_FILENO);
+        dup(saved_stderr);
+        close(STDOUT_FILENO);
+        dup(saved_stdout);
+        close(saved_stdout);
+        close(saved_stderr);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        debug_printf("[TOOL run_command] dup(pipefd[1]) != STDERR\n");
+        return -1;
+    }
+    close(pipefd[1]);  /* Close original write end; child inherits stdout/stderr */
 
     /* Spawn sh -c "command" */
     argv[0] = "sh";
@@ -88,6 +113,9 @@ static int exec_and_capture_bounded(const char *cmd,
     close(STDOUT_FILENO);
     dup(saved_stdout);
     close(saved_stdout);
+    close(STDERR_FILENO);
+    dup(saved_stderr);
+    close(saved_stderr);
 
     if (pid < 0) {
         close(pipefd[0]);

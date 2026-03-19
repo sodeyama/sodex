@@ -53,10 +53,80 @@ static void test_resume_latest_for_cwd(void)
     TEST_PASS("resume_latest_for_cwd");
 }
 
+static void test_text_layout_wraps_sentences(void)
+{
+    struct agent_text_layout layout;
+    char out[256];
+
+    TEST_START("text_layout_wraps_sentences");
+    agent_text_layout_init(&layout, 12);
+    ASSERT(agent_text_layout_format(&layout,
+                                    "一文目です。二文目です。",
+                                    -1,
+                                    out, sizeof(out)) > 0,
+           "format should succeed");
+    ASSERT(strcmp(out, "一文目です。\n二文目です。\n") == 0,
+           "sentence break formatting mismatch");
+    TEST_PASS("text_layout_wraps_sentences");
+}
+
+static void test_text_layout_wraps_ascii_width(void)
+{
+    struct agent_text_layout layout;
+    char out[256];
+
+    TEST_START("text_layout_wraps_ascii_width");
+    agent_text_layout_init(&layout, 20);
+    ASSERT(agent_text_layout_format(&layout,
+                                    "12345678901234567890ABC",
+                                    -1,
+                                    out, sizeof(out)) > 0,
+           "format should succeed");
+    ASSERT(strcmp(out, "12345678901234567890\nABC") == 0,
+           "ascii wrap formatting mismatch");
+    TEST_PASS("text_layout_wraps_ascii_width");
+}
+
+static void test_tool_result_failure_detection(void)
+{
+    static const char error_json[] = "{\"error\":\"permission denied\"}";
+    static const char exit_fail_json[] = "{\"command\":\"x\",\"exit_code\":127}";
+    static const char exit_ok_json[] = "{\"command\":\"x\",\"exit_code\":0}";
+    int exit_code = 0;
+    char error[64];
+
+    TEST_START("tool_result_failure_detection");
+    ASSERT(agent_tool_result_is_failure(error_json,
+                                        strlen(error_json), 0) == 1,
+           "error field should be failure");
+    ASSERT(agent_tool_result_is_failure(exit_fail_json,
+                                        strlen(exit_fail_json), 0) == 1,
+           "nonzero exit should be failure");
+    ASSERT(agent_tool_result_is_failure(exit_ok_json,
+                                        strlen(exit_ok_json), 0) == 0,
+           "zero exit should be success");
+    ASSERT(agent_tool_result_get_exit_code(exit_fail_json,
+                                           strlen(exit_fail_json),
+                                           &exit_code) == 0,
+           "exit_code should parse");
+    ASSERT(exit_code == 127, "exit_code mismatch");
+    ASSERT(agent_tool_result_copy_string_field(error_json,
+                                               strlen(error_json),
+                                               "error",
+                                               error, sizeof(error)) >= 0,
+           "error field should copy");
+    ASSERT(strcmp(error, "permission denied") == 0,
+           "error field mismatch");
+    TEST_PASS("tool_result_failure_detection");
+}
+
 int main(void)
 {
     printf("=== agent repl cli tests ===\n\n");
     test_resume_latest_for_cwd();
+    test_text_layout_wraps_sentences();
+    test_text_layout_wraps_ascii_width();
+    test_tool_result_failure_detection();
     printf("\n=== RESULT: %d passed, %d failed ===\n", passed, failed);
     return failed ? 1 : 0;
 }

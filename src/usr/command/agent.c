@@ -13,6 +13,7 @@
 #include <entropy.h>
 #include <fs.h>
 #include <json.h>
+#include <winsize.h>
 #include <agent/agent.h>
 #include <agent/audit.h>
 #include <agent/claude_client.h>
@@ -27,6 +28,7 @@
 #define REPL_PROMPT_MAX    384
 #define COMPACT_KEEP_TURNS 8
 #define COMPACT_SUMMARY_MAX 1024
+#define AGENT_RENDER_BUF_MAX ((AGENT_MAX_RESPONSE * 2) + 64)
 
 enum agent_cli_mode {
     AGENT_MODE_REPL = 0,
@@ -46,6 +48,219 @@ static struct session_meta s_session;
 static char s_api_key[API_KEY_MAX];
 static char s_input_line[PROMPT_MAX];
 static int s_streamed_chars = 0;
+static const char s_loading_frames[] = "|/-\\";
+
+struct agent_cli_render_state {
+    struct agent_text_layout layout;
+    int terminal_cols;
+    int loading_visible;
+    int spinner_index;
+};
+
+static struct agent_cli_render_state s_cli;
+
+static int detect_terminal_cols(void)
+{
+    struct winsize winsize;
+
+    if (get_winsize(STDOUT_FILENO, &winsize) == 0 && winsize.cols >= 20)
+        return winsize.cols;
+    return 80;
+}
+
+static void reset_render_state(void)
+{
+    memset(&s_cli, 0, sizeof(s_cli));
+    s_cli.terminal_cols = detect_terminal_cols();
+    agent_text_layout_init(&s_cli.layout, s_cli.terminal_cols);
+}
+
+static void render_newline(void)
+{
+    write(STDOUT_FILENO, "\n", 1);
+    s_cli.layout.current_col = 0;
+    s_cli.layout.skip_leading_space = 0;
+}
+
+static void clear_loading_line(void)
+{
+    char spaces[64];
+    int remain;
+
+    if (!s_cli.loading_visible)
+        return;
+
+    write(STDOUT_FILENO, "\r", 1);
+    memset(spaces, ' ', sizeof(spaces));
+    remain = s_cli.terminal_cols;
+    while (remain > 0) {
+        int chunk = remain;
+
+        if (chunk > (int)sizeof(spaces))
+            chunk = sizeof(spaces);
+        write(STDOUT_FILENO, spaces, (size_t)chunk);
+        remain -= chunk;
+    }
+    write(STDOUT_FILENO, "\r", 1);
+    s_cli.loading_visible = 0;
+}
+
+static void write_rendered_text(const char *text, int text_len)
+{
+    static char render_buf[AGENT_RENDER_BUF_MAX];
+    int rendered_len;
+
+    if (!text || text_len <= 0)
+        return;
+    if (s_cli.terminal_cols <= 0)
+        reset_render_state();
+
+    rendered_len = agent_text_layout_format(&s_cli.layout,
+                                            text, text_len,
+                                            render_buf, sizeof(render_buf));
+    if (rendered_len < 0) {
+        write(STDOUT_FILENO, text, (size_t)text_len);
+        return;
+    }
+    write(STDOUT_FILENO, render_buf, (size_t)rendered_len);
+}
+
+static void show_loading_line(const char *label)
+{
+    static char line[160];
+    int len;
+    char frame;
+
+    if (!label || !*label)
+        label = "調査中...";
+
+    if (s_cli.terminal_cols <= 0)
+        reset_render_state();
+    if (!s_cli.loading_visible && s_cli.layout.current_col != 0)
+        render_newline();
+
+    clear_loading_line();
+    frame = s_loading_frames[s_cli.spinner_index % 4];
+    s_cli.spinner_index++;
+    len = snprintf(line, sizeof(line), "[%c] %s", frame, label);
+    if (len < 0)
+        return;
+    if (len >= (int)sizeof(line))
+        len = sizeof(line) - 1;
+    write(STDOUT_FILENO, line, (size_t)len);
+    s_cli.loading_visible = 1;
+}
+
+static void print_tool_failure(const struct agent_event *event)
+{
+    static char command[256];
+    static char message[1024];
+    static char header[160];
+    static char raw[512];
+    int exit_code = 0;
+    int has_exit = 0;
+    int len;
+
+    if (!event)
+        return;
+
+    clear_loading_line();
+    command[0] = '\0';
+    message[0] = '\0';
+
+    has_exit = agent_tool_result_get_exit_code(event->tool_result_json,
+                                               event->tool_result_len,
+                                               &exit_code) == 0;
+    agent_tool_result_copy_string_field(event->tool_result_json,
+                                        event->tool_result_len,
+                                        "command",
+                                        command, sizeof(command));
+    if (agent_tool_result_copy_string_field(event->tool_result_json,
+                                            event->tool_result_len,
+                                            "error",
+                                            message, sizeof(message)) < 0 &&
+        agent_tool_result_copy_string_field(event->tool_result_json,
+                                            event->tool_result_len,
+                                            "output",
+                                            message, sizeof(message)) < 0 &&
+        agent_tool_result_copy_string_field(event->tool_result_json,
+                                            event->tool_result_len,
+                                            "output_head",
+                                            message, sizeof(message)) < 0 &&
+        agent_tool_result_copy_string_field(event->tool_result_json,
+                                            event->tool_result_len,
+                                            "output_tail",
+                                            message, sizeof(message)) < 0) {
+        int raw_len = event->tool_result_len;
+
+        if (raw_len >= (int)sizeof(raw))
+            raw_len = sizeof(raw) - 1;
+        if (raw_len > 0) {
+            memcpy(raw, event->tool_result_json, (size_t)raw_len);
+            raw[raw_len] = '\0';
+            memcpy(message, raw, (size_t)(raw_len + 1));
+        }
+    }
+
+    len = snprintf(header, sizeof(header), "[tool %s 失敗",
+                   event->tool_name ? event->tool_name : "unknown");
+    if (has_exit) {
+        len += snprintf(header + len, sizeof(header) - len,
+                        " exit=%d", exit_code);
+    }
+    if (len >= 0 && len < (int)sizeof(header) - 2) {
+        header[len++] = ']';
+        header[len++] = '\n';
+        header[len] = '\0';
+        write(STDOUT_FILENO, header, (size_t)len);
+    }
+    s_cli.layout.current_col = 0;
+    s_cli.layout.skip_leading_space = 0;
+
+    if (command[0] != '\0') {
+        write(STDOUT_FILENO, "$ ", 2);
+        write_rendered_text(command, strlen(command));
+        if (s_cli.layout.current_col != 0)
+            render_newline();
+    }
+    if (message[0] != '\0') {
+        write_rendered_text(message, strlen(message));
+        if (s_cli.layout.current_col != 0)
+            render_newline();
+    }
+}
+
+static void repl_agent_event(const struct agent_event *event, void *userdata)
+{
+    static char label[96];
+
+    (void)userdata;
+    if (!event)
+        return;
+
+    switch (event->type) {
+    case AGENT_EVENT_STEP_START:
+        show_loading_line("調査中...");
+        break;
+    case AGENT_EVENT_TOOL_START:
+        snprintf(label, sizeof(label), "%s 実行中...",
+                 event->tool_name ? event->tool_name : "tool");
+        show_loading_line(label);
+        break;
+    case AGENT_EVENT_TOOL_FINISH:
+        if (agent_tool_result_is_failure(event->tool_result_json,
+                                         event->tool_result_len,
+                                         event->tool_is_error)) {
+            print_tool_failure(event);
+            show_loading_line("再調査中...");
+        } else {
+            show_loading_line("応答を整理中...");
+        }
+        break;
+    default:
+        break;
+    }
+}
 
 static void repl_stream_text(const char *text, int text_len, void *userdata)
 {
@@ -53,7 +268,8 @@ static void repl_stream_text(const char *text, int text_len, void *userdata)
 
     if (!text || text_len <= 0)
         return;
-    write(STDOUT_FILENO, text, (size_t)text_len);
+    clear_loading_line();
+    write_rendered_text(text, text_len);
     s_streamed_chars += text_len;
 }
 
@@ -272,11 +488,14 @@ static void print_result(const struct agent_result *result)
 {
     if (!result)
         return;
+    clear_loading_line();
+    if (s_cli.terminal_cols <= 0)
+        reset_render_state();
 
     if (result->final_text_len > 0) {
-        write(STDOUT_FILENO, result->final_text, (size_t)result->final_text_len);
-        if (result->final_text[result->final_text_len - 1] != '\n')
-            printf("\n");
+        write_rendered_text(result->final_text, result->final_text_len);
+        if (s_cli.layout.current_col != 0)
+            render_newline();
         return;
     }
 
@@ -612,17 +831,19 @@ static int run_single_turn(struct agent_state *state,
         return -1;
 
     start_turn = state->conv.turn_count;
+    reset_render_state();
     s_streamed_chars = 0;
+    agent_set_event_callback(repl_agent_event, (void *)0);
     claude_client_set_text_stream_callback(repl_stream_text, (void *)0);
     ret = agent_run_turn(&s_config, state, prompt, &s_result);
     claude_client_set_text_stream_callback((claude_stream_text_fn)0, (void *)0);
+    agent_set_event_callback((agent_event_fn)0, (void *)0);
+    clear_loading_line();
     if (ret == 0)
         persist_new_turns(session->id, state, start_turn, &s_result);
     if (s_streamed_chars > 0) {
-        /* Streaming already displayed text; just add newline if needed */
-        if (s_result.final_text_len > 0 &&
-            s_result.final_text[s_result.final_text_len - 1] != '\n')
-            printf("\n");
+        if (s_cli.layout.current_col != 0)
+            render_newline();
     } else {
         print_result(&s_result);
     }
@@ -794,8 +1015,20 @@ static int run_oneshot(const char *prompt)
 {
     int ret;
 
+    reset_render_state();
+    s_streamed_chars = 0;
+    agent_set_event_callback(repl_agent_event, (void *)0);
+    claude_client_set_text_stream_callback(repl_stream_text, (void *)0);
     ret = agent_run(&s_config, prompt, &s_result);
-    print_result(&s_result);
+    claude_client_set_text_stream_callback((claude_stream_text_fn)0, (void *)0);
+    agent_set_event_callback((agent_event_fn)0, (void *)0);
+    clear_loading_line();
+    if (s_streamed_chars > 0) {
+        if (s_cli.layout.current_col != 0)
+            render_newline();
+    } else {
+        print_result(&s_result);
+    }
     return ret;
 }
 

@@ -170,6 +170,50 @@ static void test_string_escape(void)
     TEST_PASS("string_escape");
 }
 
+static void test_unicode_escape(void)
+{
+    const char *js = "{\"msg\":\"\\u4eca\\u65e5 \\u6771\\u4eac\"}";
+    const char *expected = "\xE4\xBB\x8A\xE6\x97\xA5 \xE6\x9D\xB1\xE4\xBA\xAC";
+    struct json_parser p;
+    struct json_token tokens[16];
+    int n, tok;
+    char val[64];
+
+    TEST_START("unicode_escape");
+    json_init(&p);
+    n = json_parse(&p, js, strlen(js), tokens, 16);
+    ASSERT(n > 0, "parse failed");
+
+    tok = json_find_key(js, tokens, n, 0, "msg");
+    ASSERT(tok >= 0, "key not found");
+    json_token_str(js, &tokens[tok], val, sizeof(val));
+    ASSERT(strcmp(val, expected) == 0, "unicode mismatch");
+
+    TEST_PASS("unicode_escape");
+}
+
+static void test_unicode_surrogate_pair(void)
+{
+    const char *js = "{\"msg\":\"\\ud83d\\ude00\"}";
+    const char *expected = "\xF0\x9F\x98\x80";
+    struct json_parser p;
+    struct json_token tokens[16];
+    int n, tok;
+    char val[16];
+
+    TEST_START("unicode_surrogate_pair");
+    json_init(&p);
+    n = json_parse(&p, js, strlen(js), tokens, 16);
+    ASSERT(n > 0, "parse failed");
+
+    tok = json_find_key(js, tokens, n, 0, "msg");
+    ASSERT(tok >= 0, "key not found");
+    json_token_str(js, &tokens[tok], val, sizeof(val));
+    ASSERT(strcmp(val, expected) == 0, "surrogate mismatch");
+
+    TEST_PASS("unicode_surrogate_pair");
+}
+
 static void test_null_bool(void)
 {
     const char *js = "{\"a\":null,\"b\":false,\"c\":true}";
@@ -375,6 +419,8 @@ int main(void)
     test_nested_object();
     test_array_access();
     test_string_escape();
+    test_unicode_escape();
+    test_unicode_surrogate_pair();
     test_null_bool();
     test_negative_number();
     test_claude_response();

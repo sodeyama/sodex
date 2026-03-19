@@ -25,8 +25,28 @@ enum agent_stop_condition {
     AGENT_STOP_TOKEN_LIMIT,       /* Token budget exceeded */
 };
 
+enum agent_event_type {
+    AGENT_EVENT_STEP_START = 0,
+    AGENT_EVENT_TOOL_START,
+    AGENT_EVENT_TOOL_FINISH,
+};
+
 /* Forward declaration */
 struct llm_provider;
+
+struct agent_event {
+    enum agent_event_type type;
+    int  step;
+    const char *tool_name;
+    const char *tool_input_json;
+    int  tool_input_len;
+    const char *tool_result_json;
+    int  tool_result_len;
+    int  tool_is_error;
+};
+
+typedef void (*agent_event_fn)(const struct agent_event *event,
+                               void *userdata);
 
 /* Agent configuration */
 struct agent_config {
@@ -61,6 +81,12 @@ struct agent_result {
     int  total_tool_calls;
 };
 
+struct agent_text_layout {
+    int wrap_cols;
+    int current_col;
+    int skip_leading_space;
+};
+
 /* Initialize agent config with defaults */
 void agent_config_init(struct agent_config *config);
 
@@ -90,6 +116,24 @@ int agent_run(
 int agent_resume_latest_for_cwd(const char *cwd,
                                 char *session_id_out,
                                 int session_id_cap);
+
+/* CLI へ進捗イベントを通知する */
+void agent_set_event_callback(agent_event_fn callback, void *userdata);
+
+/* テキストを CLI 向けに折り返して整形する */
+void agent_text_layout_init(struct agent_text_layout *layout, int wrap_cols);
+int agent_text_layout_format(struct agent_text_layout *layout,
+                             const char *text, int text_len,
+                             char *out, int out_cap);
+
+/* tool 結果 JSON の簡易参照 */
+int agent_tool_result_copy_string_field(const char *result_json, int result_len,
+                                        const char *key,
+                                        char *out, int out_cap);
+int agent_tool_result_get_exit_code(const char *result_json, int result_len,
+                                    int *exit_code);
+int agent_tool_result_is_failure(const char *result_json, int result_len,
+                                 int is_error);
 
 /* Single step (for testing) */
 int agent_step(

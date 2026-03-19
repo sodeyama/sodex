@@ -207,10 +207,22 @@
 | [x] | RT-101 | `term` の IME overlay を差分描画化し、overlay 内容や下地が変わらない frame の再描画を避ける | RT-80, RT-100 | 候補表示中でも不要な右上 redraw を抑えられる |
 | [x] | RT-102 | framebuffer `cell_renderer` を行単位の塗りつぶしと glyph 転送へ寄せ、IME 候補表示時の描画オーバーヘッドを下げる | RT-101 | IME 候補表示の hot path が 1px ごとの関数呼び出しに依存しない |
 
+## M17: shell のタブ補完
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | RT-103 | `term` に shell 補完専用の line state と active 判定を追加し、shell pid / foreground pid / `ICANON` 条件を見られるようにする | RT-66, RT-79 | shell prompt 上だけ completion を有効化できる |
+| [x] | RT-104 | raw ext3 directory entry の列挙を再利用可能 helper へ切り出し、path prefix から候補列を返す `shell_completion` 層を追加する | RT-35, RT-103 | `./`, `../`, absolute path, UTF-8 filename を含む候補列を userland で得られる |
+| [x] | RT-105 | quote / escape / redirection を考慮して、現在行末の補完対象 word を切り出す helper を追加する | RT-68, RT-104 | `cat \"two words\"`, `cmd > out`, `cmd ./foo\\ bar` のような末尾 token を壊さず取り出せる |
+| [x] | RT-106 | `term` の input 経路に `Tab` / `Shift+Tab` / `Esc` の completion action を追加し、一意補完、共通 prefix 延長、候補巡回、cancel を inline 反映できるようにする | RT-103, RT-104, RT-105 | `cat hoge_` で補完が始まり、複数候補を巡回できる |
+| [x] | RT-107 | `term` overlay に completion 候補 UI を追加し、IME overlay と競合しない表示優先度と差分描画を整える | RT-101, RT-106 | 補完候補件数と選択中候補を overlay で見分けられる |
+| [x] | RT-108 | host test を追加し、token 切り出し、path match、候補巡回、cancel/reapply を回帰検知できるようにする | RT-104, RT-105, RT-106 | 補完ロジックの退行を host test で検知できる |
+| [x] | RT-109 | QEMU smoke と screenshot reference を追加し、shell prompt 上の tab completion 導線を固定する | RT-106, RT-107, RT-108 | `cat hoge_` 補完と複数候補表示を QEMU 上で回帰検知できる |
+
 ## 先送りする項目
 
 - 複数 terminal セッション
-- タブ補完や高度な line editing
+- 高度な line editing
 - マウス入力
 - ウィンドウシステム
 - `vi` の複数バッファ、text object、マクロ

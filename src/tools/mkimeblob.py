@@ -8,9 +8,9 @@ import struct
 from pathlib import Path
 
 HEADER_STRUCT = struct.Struct("<4s7I")
-ENTRY_STRUCT = struct.Struct("<IIIHHI")
+ENTRY_STRUCT = struct.Struct("<IIIHHII")
 MAGIC = b"IMED"
-VERSION = 2
+VERSION = 3
 MIN_BUCKETS = 64
 MAX_BUCKETS = 16384
 TARGET_ENTRIES_PER_BUCKET = 16
@@ -29,21 +29,29 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_entries(path: Path) -> dict[str, list[str]]:
-    grouped: dict[str, list[str]] = {}
+def load_entries(path: Path) -> dict[str, list[tuple[str, int]]]:
+    grouped: dict[str, list[tuple[str, int]]] = {}
 
     for lineno, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw_line.strip()
+        cost = 0
         if not line or line.startswith("#"):
             continue
         parts = raw_line.split("\t")
-        if len(parts) != 2:
-            raise ValueError(f"{path}:{lineno}: <よみ><TAB><候補> を期待しました")
+        if len(parts) not in {2, 3}:
+            raise ValueError(f"{path}:{lineno}: <よみ><TAB><候補>[<TAB>cost] を期待しました")
         reading = parts[0].strip()
         candidate = parts[1].strip()
+        if len(parts) >= 3 and parts[2].strip():
+            try:
+                cost = int(parts[2].strip())
+            except ValueError as exc:
+                raise ValueError(f"{path}:{lineno}: cost が不正です: {parts[2]!r}") from exc
         if not reading or not candidate:
             raise ValueError(f"{path}:{lineno}: 空のよみ/候補は使えません")
-        grouped.setdefault(reading, []).append(candidate)
+        if cost < 0:
+            raise ValueError(f"{path}:{lineno}: cost は 0 以上で指定してください")
+        grouped.setdefault(reading, []).append((candidate, cost))
 
     if not grouped:
         raise ValueError(f"{path}: 辞書エントリがありません")
@@ -75,15 +83,16 @@ def choose_bucket_count(entry_count: int, requested: int) -> int:
     return max(MIN_BUCKETS, min(MAX_BUCKETS, next_power_of_two(target)))
 
 
-def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
-    entries: list[tuple[int, int, bytes, list[str]]] = []
+def build_blob(grouped: dict[str, list[tuple[str, int]]], bucket_count: int) -> bytes:
+    entries: list[tuple[int, int, bytes, list[tuple[str, int]], int]] = []
     bucket_sizes = [0] * bucket_count
 
     for reading, candidates in grouped.items():
         reading_bytes = reading.encode("utf-8")
         reading_hash = fnv1a(reading_bytes)
         bucket = reading_hash % bucket_count
-        entries.append((bucket, reading_hash, reading_bytes, candidates))
+        best_cost = min(cost for _candidate, cost in candidates)
+        entries.append((bucket, reading_hash, reading_bytes, candidates, best_cost))
         bucket_sizes[bucket] += 1
 
     entries.sort(key=lambda item: (item[0], item[2]))
@@ -97,13 +106,13 @@ def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
 
     data_blob = bytearray()
     entry_blob = bytearray()
-    for _bucket, reading_hash, reading_bytes, candidates in entries:
+    for _bucket, reading_hash, reading_bytes, candidates, best_cost in entries:
         reading_offset = len(data_blob)
         data_blob.extend(reading_bytes)
 
         candidate_offset = len(data_blob)
         candidate_bytes = 0
-        for candidate in candidates:
+        for candidate, _cost in candidates:
             encoded = candidate.encode("utf-8") + b"\0"
             data_blob.extend(encoded)
             candidate_bytes += len(encoded)
@@ -116,6 +125,7 @@ def build_blob(grouped: dict[str, list[str]], bucket_count: int) -> bytes:
                 len(reading_bytes),
                 len(candidates),
                 candidate_bytes,
+                best_cost,
             )
         )
 

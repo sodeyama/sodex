@@ -60,7 +60,11 @@ enum term_ime_action {
   TERM_IME_ACTION_NEXT_CANDIDATE = 6,
   TERM_IME_ACTION_PREV_CANDIDATE = 7,
   TERM_IME_ACTION_COMMIT_CONVERSION = 8,
-  TERM_IME_ACTION_CANCEL_CONVERSION = 9
+  TERM_IME_ACTION_CANCEL_CONVERSION = 9,
+  TERM_IME_ACTION_FOCUS_NEXT_CLAUSE = 10,
+  TERM_IME_ACTION_FOCUS_PREV_CLAUSE = 11,
+  TERM_IME_ACTION_EXPAND_CLAUSE_RIGHT = 12,
+  TERM_IME_ACTION_EXPAND_CLAUSE_LEFT = 13
 };
 
 struct term_app {
@@ -673,6 +677,18 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
     case TERM_IME_ACTION_PREV_CANDIDATE:
       ime_select_prev_candidate(&app->ime);
       break;
+    case TERM_IME_ACTION_FOCUS_NEXT_CLAUSE:
+      ime_focus_next_clause(&app->ime);
+      break;
+    case TERM_IME_ACTION_FOCUS_PREV_CLAUSE:
+      ime_focus_prev_clause(&app->ime);
+      break;
+    case TERM_IME_ACTION_EXPAND_CLAUSE_RIGHT:
+      ime_expand_clause_right(&app->ime);
+      break;
+    case TERM_IME_ACTION_EXPAND_CLAUSE_LEFT:
+      ime_expand_clause_left(&app->ime);
+      break;
     case TERM_IME_ACTION_COMMIT_CONVERSION:
       {
         char converted[TERM_INPUT_BUF];
@@ -703,6 +719,18 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
     return len;
   }
 
+  if (app->ime.mode != IME_MODE_LATIN &&
+      (event->ascii == '\r' || event->ascii == '\n') &&
+      (app->ime.preedit_len > 0 || ime_reading_chars(&app->ime) > 0)) {
+    len = flush_ime(app, buf, len);
+    if (len < 0)
+      return 0;
+    ime_reset_segment(&app->ime);
+    if (needs_redraw != NULL)
+      *needs_redraw = 1;
+    return len;
+  }
+
   if (app->ime.mode == IME_MODE_HIRAGANA &&
       app->ime.preedit_len <= 0 &&
       ime_reading_chars(&app->ime) > 0 &&
@@ -720,7 +748,6 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
   if (ime_conversion_active(&app->ime) != 0 &&
       event->ascii != KEY_BACK) {
     ime_cancel_conversion(&app->ime);
-    ime_reset_segment(&app->ime);
     if (needs_redraw != NULL)
       *needs_redraw = 1;
   }
@@ -1214,14 +1241,30 @@ PRIVATE int flush_ime(struct term_app *app, char *buf, int len)
 PRIVATE enum term_ime_action ime_action_for_event(const struct ime_state *ime,
                                                   const struct key_event *event)
 {
+  int clause_count;
+  int focused_clause;
+
   if (event == NULL)
     return TERM_IME_ACTION_NONE;
   if (ime != NULL && ime_conversion_active(ime) != 0) {
+    clause_count = ime_clause_count(ime);
+    focused_clause = ime_focused_clause_index(ime);
     if ((event->flags & KEY_EVENT_EXTENDED) != 0) {
-      if (event->scancode == KEY_SCANCODE_RIGHT)
+      if (event->scancode == KEY_SCANCODE_RIGHT) {
+        if ((event->modifiers & KEY_MOD_SHIFT) != 0 && clause_count > 1)
+          return TERM_IME_ACTION_EXPAND_CLAUSE_RIGHT;
+        if (clause_count > 1 && focused_clause >= 0 &&
+            focused_clause < clause_count - 1)
+          return TERM_IME_ACTION_FOCUS_NEXT_CLAUSE;
         return TERM_IME_ACTION_NEXT_CANDIDATE;
-      if (event->scancode == KEY_SCANCODE_LEFT)
+      }
+      if (event->scancode == KEY_SCANCODE_LEFT) {
+        if ((event->modifiers & KEY_MOD_SHIFT) != 0 && clause_count > 1)
+          return TERM_IME_ACTION_EXPAND_CLAUSE_LEFT;
+        if (clause_count > 1 && focused_clause > 0)
+          return TERM_IME_ACTION_FOCUS_PREV_CLAUSE;
         return TERM_IME_ACTION_PREV_CANDIDATE;
+      }
     }
     if (event->ascii == ' ' && (event->modifiers & KEY_MOD_SHIFT) != 0)
       return TERM_IME_ACTION_PREV_CANDIDATE;
@@ -1425,8 +1468,13 @@ PRIVATE int ime_overlay_region_needs_redraw(const struct term_app *app,
 PRIVATE void render_conversion_target(struct term_app *app)
 {
   const char *reading;
+  int focused_start_char = 0;
+  int focused_end_char = 0;
+  int focused_start_col;
+  int focused_end_col;
   int target_cols;
   int start_col;
+  int current_char = 0;
   int row;
   int col;
 
@@ -1447,9 +1495,59 @@ PRIVATE void render_conversion_target(struct term_app *app)
   if (target_cols > app->surface.cursor_col)
     return;
 
+  if (ime_clause_count(&app->ime) > 0 &&
+      ime_focused_clause_index(&app->ime) >= 0) {
+    focused_start_char = ime_clause_start_char(&app->ime,
+                                               ime_focused_clause_index(&app->ime));
+    focused_end_char = ime_clause_end_char(&app->ime,
+                                           ime_focused_clause_index(&app->ime));
+  } else {
+    focused_end_char = ime_reading_chars(&app->ime);
+  }
+
   start_col = app->surface.cursor_col - target_cols;
+  focused_start_col = start_col;
+  focused_end_col = app->surface.cursor_col;
   col = start_col;
   while (col < app->surface.cursor_col) {
+    const struct term_cell *cell = terminal_surface_cell(&app->surface, col, row);
+    struct term_cell marked;
+
+    if (cell == NULL)
+      break;
+    if ((cell->attr & TERM_ATTR_CONTINUATION) != 0) {
+      col++;
+      continue;
+    }
+
+    if (current_char == focused_start_char)
+      focused_start_col = col;
+    if (current_char == focused_end_char &&
+        focused_end_col == app->surface.cursor_col) {
+      focused_end_col = col;
+    }
+
+    marked = *cell;
+    marked.fg = TERM_IME_READING_FG;
+    marked.bg = TERM_IME_READING_BG;
+    marked.attr &= ~TERM_ATTR_REVERSE;
+
+    if (app->use_framebuffer != 0)
+      term_draw_cell(app, col, row, &marked, FALSE);
+    else
+      console_putc_at(col, row, render_color(&marked), render_char(&marked));
+
+    current_char++;
+    if (marked.width > 1)
+      col += marked.width;
+    else
+      col++;
+  }
+  if (focused_end_char >= ime_reading_chars(&app->ime))
+    focused_end_col = app->surface.cursor_col;
+
+  col = focused_start_col;
+  while (col < focused_end_col) {
     const struct term_cell *cell = terminal_surface_cell(&app->surface, col, row);
     struct term_cell marked;
 
@@ -1482,15 +1580,19 @@ PRIVATE int build_ime_overlay_cells(struct term_app *app,
 {
   const char *mode;
   const char *reading;
+  char clause_reading[IME_READING_MAX];
   char completion_text[SHELL_COMPLETION_OVERLAY_MAX];
   char *p;
   int i;
   int len = 0;
+  int clause_total;
+  int focused_clause;
   int page_end;
   int page_start;
   int page_total;
   char count[24];
   char page[24];
+  char segment[24];
 
   if (app == NULL || cells == NULL || cap <= 0)
     return 0;
@@ -1551,6 +1653,22 @@ PRIVATE int build_ime_overlay_cells(struct term_app *app,
                                TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
   }
   reading = ime_reading(&app->ime);
+  clause_total = ime_clause_count(&app->ime);
+  focused_clause = ime_focused_clause_index(&app->ime);
+  if (clause_total > 1 && focused_clause >= 0 &&
+      ime_copy_clause_reading(&app->ime, focused_clause,
+                              clause_reading, sizeof(clause_reading)) > 0) {
+    p = segment;
+    *p++ = ' ';
+    *p++ = 'S';
+    p = metric_append_uint(p, (u_int32_t)(focused_clause + 1));
+    *p++ = '/';
+    p = metric_append_uint(p, (u_int32_t)clause_total);
+    *p = '\0';
+    len = append_overlay_ascii(cells, len, cap, segment,
+                               TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
+    reading = clause_reading;
+  }
   if (reading[0] != '\0') {
     len = append_overlay_ascii(cells, len, cap, " [",
                                TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
@@ -1700,6 +1818,8 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
   char info[24];
   char *p;
   int pos = 0;
+  int clause_total;
+  int focused_clause;
   int tail_len;
   int selected;
   int total;
@@ -1741,6 +1861,8 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
     mode++;
   }
   if (ime_conversion_active(&app->ime) != 0) {
+    clause_total = ime_clause_count(&app->ime);
+    focused_clause = ime_focused_clause_index(&app->ime);
     selected = ime_candidate_index(&app->ime) + 1;
     total = ime_candidate_count(&app->ime);
     p = info;
@@ -1756,6 +1878,13 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
                              (u_int32_t)(ime_candidate_page_index(&app->ime) + 1));
       *p++ = '/';
       p = metric_append_uint(p, (u_int32_t)ime_candidate_page_count(&app->ime));
+    }
+    if (clause_total > 1 && focused_clause >= 0) {
+      *p++ = ' ';
+      *p++ = 'S';
+      p = metric_append_uint(p, (u_int32_t)(focused_clause + 1));
+      *p++ = '/';
+      p = metric_append_uint(p, (u_int32_t)clause_total);
     }
     *p = '\0';
     tail_len = (int)strlen(info);

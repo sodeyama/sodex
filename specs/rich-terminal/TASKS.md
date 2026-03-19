@@ -19,6 +19,7 @@
 12. terminal / shell / `vi` の実用化と回帰基盤の再固定
 13. 日本語 IME の漢字変換と候補 UI
 14. フル IME 辞書と大規模候補対応
+15. IME の連文節 / 全文変換
 
 ## M0: 互換を壊さない基盤化
 
@@ -219,6 +220,26 @@
 | [x] | RT-108 | host test を追加し、token 切り出し、path match、候補巡回、cancel/reapply を回帰検知できるようにする | RT-104, RT-105, RT-106 | 補完ロジックの退行を host test で検知できる |
 | [x] | RT-109 | QEMU smoke と screenshot reference を追加し、shell prompt 上の tab completion 導線を固定する | RT-106, RT-107, RT-108 | `cat hoge_` 補完と複数候補表示を QEMU 上で回帰検知できる |
 
+## M18: IME の連文節 / 全文変換
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | RT-110 | `ime_state` と新規 helper header に composition 全体、clause 配列、focused clause、phase を定義する | RT-91, RT-109 | 現行 IME 互換を壊さず multi-clause state の型が入る |
+| [ ] | RT-111 | `ime_romaji` を composition buffer 前提へ寄せ、未確定かな全体を保持できるようにする | RT-110 | romaji -> かな入力が単一 `reading` 依存なしで積める |
+| [ ] | RT-112 | `build_ime_dictionary_source.py` に cost 付き中間表現を残し、blob v3 入力形式を決める | RT-84, RT-85 | Mozc cost を落とさず blob 生成へ渡せる |
+| [ ] | RT-113 | `mkimeblob.py` と `ime_dict_blob.*` を拡張し、candidate cost 付き blob v3 を読めるようにする | RT-112 | segmentation に必要な cost を on-disk で引ける |
+| [ ] | RT-114 | `ime_dictionary.*` に exact lookup と segmentation 用 lookup を追加し、v2/v3 fallback を整える | RT-113 | 既存単一変換と新規分節 lookup を同じ層で扱える |
+| [ ] | RT-115 | composition 全体の自動分節と fallback clause を計算する `ime_segmenter` を pure logic として実装する | RT-111, RT-114 | ひらがな文を clause 列へ安定分割できる |
+| [ ] | RT-116 | focused clause の候補遷移、focus 移動、境界調整、全文 commit / cancel を `ime_composition` helper にまとめる | RT-110, RT-115 | multi-clause state 遷移を `term` 非依存で扱える |
+| [ ] | RT-117 | `term` の key 変換を更新し、全文変換開始、focused clause 操作、`Enter` commit 優先を実装する | RT-116 | `Space` / `Left` / `Right` / `Enter` / `Esc` の意味が multi-clause IME で揃う |
+| [ ] | RT-118 | 本文上の composition 表示を追加し、focused clause を inline で視覚化する | RT-117 | 未確定全文と focused clause を本文上で見分けられる |
+| [ ] | RT-119 | overlay を更新し、focused clause の読み、候補 page、全文中の位置を表示する | RT-117, RT-118 | multi-clause 候補 UI が completion overlay と共存する |
+| [ ] | RT-120 | shell completion との優先度を確認し、IME active 中の completion 抑止を regression なしで維持する | RT-117, RT-119 | IME active 中に tab completion が誤発火しない |
+| [ ] | RT-121 | shell と `vi` の commit sink を整理し、multi-clause commit を 1 回の UTF-8 burst で流す | RT-117, RT-118 | clause ごとの個別送信なしで commit できる |
+| [ ] | RT-122 | composition 中の `Enter` newline 抑制と commit 後の復帰動作を shell / `vi` の両方で通す | RT-121 | `Enter` 確定が shell / `vi` の両方で破綻しない |
+| [ ] | RT-123 | host test を追加し、分節、候補切り替え、境界調整、`Enter` commit、cancel を回帰検知できるようにする | RT-115, RT-116, RT-122 | multi-clause IME ロジックの退行を host test で検知できる |
+| [ ] | RT-124 | QEMU smoke と reference data を追加し、shell / `vi` の全文変換と保存を固定する | RT-119, RT-122, RT-123 | multi-clause IME の主要導線を QEMU 上で回帰検知できる |
+
 ## 先送りする項目
 
 - 複数 terminal セッション
@@ -227,3 +248,4 @@
 - ウィンドウシステム
 - `vi` の複数バッファ、text object、マクロ
 - 日本語 IME の予測変換、学習辞書
+- app 非依存の再変換

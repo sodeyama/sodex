@@ -3,7 +3,7 @@
 
 #include <sys/types.h>
 
-#define IME_DICT_BLOB_VERSION 2U
+#define IME_DICT_BLOB_VERSION 3U
 #define IME_DICT_BLOB_BUCKET_COUNT_MAX 16384
 #define IME_DICT_BLOB_CACHE_BLOCK_SIZE 4096
 #define IME_DICT_BLOB_CACHE_SLOTS 8
@@ -53,6 +53,13 @@ int ime_dict_blob_lookup(struct ime_dict_blob_context *ctx,
                          char *storage, int storage_cap,
                          const char **out_candidates, int candidate_cap,
                          int *out_count);
+int ime_dict_blob_lookup_with_cost(struct ime_dict_blob_context *ctx,
+                                   const char *reading,
+                                   char *storage, int storage_cap,
+                                   const char **out_candidates,
+                                   int candidate_cap,
+                                   int *out_count,
+                                   int *out_best_cost);
 const struct ime_dict_blob_metrics *
 ime_dict_blob_get_metrics(const struct ime_dict_blob_context *ctx);
 u_int32_t ime_dict_blob_memory_budget(void);

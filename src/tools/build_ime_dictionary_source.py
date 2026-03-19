@@ -105,7 +105,7 @@ def load_mozc_entries(
     max_candidate_bytes: int,
     max_reading_bytes: int,
     max_cost: int,
-) -> dict[str, list[str]]:
+) -> dict[str, list[tuple[int, str]]]:
     grouped: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
     order = 0
 
@@ -143,14 +143,14 @@ def load_mozc_entries(
             grouped[reading].append((cost, order, candidate))
             order += 1
 
-    finalized: dict[str, list[str]] = {}
+    finalized: dict[str, list[tuple[int, str]]] = {}
     for reading in sorted(grouped):
         seen: set[str] = set()
-        selected: list[str] = []
+        selected: list[tuple[int, str]] = []
         total_bytes = 0
         items = sorted(grouped[reading], key=lambda item: (item[0], item[1], item[2]))
 
-        for _cost, _order, candidate in items:
+        for cost, _order, candidate in items:
             candidate_bytes = len(candidate.encode("utf-8")) + 1
 
             if candidate in seen:
@@ -162,7 +162,7 @@ def load_mozc_entries(
             if total_bytes + candidate_bytes > max_candidate_bytes:
                 break
 
-            selected.append(candidate)
+            selected.append((cost, candidate))
             seen.add(candidate)
             total_bytes += candidate_bytes
 
@@ -172,24 +172,26 @@ def load_mozc_entries(
     return finalized
 
 
-def write_output(path: Path, manual_entries: dict[str, list[str]], mozc_entries: dict[str, list[str]]) -> None:
+def write_output(path: Path,
+                 manual_entries: dict[str, list[str]],
+                 mozc_entries: dict[str, list[tuple[int, str]]]) -> None:
     lines: list[str] = [
         "# IME 辞書 source",
         "# 手製補助語彙: CC0-1.0",
         "# 外部辞書: third_party/dictionaries/mozc を参照",
-        "# 形式: よみ<TAB>候補",
+        "# 形式: よみ<TAB>候補<TAB>cost",
         "",
         "# 手製補助語彙",
     ]
 
     for reading, candidates in manual_entries.items():
         for candidate in candidates:
-            lines.append(f"{reading}\t{candidate}")
+            lines.append(f"{reading}\t{candidate}\t0")
 
     lines.extend(["", "# Mozc 辞書由来語彙"])
     for reading in sorted(mozc_entries):
-        for candidate in mozc_entries[reading]:
-            lines.append(f"{reading}\t{candidate}")
+        for cost, candidate in mozc_entries[reading]:
+            lines.append(f"{reading}\t{candidate}\t{cost}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

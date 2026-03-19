@@ -23,6 +23,12 @@ int ime_dictionary_lookup(const char *reading,
                           char *storage, int storage_cap,
                           const char **out_candidates, int candidate_cap,
                           int *out_count);
+int ime_dictionary_lookup_with_cost(const char *reading,
+                                    char *storage, int storage_cap,
+                                    const char **out_candidates,
+                                    int candidate_cap,
+                                    int *out_count,
+                                    int *out_best_cost);
 void ime_dictionary_reset_runtime(void);
 void ime_dictionary_get_metrics(struct ime_dictionary_metrics *out_metrics);
 int ime_dictionary_last_source(void);

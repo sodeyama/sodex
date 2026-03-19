@@ -41,6 +41,26 @@ TEST(blob_lookup_preserves_candidate_order) {
     ASSERT_STR_EQ(candidates[7], "技工");
 }
 
+TEST(blob_lookup_reports_best_cost) {
+    char storage[IME_CANDIDATE_STORAGE_MAX];
+    const char *candidates[IME_CANDIDATE_MAX];
+    int count = 0;
+    int best_cost = -1;
+
+    ASSERT_EQ(use_blob_fixture(), 0);
+    ASSERT_EQ(ime_dictionary_lookup_with_cost("がっこう", storage, sizeof(storage),
+                                              candidates, IME_CANDIDATE_MAX,
+                                              &count, &best_cost), 0);
+    ASSERT_EQ(count, 1);
+    ASSERT_EQ(best_cost, 0);
+
+    ASSERT_EQ(ime_dictionary_lookup_with_cost("しゅしょう", storage, sizeof(storage),
+                                              candidates, IME_CANDIDATE_MAX,
+                                              &count, &best_cost), 0);
+    ASSERT_EQ(count, 3);
+    ASSERT(best_cost > 0);
+}
+
 TEST(blob_lookup_finds_added_basic_terms) {
     char storage[IME_CANDIDATE_STORAGE_MAX];
     const char *candidates[IME_CANDIDATE_MAX];
@@ -132,6 +152,7 @@ int main(void)
 
     RUN_TEST(lookup_prefers_blob_dictionary);
     RUN_TEST(blob_lookup_preserves_candidate_order);
+    RUN_TEST(blob_lookup_reports_best_cost);
     RUN_TEST(blob_lookup_finds_added_basic_terms);
     RUN_TEST(blob_lookup_finds_large_dictionary_terms);
     RUN_TEST(repeated_lookup_hits_runtime_result_cache);

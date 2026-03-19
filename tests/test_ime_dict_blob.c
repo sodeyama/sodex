@@ -34,6 +34,29 @@ TEST(open_and_lookup_blob_entry) {
     ime_dict_blob_close(&ctx);
 }
 
+TEST(blob_lookup_reports_best_cost) {
+    struct ime_dict_blob_context ctx;
+    char storage[IME_CANDIDATE_STORAGE_MAX];
+    const char *candidates[IME_CANDIDATE_MAX];
+    int count = 0;
+    int best_cost = -1;
+
+    ime_dict_blob_init(&ctx);
+    ASSERT_EQ(ime_dict_blob_open(&ctx, TEST_BLOB_PATH), 0);
+    ASSERT_EQ(ime_dict_blob_lookup_with_cost(&ctx, "がっこう", storage, sizeof(storage),
+                                             candidates, IME_CANDIDATE_MAX,
+                                             &count, &best_cost), 1);
+    ASSERT_EQ(count, 1);
+    ASSERT_EQ(best_cost, 0);
+
+    ASSERT_EQ(ime_dict_blob_lookup_with_cost(&ctx, "しゅしょう", storage, sizeof(storage),
+                                             candidates, IME_CANDIDATE_MAX,
+                                             &count, &best_cost), 1);
+    ASSERT_EQ(count, 3);
+    ASSERT(best_cost > 0);
+    ime_dict_blob_close(&ctx);
+}
+
 TEST(blob_contains_hundreds_of_basic_entries) {
     struct ime_dict_blob_context ctx;
     u_int32_t bucket_max;
@@ -83,6 +106,7 @@ int main(void)
     printf("=== ime dict blob tests ===\n");
 
     RUN_TEST(open_and_lookup_blob_entry);
+    RUN_TEST(blob_lookup_reports_best_cost);
     RUN_TEST(blob_contains_hundreds_of_basic_entries);
     RUN_TEST(blob_contains_large_dictionary_terms_from_mozc_source);
     RUN_TEST(lookup_returns_not_found_for_unknown_reading);

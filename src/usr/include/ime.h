@@ -4,7 +4,8 @@
 #include <sys/types.h>
 
 #define IME_PREEDIT_MAX 16
-#define IME_READING_MAX 64
+#define IME_READING_MAX 128
+#define IME_CLAUSE_MAX 16
 #define IME_CANDIDATE_MAX 16
 #define IME_CANDIDATE_PAGE_SIZE 4
 #define IME_CANDIDATE_STORAGE_MAX 1024
@@ -15,6 +16,16 @@ enum ime_mode {
   IME_MODE_KATAKANA = 2
 };
 
+struct ime_clause {
+  int start_byte;
+  int end_byte;
+  int start_char;
+  int end_char;
+  int selected_index;
+  int candidate_count;
+  char selected[IME_CANDIDATE_STORAGE_MAX];
+};
+
 struct ime_state {
   enum ime_mode mode;
   char preedit[IME_PREEDIT_MAX];
@@ -22,6 +33,9 @@ struct ime_state {
   char reading[IME_READING_MAX];
   int reading_len;
   int reading_chars;
+  struct ime_clause clauses[IME_CLAUSE_MAX];
+  int clause_count;
+  int focused_clause;
   char candidate_storage[IME_CANDIDATE_STORAGE_MAX];
   const char *candidates[IME_CANDIDATE_MAX];
   int candidate_count;

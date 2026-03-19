@@ -17,6 +17,7 @@ struct ime_dictionary_cache_entry {
   int valid;
   int source;
   u_int32_t age;
+  int best_cost;
   int candidate_count;
   char reading[IME_READING_MAX];
   char storage[IME_CANDIDATE_STORAGE_MAX];
@@ -69,29 +70,47 @@ static int ime_dictionary_copy_cached_entry(
     const struct ime_dictionary_cache_entry *entry,
     char *storage, int storage_cap,
     const char **out_candidates, int candidate_cap,
-    int *out_count);
+    int *out_count,
+    int *out_best_cost);
 static int ime_dictionary_cache_lookup(const char *reading,
                                        char *storage, int storage_cap,
                                        const char **out_candidates,
                                        int candidate_cap,
                                        int *out_count,
-                                       int *out_source);
+                                       int *out_source,
+                                       int *out_best_cost);
 static void ime_dictionary_cache_store(const char *reading,
                                        const char *storage,
                                        int candidate_count,
-                                       int source);
+                                       int source,
+                                       int best_cost);
 static int ime_dictionary_lookup_fallback(const char *reading,
                                           char *storage, int storage_cap,
                                           const char **out_candidates,
                                           int candidate_cap,
-                                          int *out_count);
+                                          int *out_count,
+                                          int *out_best_cost);
 
 int ime_dictionary_lookup(const char *reading,
                           char *storage, int storage_cap,
                           const char **out_candidates, int candidate_cap,
                           int *out_count)
 {
+  return ime_dictionary_lookup_with_cost(reading,
+                                         storage, storage_cap,
+                                         out_candidates, candidate_cap,
+                                         out_count, NULL);
+}
+
+int ime_dictionary_lookup_with_cost(const char *reading,
+                                    char *storage, int storage_cap,
+                                    const char **out_candidates,
+                                    int candidate_cap,
+                                    int *out_count,
+                                    int *out_best_cost)
+{
   int cache_source = IME_DICTIONARY_SOURCE_NONE;
+  int best_cost = 0;
   int lookup_result;
 
   if (reading == NULL || storage == NULL || storage_cap <= 0 ||
@@ -102,16 +121,21 @@ int ime_dictionary_lookup(const char *reading,
   ime_dictionary_metrics.lookups++;
   ime_dictionary_metrics.last_source = IME_DICTIONARY_SOURCE_NONE;
   *out_count = 0;
+  if (out_best_cost != NULL)
+    *out_best_cost = 0;
 
   if (ime_dictionary_cache_lookup(reading, storage, storage_cap,
                                   out_candidates, candidate_cap,
-                                  out_count, &cache_source) == 0) {
+                                  out_count, &cache_source,
+                                  &best_cost) == 0) {
     ime_dictionary_metrics.result_cache_hits++;
     ime_dictionary_metrics.last_source = cache_source;
     if (cache_source == IME_DICTIONARY_SOURCE_BLOB)
       ime_dictionary_metrics.blob_lookups++;
     else if (cache_source == IME_DICTIONARY_SOURCE_FALLBACK)
       ime_dictionary_metrics.fallback_lookups++;
+    if (out_best_cost != NULL)
+      *out_best_cost = best_cost;
     return 0;
   }
   ime_dictionary_metrics.result_cache_misses++;
@@ -124,15 +148,19 @@ int ime_dictionary_lookup(const char *reading,
   }
 
   if (ime_dictionary_blob_state > 0) {
-    lookup_result = ime_dict_blob_lookup(&ime_blob_context, reading,
-                                         storage, storage_cap,
-                                         out_candidates, candidate_cap,
-                                         out_count);
+    lookup_result = ime_dict_blob_lookup_with_cost(&ime_blob_context, reading,
+                                                   storage, storage_cap,
+                                                   out_candidates,
+                                                   candidate_cap,
+                                                   out_count, &best_cost);
     if (lookup_result > 0) {
       ime_dictionary_metrics.blob_lookups++;
       ime_dictionary_metrics.last_source = IME_DICTIONARY_SOURCE_BLOB;
       ime_dictionary_cache_store(reading, storage, *out_count,
-                                 IME_DICTIONARY_SOURCE_BLOB);
+                                 IME_DICTIONARY_SOURCE_BLOB,
+                                 best_cost);
+      if (out_best_cost != NULL)
+        *out_best_cost = best_cost;
       return 0;
     }
     if (lookup_result < 0) {
@@ -145,11 +173,14 @@ int ime_dictionary_lookup(const char *reading,
 
   if (ime_dictionary_lookup_fallback(reading, storage, storage_cap,
                                      out_candidates, candidate_cap,
-                                     out_count) == 0) {
+                                     out_count, &best_cost) == 0) {
     ime_dictionary_metrics.fallback_lookups++;
     ime_dictionary_metrics.last_source = IME_DICTIONARY_SOURCE_FALLBACK;
     ime_dictionary_cache_store(reading, storage, *out_count,
-                               IME_DICTIONARY_SOURCE_FALLBACK);
+                               IME_DICTIONARY_SOURCE_FALLBACK,
+                               best_cost);
+    if (out_best_cost != NULL)
+      *out_best_cost = best_cost;
     return 0;
   }
 
@@ -251,7 +282,8 @@ static int ime_dictionary_copy_cached_entry(
     const struct ime_dictionary_cache_entry *entry,
     char *storage, int storage_cap,
     const char **out_candidates, int candidate_cap,
-    int *out_count)
+    int *out_count,
+    int *out_best_cost)
 {
   const char *cursor;
   int i;
@@ -279,6 +311,8 @@ static int ime_dictionary_copy_cached_entry(
   for (; i < candidate_cap; i++)
     out_candidates[i] = NULL;
   *out_count = entry->candidate_count;
+  if (out_best_cost != NULL)
+    *out_best_cost = entry->best_cost;
   return 0;
 }
 
@@ -287,7 +321,8 @@ static int ime_dictionary_cache_lookup(const char *reading,
                                        const char **out_candidates,
                                        int candidate_cap,
                                        int *out_count,
-                                       int *out_source)
+                                       int *out_source,
+                                       int *out_best_cost)
 {
   int i;
 
@@ -307,7 +342,8 @@ static int ime_dictionary_cache_lookup(const char *reading,
     return ime_dictionary_copy_cached_entry(&ime_dictionary_cache[i],
                                             storage, storage_cap,
                                             out_candidates, candidate_cap,
-                                            out_count);
+                                            out_count,
+                                            out_best_cost);
   }
   return -1;
 }
@@ -315,7 +351,8 @@ static int ime_dictionary_cache_lookup(const char *reading,
 static void ime_dictionary_cache_store(const char *reading,
                                        const char *storage,
                                        int candidate_count,
-                                       int source)
+                                       int source,
+                                       int best_cost)
 {
   struct ime_dictionary_cache_entry *slot = NULL;
   size_t reading_len;
@@ -358,6 +395,7 @@ static void ime_dictionary_cache_store(const char *reading,
   slot->valid = 1;
   slot->source = source;
   slot->age = ++ime_dictionary_cache_tick;
+  slot->best_cost = best_cost;
   slot->candidate_count = candidate_count;
 }
 
@@ -365,7 +403,8 @@ static int ime_dictionary_lookup_fallback(const char *reading,
                                           char *storage, int storage_cap,
                                           const char **out_candidates,
                                           int candidate_cap,
-                                          int *out_count)
+                                          int *out_count,
+                                          int *out_best_cost)
 {
   unsigned int i;
 
@@ -376,11 +415,15 @@ static int ime_dictionary_lookup_fallback(const char *reading,
                   sizeof(ime_dictionary_fallback[0]); i++) {
     if (strcmp(ime_dictionary_fallback[i].reading, reading) != 0)
       continue;
-    return ime_dictionary_copy_candidates(ime_dictionary_fallback[i].candidates,
-                                          ime_dictionary_fallback[i].candidate_count,
-                                          storage, storage_cap,
-                                          out_candidates, candidate_cap,
-                                          out_count);
+    if (ime_dictionary_copy_candidates(ime_dictionary_fallback[i].candidates,
+                                       ime_dictionary_fallback[i].candidate_count,
+                                       storage, storage_cap,
+                                       out_candidates, candidate_cap,
+                                       out_count) < 0)
+      return -1;
+    if (out_best_cost != NULL)
+      *out_best_cost = 0;
+    return 0;
   }
 
   return -1;

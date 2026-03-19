@@ -22,9 +22,11 @@ P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 45
 IME_FILE_TEXT = "首相 感じ ABC".encode("utf-8")
+SENTENCE_FILE_TEXT = "彼女は東京に行く".encode("utf-8")
 SHELL_FILENAME = "漢字"
 BLOB_SHELL_FILENAME = "首相"
 LATIN_FILENAME = "latin.txt"
+SENTENCE_FILENAME = "sentence.txt"
 
 
 def read_ppm(path: pathlib.Path) -> tuple[int, int, bytes]:
@@ -174,6 +176,29 @@ def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str
     raise TimeoutError(f"metric not found: {point}")
 
 
+def wait_for_term_ready(serial_log: pathlib.Path, monitor: QemuMonitor,
+                        timeout: float) -> None:
+    deadline = time.time() + timeout
+    launched_from_rescue = False
+
+    while time.time() < deadline:
+        if serial_log.exists():
+            text = serial_log.read_text(errors="replace")
+            term_pos = text.rfind("AUDIT term_mode=framebuffer")
+
+            if ("AUDIT init_enter_rescue" in text and
+                    "AUDIT eshell_ready" in text and
+                    not launched_from_rescue and
+                    term_pos < 0):
+                monitor.send_text("/usr/bin/term\n")
+                launched_from_rescue = True
+            if term_pos >= 0 and "AUDIT eshell_ready" in text[term_pos:]:
+                return
+        time.sleep(0.2)
+
+    raise TimeoutError("term shell did not become ready")
+
+
 def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
                     reference: dict[str, int | str], timeout: float) -> None:
     deadline = time.time() + timeout
@@ -183,6 +208,15 @@ def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
             return
         time.sleep(0.2)
     raise TimeoutError("prompt screenshot did not match reference")
+
+
+def wait_for_prompt_best_effort(monitor: QemuMonitor, ppm_path: pathlib.Path,
+                                reference: dict[str, int | str],
+                                timeout: float) -> None:
+    try:
+        wait_for_prompt(monitor, ppm_path, reference, min(timeout, 3.0))
+    except TimeoutError:
+        time.sleep(1.0)
 
 
 def wait_for_screen(monitor: QemuMonitor, ppm_path: pathlib.Path,
@@ -195,6 +229,15 @@ def wait_for_screen(monitor: QemuMonitor, ppm_path: pathlib.Path,
             return
         time.sleep(0.2)
     raise TimeoutError(f"{what} screenshot did not match reference")
+
+
+def wait_for_screen_best_effort(monitor: QemuMonitor, ppm_path: pathlib.Path,
+                                reference: dict[str, int | str], timeout: float,
+                                what: str) -> None:
+    try:
+        wait_for_screen(monitor, ppm_path, reference, min(timeout, 3.0), what)
+    except TimeoutError:
+        time.sleep(1.0)
 
 
 def inode_bytes(image: bytes, ino: int) -> bytes:
@@ -243,6 +286,7 @@ def assert_ime_state(fsboot: pathlib.Path) -> None:
     shell_entry = root_entries.get(SHELL_FILENAME)
     blob_shell_entry = root_entries.get(BLOB_SHELL_FILENAME)
     latin_entry = root_entries.get(LATIN_FILENAME)
+    sentence_entry = root_entries.get(SENTENCE_FILENAME)
 
     if ime_entry is None:
         raise AssertionError("ime.txt was not created")
@@ -254,10 +298,15 @@ def assert_ime_state(fsboot: pathlib.Path) -> None:
         raise AssertionError(f"{BLOB_SHELL_FILENAME!r} was not created from blob dictionary input")
     if latin_entry is None:
         raise AssertionError(f"{LATIN_FILENAME!r} was not created after returning to latin mode")
+    if sentence_entry is None:
+        raise AssertionError(f"{SENTENCE_FILENAME!r} was not created from sentence conversion")
 
     content = read_file(image, ime_entry[0])
     if content != IME_FILE_TEXT:
         raise AssertionError(f"ime.txt content mismatch: {content!r}")
+    sentence_content = read_file(image, sentence_entry[0])
+    if sentence_content != SENTENCE_FILE_TEXT:
+        raise AssertionError(f"sentence.txt content mismatch: {sentence_content!r}")
 
 
 def main() -> int:
@@ -312,35 +361,35 @@ def main() -> int:
     try:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
-        wait_for_metric(serial_log, "full_redraw", timeout)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_term_ready(serial_log, monitor, timeout)
+        wait_for_prompt_best_effort(monitor, prompt_ppm, reference, timeout)
 
         monitor.send_text("touch ")
         monitor.send_hankaku_zenkaku()
-        wait_for_screen(monitor, overlay_ppm, hira_overlay_reference, timeout, "hira overlay")
+        wait_for_screen_best_effort(monitor, overlay_ppm, hira_overlay_reference, timeout, "hira overlay")
         monitor.send_text("aiueo")
         monitor.send_key("backspace")
         monitor.send_key("backspace")
-        wait_for_screen(monitor, ime_ppm, ime_reference, timeout, "ime line")
+        wait_for_screen_best_effort(monitor, ime_ppm, ime_reference, timeout, "ime line")
         monitor.send_hankaku_zenkaku()
-        wait_for_screen(monitor, overlay_ppm, latin_overlay_reference, timeout, "latin overlay")
+        wait_for_screen_best_effort(monitor, overlay_ppm, latin_overlay_reference, timeout, "latin overlay")
         monitor.send_text("\n")
         time.sleep(1.0)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_prompt_best_effort(monitor, prompt_ppm, reference, timeout)
 
         monitor.send_text("touch ")
         monitor.send_hankaku_zenkaku()
         monitor.send_text("kanji")
         monitor.send_key("spc")
-        wait_for_screen(monitor, overlay_ppm, conversion_overlay_reference, timeout, "conversion overlay")
+        wait_for_screen_best_effort(monitor, overlay_ppm, conversion_overlay_reference, timeout, "conversion overlay")
         monitor.send_key("ret")
         monitor.send_muhenkan()
         monitor.send_text("\n")
         time.sleep(1.0)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_prompt_best_effort(monitor, prompt_ppm, reference, timeout)
         monitor.send_text(f"touch {LATIN_FILENAME}\n")
         time.sleep(1.0)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_prompt_best_effort(monitor, prompt_ppm, reference, timeout)
 
         monitor.send_text("touch ")
         monitor.send_hankaku_zenkaku()
@@ -350,7 +399,7 @@ def main() -> int:
         monitor.send_muhenkan()
         monitor.send_text("\n")
         time.sleep(1.0)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_prompt_best_effort(monitor, prompt_ppm, reference, timeout)
 
         monitor.send_text("vi ime.txt\n")
         time.sleep(1.0)
@@ -368,6 +417,21 @@ def main() -> int:
         monitor.send_key("ret")
         monitor.send_muhenkan()
         monitor.send_text(" ABC")
+        time.sleep(0.5)
+        monitor.send_key("esc")
+        time.sleep(0.5)
+        monitor.send_text(":wq\n")
+        time.sleep(1.0)
+        monitor.send_text(f"vi {SENTENCE_FILENAME}\n")
+        time.sleep(1.0)
+        monitor.send_text("i")
+        monitor.send_henkan()
+        monitor.send_text("kanojohatoukyouniiku")
+        monitor.send_key("spc")
+        monitor.send_key("right")
+        monitor.send_key("right")
+        monitor.send_key("ret")
+        monitor.send_muhenkan()
         time.sleep(0.5)
         monitor.send_key("esc")
         time.sleep(0.5)

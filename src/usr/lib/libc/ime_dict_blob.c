@@ -11,7 +11,9 @@
 #endif
 
 #define IME_DICT_BLOB_MAGIC "IMED"
-#define IME_DICT_BLOB_ENTRY_SIZE 20
+#define IME_DICT_BLOB_VERSION_LEGACY 2U
+#define IME_DICT_BLOB_ENTRY_SIZE_V2 20
+#define IME_DICT_BLOB_ENTRY_SIZE_V3 24
 
 struct ime_dict_blob_entry {
   u_int32_t reading_hash;
@@ -20,6 +22,7 @@ struct ime_dict_blob_entry {
   u_int16_t reading_len;
   u_int16_t candidate_count;
   u_int32_t candidate_bytes;
+  u_int32_t best_cost;
 };
 
 static int ime_dict_blob_read_raw_all(int fd, u_int32_t offset,
@@ -33,6 +36,7 @@ static int ime_dict_blob_read_at(struct ime_dict_blob_context *ctx,
 static int ime_dict_blob_read_entry(struct ime_dict_blob_context *ctx,
                                     u_int32_t index,
                                     struct ime_dict_blob_entry *entry);
+static int ime_dict_blob_entry_size(const struct ime_dict_blob_context *ctx);
 static int ime_dict_blob_match_reading(struct ime_dict_blob_context *ctx,
                                        const struct ime_dict_blob_entry *entry,
                                        const char *reading,
@@ -78,7 +82,8 @@ int ime_dict_blob_open(struct ime_dict_blob_context *ctx, const char *path)
     goto fail;
   if (ime_dict_blob_memcmp(ctx->header.magic, IME_DICT_BLOB_MAGIC, 4) != 0)
     goto fail;
-  if (ctx->header.version != IME_DICT_BLOB_VERSION)
+  if (ctx->header.version != IME_DICT_BLOB_VERSION &&
+      ctx->header.version != IME_DICT_BLOB_VERSION_LEGACY)
     goto fail;
   if (ctx->header.bucket_count == 0 ||
       ctx->header.bucket_count > IME_DICT_BLOB_BUCKET_COUNT_MAX)
@@ -91,6 +96,10 @@ int ime_dict_blob_open(struct ime_dict_blob_context *ctx, const char *path)
 
   bucket_bytes = (ctx->header.bucket_count + 1U) * sizeof(u_int32_t);
   if (ctx->header.bucket_offset + bucket_bytes > ctx->header.file_size)
+    goto fail;
+  if (ctx->header.entry_offset +
+      ctx->header.entry_count * (u_int32_t)ime_dict_blob_entry_size(ctx) >
+      ctx->header.data_offset)
     goto fail;
   if (ime_dict_blob_read_raw_all(ctx->fd, ctx->header.bucket_offset,
                                  ctx->bucket_offsets,
@@ -121,6 +130,20 @@ int ime_dict_blob_lookup(struct ime_dict_blob_context *ctx,
                          const char **out_candidates, int candidate_cap,
                          int *out_count)
 {
+  return ime_dict_blob_lookup_with_cost(ctx, reading,
+                                        storage, storage_cap,
+                                        out_candidates, candidate_cap,
+                                        out_count, NULL);
+}
+
+int ime_dict_blob_lookup_with_cost(struct ime_dict_blob_context *ctx,
+                                   const char *reading,
+                                   char *storage, int storage_cap,
+                                   const char **out_candidates,
+                                   int candidate_cap,
+                                   int *out_count,
+                                   int *out_best_cost)
+{
   struct ime_dict_blob_entry entry;
   u_int32_t bucket;
   u_int32_t reading_hash;
@@ -137,6 +160,8 @@ int ime_dict_blob_lookup(struct ime_dict_blob_context *ctx,
 
   storage[0] = '\0';
   *out_count = 0;
+  if (out_best_cost != NULL)
+    *out_best_cost = 0;
   for (i = 0; i < candidate_cap; i++)
     out_candidates[i] = NULL;
   if (reading[0] == '\0')
@@ -176,6 +201,8 @@ int ime_dict_blob_lookup(struct ime_dict_blob_context *ctx,
                                        (int)entry.candidate_count) < 0)
       return -1;
     *out_count = (int)entry.candidate_count;
+    if (out_best_cost != NULL)
+      *out_best_cost = (int)entry.best_cost;
     return 1;
   }
 
@@ -323,17 +350,32 @@ static int ime_dict_blob_read_entry(struct ime_dict_blob_context *ctx,
                                     u_int32_t index,
                                     struct ime_dict_blob_entry *entry)
 {
-  u_int8_t raw[IME_DICT_BLOB_ENTRY_SIZE];
+  u_int8_t raw[IME_DICT_BLOB_ENTRY_SIZE_V3];
+  int entry_size;
 
   if (ctx == NULL || entry == NULL || index >= ctx->header.entry_count)
     return -1;
+  entry_size = ime_dict_blob_entry_size(ctx);
+  memset(entry, 0, sizeof(*entry));
   if (ime_dict_blob_read_at(ctx,
                             ctx->header.entry_offset +
-                            index * IME_DICT_BLOB_ENTRY_SIZE,
-                            raw, sizeof(raw)) < 0)
+                            index * (u_int32_t)entry_size,
+                            raw, entry_size) < 0)
     return -1;
-  memcpy(entry, raw, sizeof(*entry));
+  if (ctx->header.version == IME_DICT_BLOB_VERSION_LEGACY)
+    memcpy(entry, raw, (size_t)IME_DICT_BLOB_ENTRY_SIZE_V2);
+  else
+    memcpy(entry, raw, sizeof(*entry));
   return 0;
+}
+
+static int ime_dict_blob_entry_size(const struct ime_dict_blob_context *ctx)
+{
+  if (ctx == NULL)
+    return IME_DICT_BLOB_ENTRY_SIZE_V3;
+  if (ctx->header.version == IME_DICT_BLOB_VERSION_LEGACY)
+    return IME_DICT_BLOB_ENTRY_SIZE_V2;
+  return IME_DICT_BLOB_ENTRY_SIZE_V3;
 }
 
 static int ime_dict_blob_match_reading(struct ime_dict_blob_context *ctx,

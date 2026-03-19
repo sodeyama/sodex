@@ -5,7 +5,7 @@
 #include <utf8.h>
 
 #define TEST_BLOB_PATH "ime_dictionary_fixture.blob"
-#define TEST_BUF_SIZE 128
+#define TEST_BUF_SIZE 256
 
 static int configure_dictionary(void)
 {
@@ -24,6 +24,15 @@ static int feed_text(struct ime_state *ime, const char *text, char *out)
         text++;
     }
     return total;
+}
+
+static void assert_clause_reading(const struct ime_state *ime, int clause_index,
+                                  const char *expected)
+{
+    char reading[TEST_BUF_SIZE];
+
+    ASSERT(ime_copy_clause_reading(ime, clause_index, reading, sizeof(reading)) > 0);
+    ASSERT_STR_EQ(reading, expected);
 }
 
 TEST(start_conversion_uses_blob_reading) {
@@ -82,6 +91,76 @@ TEST(candidate_paging_tracks_selected_window) {
     ASSERT_EQ(ime_candidate_page_index(&ime), 1);
     ASSERT_EQ(ime_candidate_page_start(&ime), 4);
     ASSERT_STR_EQ(ime_current_candidate(&ime), "起稿");
+}
+
+TEST(sentence_conversion_segments_full_reading_and_commits) {
+    struct ime_state ime;
+    char out[TEST_BUF_SIZE];
+    int replace_chars = 0;
+    int len;
+
+    ASSERT_EQ(configure_dictionary(), 0);
+    ime_init(&ime);
+    ime_set_mode(&ime, IME_MODE_HIRAGANA);
+    ASSERT_EQ(feed_text(&ime, "kanojohatoukyouniiku", out), 39);
+    ASSERT_STR_EQ(ime_reading(&ime), "かのじょはとうきょうにいく");
+    ASSERT_EQ(ime_reading_chars(&ime), 13);
+    ASSERT_EQ(ime_start_conversion(&ime), 1);
+    ASSERT_EQ(ime_conversion_active(&ime), 1);
+    ASSERT_EQ(ime_clause_count(&ime), 5);
+    ASSERT_EQ(ime_focused_clause_index(&ime), 0);
+    assert_clause_reading(&ime, 0, "かのじょ");
+    assert_clause_reading(&ime, 1, "は");
+    assert_clause_reading(&ime, 2, "とうきょう");
+    assert_clause_reading(&ime, 3, "に");
+    assert_clause_reading(&ime, 4, "いく");
+    ASSERT_STR_EQ(ime_current_candidate(&ime), "彼女");
+
+    len = ime_commit_conversion(&ime, out, sizeof(out), &replace_chars);
+    ASSERT_EQ(len, 24);
+    ASSERT_EQ(replace_chars, 13);
+    out[len] = '\0';
+    ASSERT_STR_EQ(out, "彼女は東京に行く");
+}
+
+TEST(sentence_conversion_moves_focus_between_clauses) {
+    struct ime_state ime;
+    char out[TEST_BUF_SIZE];
+
+    ASSERT_EQ(configure_dictionary(), 0);
+    ime_init(&ime);
+    ime_set_mode(&ime, IME_MODE_HIRAGANA);
+    ASSERT_EQ(feed_text(&ime, "kanojohatoukyouniiku", out), 39);
+    ASSERT_EQ(ime_start_conversion(&ime), 1);
+    ASSERT_EQ(ime_focus_next_clause(&ime), 1);
+    ASSERT_EQ(ime_focused_clause_index(&ime), 1);
+    ASSERT_STR_EQ(ime_current_candidate(&ime), "は");
+    ASSERT_EQ(ime_focus_next_clause(&ime), 1);
+    ASSERT_EQ(ime_focused_clause_index(&ime), 2);
+    assert_clause_reading(&ime, 2, "とうきょう");
+    ASSERT_STR_EQ(ime_current_candidate(&ime), "東京");
+    ASSERT_EQ(ime_clause_start_char(&ime, 2), 5);
+    ASSERT_EQ(ime_clause_end_char(&ime, 2), 10);
+}
+
+TEST(sentence_conversion_expands_clause_boundary) {
+    struct ime_state ime;
+    char out[TEST_BUF_SIZE];
+
+    ASSERT_EQ(configure_dictionary(), 0);
+    ime_init(&ime);
+    ime_set_mode(&ime, IME_MODE_HIRAGANA);
+    ASSERT_EQ(feed_text(&ime, "kanojohatoukyouniiku", out), 39);
+    ASSERT_EQ(ime_start_conversion(&ime), 1);
+    ASSERT_EQ(ime_focus_next_clause(&ime), 1);
+    ASSERT_EQ(ime_focus_next_clause(&ime), 1);
+    ASSERT_EQ(ime_focused_clause_index(&ime), 2);
+    ASSERT_EQ(ime_expand_clause_right(&ime), 1);
+    ASSERT_EQ(ime_clause_count(&ime), 4);
+    ASSERT_EQ(ime_focused_clause_index(&ime), 2);
+    assert_clause_reading(&ime, 2, "とうきょうに");
+    ASSERT_STR_EQ(ime_current_candidate(&ime), "とうきょうに");
+    assert_clause_reading(&ime, 3, "いく");
 }
 
 TEST(common_basic_term_converts_from_expanded_dictionary) {
@@ -197,6 +276,9 @@ int main(void)
     RUN_TEST(start_conversion_uses_blob_reading);
     RUN_TEST(candidate_cycle_moves_forward_and_backward);
     RUN_TEST(candidate_paging_tracks_selected_window);
+    RUN_TEST(sentence_conversion_segments_full_reading_and_commits);
+    RUN_TEST(sentence_conversion_moves_focus_between_clauses);
+    RUN_TEST(sentence_conversion_expands_clause_boundary);
     RUN_TEST(common_basic_term_converts_from_expanded_dictionary);
     RUN_TEST(common_city_and_weather_terms_convert_from_expanded_dictionary);
     RUN_TEST(common_large_dictionary_term_converts_from_mozc_source);

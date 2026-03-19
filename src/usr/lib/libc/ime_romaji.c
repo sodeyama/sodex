@@ -175,6 +175,9 @@ void ime_reset_segment(struct ime_state *state)
   memset(state->reading, 0, sizeof(state->reading));
   state->reading_len = 0;
   state->reading_chars = 0;
+  memset(state->clauses, 0, sizeof(state->clauses));
+  state->clause_count = 0;
+  state->focused_clause = 0;
   ime_clear_candidates(state);
 }
 
@@ -258,8 +261,11 @@ static void ime_clear_candidates(struct ime_state *state)
   if (state == NULL)
     return;
   memset(state->candidate_storage, 0, sizeof(state->candidate_storage));
+  memset(state->clauses, 0, sizeof(state->clauses));
   for (i = 0; i < IME_CANDIDATE_MAX; i++)
     state->candidates[i] = NULL;
+  state->clause_count = 0;
+  state->focused_clause = 0;
   state->candidate_count = 0;
   state->candidate_index = 0;
   state->conversion_active = 0;

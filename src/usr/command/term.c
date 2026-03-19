@@ -8,8 +8,10 @@
 #include <ime.h>
 #include <ime_conversion.h>
 #include <key.h>
+#include <shell_completion.h>
 #include <sleep.h>
 #include <terminal_surface.h>
+#include <termios.h>
 #include <tty.h>
 #include <utf8.h>
 #include <vt_parser.h>
@@ -62,6 +64,7 @@ enum term_ime_action {
 };
 
 struct term_app {
+  pid_t shell_pid;
   int master_fd;
   int use_framebuffer;
   int cursor_valid;
@@ -88,6 +91,7 @@ struct term_app {
   int scroll_head;
   int scroll_len;
   struct ime_state ime;
+  struct shell_completion_state completion;
   struct term_cell last_ime_overlay_cells[TERM_IME_OVERLAY_MAX_CELLS];
 };
 
@@ -106,7 +110,20 @@ PRIVATE int term_pixels_for_cells(const struct term_app *app, int cells);
 PRIVATE int pump_master(struct term_app *app);
 PRIVATE int pump_keys(struct term_app *app);
 PRIVATE int translate_key(struct term_app *app, struct key_event *event,
+                          pid_t foreground_pid,
+                          u_int32_t lflag,
                           char *buf, int *needs_redraw);
+PRIVATE int term_completion_context(struct term_app *app,
+                                    pid_t *foreground_pid,
+                                    u_int32_t *lflag);
+PRIVATE int term_ime_busy(const struct term_app *app);
+PRIVATE int term_handle_completion(struct term_app *app,
+                                   const struct key_event *event,
+                                   pid_t foreground_pid,
+                                   u_int32_t lflag,
+                                   char *buf,
+                                   int *handled,
+                                   int *needs_redraw);
 PRIVATE void render_surface(struct term_app *app, int force);
 PRIVATE void term_reset_present_bounds(struct term_app *app);
 PRIVATE void term_mark_present_rect(struct term_app *app,
@@ -203,7 +220,9 @@ int main(int argc, char** argv)
 
   shell_argv[0] = "eshell";
   shell_argv[1] = NULL;
-  if (execve_pty("/usr/bin/eshell", shell_argv, app->master_fd) < 0) {
+  app->shell_pid = execve_pty("/usr/bin/eshell", shell_argv, app->master_fd);
+  shell_completion_state_set_shell_pid(&app->completion, app->shell_pid);
+  if (app->shell_pid < 0) {
     term_audit_log("AUDIT term_execve_pty_failed\n");
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: fallback to eshell\n", 25);
@@ -262,6 +281,7 @@ PRIVATE int term_init(struct term_app *app)
   app->last_scroll_count = 0;
   app->long_output_base = 0;
   ime_init(&app->ime);
+  shell_completion_state_init(&app->completion);
   blank = app->parser.default_pen;
   blank.ch = ' ';
   terminal_surface_reset(&app->surface, &blank);
@@ -547,6 +567,8 @@ PRIVATE int pump_master(struct term_app *app)
     if (len <= 0)
       break;
 
+    shell_completion_state_observe_output(&app->completion, buf, len,
+                                          get_foreground_pid(app->master_fd));
     append_scrollback(app, buf, len);
     vt_parser_feed(&app->parser, buf, len);
     app->metrics.pty_bytes += (u_int32_t)len;
@@ -566,8 +588,21 @@ PRIVATE int pump_keys(struct term_app *app)
   while (getkeyevent(&event) > 0) {
     char buf[TERM_INPUT_BUF];
     int needs_redraw = 0;
-    int len = translate_key(app, &event, buf, &needs_redraw);
+    pid_t foreground_pid = -1;
+    u_int32_t lflag = 0;
+    int have_completion_context =
+        term_completion_context(app, &foreground_pid, &lflag) == 0;
+    int len = translate_key(app, &event,
+                            have_completion_context != 0 ? foreground_pid : -1,
+                            have_completion_context != 0 ? lflag : 0,
+                            buf, &needs_redraw);
     if (len > 0) {
+      if (have_completion_context != 0 &&
+          shell_completion_state_can_track(&app->completion,
+                                           foreground_pid,
+                                           lflag) != 0) {
+        shell_completion_state_feed_input(&app->completion, buf, len);
+      }
       write(app->master_fd, buf, len);
       total += len;
     }
@@ -578,16 +613,40 @@ PRIVATE int pump_keys(struct term_app *app)
   return total;
 }
 
+PRIVATE int term_completion_context(struct term_app *app,
+                                    pid_t *foreground_pid,
+                                    u_int32_t *lflag)
+{
+  struct termios termios;
+
+  if (app == NULL || foreground_pid == NULL || lflag == NULL)
+    return -1;
+
+  *foreground_pid = get_foreground_pid(app->master_fd);
+  if (tcgetattr(app->master_fd, &termios) < 0)
+    return -1;
+  *lflag = termios.c_lflag;
+  return 0;
+}
+
 PRIVATE int translate_key(struct term_app *app, struct key_event *event,
+                          pid_t foreground_pid,
+                          u_int32_t lflag,
                           char *buf, int *needs_redraw)
 {
   int len = 0;
+  int handled = 0;
   enum term_ime_action action;
 
   if (needs_redraw != NULL)
     *needs_redraw = 0;
   if (event->flags & KEY_EVENT_RELEASE)
     return 0;
+
+  len = term_handle_completion(app, event, foreground_pid, lflag,
+                               buf, &handled, needs_redraw);
+  if (handled != 0)
+    return len;
 
   action = ime_action_for_event(&app->ime, event);
   if (action != TERM_IME_ACTION_NONE) {
@@ -736,6 +795,86 @@ PRIVATE int translate_key(struct term_app *app, struct key_event *event,
   ime_reset_segment(&app->ime);
   buf[0] = event->ascii;
   return 1;
+}
+
+PRIVATE int term_ime_busy(const struct term_app *app)
+{
+  if (app == NULL)
+    return 0;
+  if (ime_conversion_active(&app->ime) != 0)
+    return 1;
+  if (app->ime.preedit_len > 0)
+    return 1;
+  if (ime_reading_chars(&app->ime) > 0)
+    return 1;
+  return 0;
+}
+
+PRIVATE int term_handle_completion(struct term_app *app,
+                                   const struct key_event *event,
+                                   pid_t foreground_pid,
+                                   u_int32_t lflag,
+                                   char *buf,
+                                   int *handled,
+                                   int *needs_redraw)
+{
+  int was_active;
+  int is_tab_key;
+  int is_plain_key;
+  int len = 0;
+
+  if (handled != NULL)
+    *handled = 0;
+  if (app == NULL || event == NULL || buf == NULL || handled == NULL)
+    return 0;
+
+  was_active = shell_completion_state_active(&app->completion);
+  is_tab_key = ((event->flags & KEY_EVENT_EXTENDED) == 0 &&
+                (event->modifiers & (KEY_MOD_CTRL | KEY_MOD_ALT)) == 0 &&
+                event->ascii == KEY_TAB);
+  is_plain_key = ((event->flags & KEY_EVENT_EXTENDED) == 0 &&
+                  (event->modifiers & (KEY_MOD_CTRL | KEY_MOD_ALT)) == 0);
+
+  if (was_active != 0) {
+    if (is_plain_key != 0 && event->ascii == KEY_ESC) {
+      len = shell_completion_state_cancel_completion(&app->completion,
+                                                     buf, TERM_INPUT_BUF);
+      *handled = 1;
+      if (needs_redraw != NULL)
+        *needs_redraw = 1;
+      return len;
+    }
+    if (is_tab_key != 0) {
+      len = shell_completion_state_complete(&app->completion,
+                                            (event->modifiers & KEY_MOD_SHIFT) != 0,
+                                            buf, TERM_INPUT_BUF);
+      *handled = 1;
+      if (needs_redraw != NULL)
+        *needs_redraw = 1;
+      return len;
+    }
+    shell_completion_state_finish_completion(&app->completion);
+    if (needs_redraw != NULL)
+      *needs_redraw = 1;
+    return 0;
+  }
+
+  if (is_tab_key == 0)
+    return 0;
+  if (shell_completion_state_can_complete(&app->completion,
+                                          foreground_pid,
+                                          lflag,
+                                          term_ime_busy(app)) == 0)
+    return 0;
+
+  len = shell_completion_state_complete(&app->completion,
+                                        (event->modifiers & KEY_MOD_SHIFT) != 0,
+                                        buf, TERM_INPUT_BUF);
+  *handled = 1;
+  if (needs_redraw != NULL &&
+      shell_completion_state_active(&app->completion) != 0)
+    *needs_redraw = 1;
+  return len;
 }
 
 PRIVATE void render_surface(struct term_app *app, int force)
@@ -1147,7 +1286,7 @@ PRIVATE void render_ime_overlay(struct term_app *app, int force)
 {
   struct term_cell cell;
   struct term_cell cells[TERM_IME_OVERLAY_MAX_CELLS];
-  char text[TERM_IME_STATUS_COLS + 1];
+  char text[SHELL_COMPLETION_OVERLAY_MAX];
   int clear_start_col;
   int clear_width;
   int overlay_start_col;
@@ -1174,7 +1313,8 @@ PRIVATE void render_ime_overlay(struct term_app *app, int force)
   if (app->use_framebuffer != 0) {
     cell_len = build_ime_overlay_cells(app, cells, TERM_IME_OVERLAY_MAX_CELLS);
     overlay_width = TERM_IME_STATUS_COLS;
-    if (ime_conversion_active(&app->ime) != 0)
+    if (ime_conversion_active(&app->ime) != 0 ||
+        shell_completion_state_active(&app->completion) != 0)
       overlay_width = TERM_IME_CONVERSION_COLS;
     if (cell_len > overlay_width)
       overlay_width = cell_len;
@@ -1215,6 +1355,9 @@ PRIVATE void render_ime_overlay(struct term_app *app, int force)
 
   build_ime_overlay_text(app, text, sizeof(text));
   width = TERM_IME_STATUS_COLS;
+  if (shell_completion_state_active(&app->completion) != 0 ||
+      ime_conversion_active(&app->ime) != 0)
+    width = TERM_IME_CONVERSION_COLS;
   if (width > right_edge_col)
     width = right_edge_col;
   clear_width = width;
@@ -1339,6 +1482,7 @@ PRIVATE int build_ime_overlay_cells(struct term_app *app,
 {
   const char *mode;
   const char *reading;
+  char completion_text[SHELL_COMPLETION_OVERLAY_MAX];
   char *p;
   int i;
   int len = 0;
@@ -1357,6 +1501,15 @@ PRIVATE int build_ime_overlay_cells(struct term_app *app,
     cells[i].fg = TERM_COLOR_BLACK;
     cells[i].bg = TERM_COLOR_LIGHT_GRAY;
     cells[i].width = 1;
+  }
+
+  if (shell_completion_state_active(&app->completion) != 0) {
+    if (shell_completion_state_overlay_text(&app->completion,
+                                            completion_text,
+                                            sizeof(completion_text)) <= 0)
+      return 0;
+    return append_overlay_utf8(cells, 0, cap, completion_text,
+                               TERM_COLOR_BLACK, TERM_COLOR_LIGHT_GRAY, 0);
   }
 
   mode = ime_mode_label(&app->ime);
@@ -1543,6 +1696,7 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
   const char *mode;
   const char *preedit;
   const char *candidate;
+  char completion_text[SHELL_COMPLETION_OVERLAY_MAX];
   char info[24];
   char *p;
   int pos = 0;
@@ -1555,6 +1709,24 @@ PRIVATE void build_ime_overlay_text(struct term_app *app, char *text, int cap)
 
   memset(text, ' ', (size_t)(cap - 1));
   text[cap - 1] = '\0';
+
+  if (shell_completion_state_active(&app->completion) != 0) {
+    int i = 0;
+
+    if (shell_completion_state_overlay_text(&app->completion,
+                                            completion_text,
+                                            sizeof(completion_text)) <= 0)
+      return;
+    while (completion_text[i] != '\0' && pos < cap - 1) {
+      unsigned char ch = (unsigned char)completion_text[i++];
+
+      if (ch >= 0x20 && ch <= 0x7e)
+        text[pos++] = (char)ch;
+      else
+        text[pos++] = '?';
+    }
+    return;
+  }
 
   mode = ime_mode_label(&app->ime);
   preedit = ime_preedit(&app->ime);

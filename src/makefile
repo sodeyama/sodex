@@ -232,7 +232,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-agent-bringup test-claude-smoke test-agent-full ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-fs test-qemu-shell-io test-qemu-shell-completion test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-agent-bringup test-claude-smoke test-agent-full ktest-build
 test-qemu: ktest-build
 	@echo "=== Running kernel integration tests in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_ktest.py $(FSBOOT) $(LOGDIR)
@@ -262,6 +262,13 @@ test-qemu-ext3-large:
 test-qemu-shell-io: all
 	@echo "=== Running shell IO smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_shell_io_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-shell-completion:
+	@$(MAKE) clean
+	@python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(LOGDIR)/shell-completion-rootfs-overlay
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/shell-completion-rootfs-overlay all
+	@echo "=== Running shell completion smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_shell_completion_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-vi: all
 	@echo "=== Running vi smoke in QEMU ==="

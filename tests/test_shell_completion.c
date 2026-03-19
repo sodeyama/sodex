@@ -174,6 +174,27 @@ TEST(unique_directory_completion_appends_slash) {
     cleanup_tree(case_dir);
 }
 
+TEST(empty_token_unique_completion_appends_space) {
+    struct shell_completion_state state;
+    char case_dir[256];
+    char path[320];
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(path, sizeof(path), case_dir, "only.txt"));
+    ASSERT(write_text_file(path, ""));
+
+    shell_completion_state_init(&state);
+    shell_completion_state_set_shell_pid(&state, 42);
+    observe_prompt(&state, case_dir);
+
+    ASSERT_EQ(feed_text(&state, "cat "), 4);
+    ASSERT(complete_once(&state, 0) > 0);
+    ASSERT_STR_EQ(shell_completion_state_line(&state), "cat only.txt ");
+    ASSERT_EQ(shell_completion_state_active(&state), 0);
+
+    cleanup_tree(case_dir);
+}
+
 TEST(multiple_candidates_extend_cycle_and_cancel) {
     struct shell_completion_state state;
     char case_dir[256];
@@ -214,6 +235,40 @@ TEST(multiple_candidates_extend_cycle_and_cancel) {
     ASSERT(complete_once(&state, 0) > 0);
     ASSERT_STR_EQ(shell_completion_state_line(&state), "cat pair_ap");
     ASSERT_EQ(shell_completion_state_active(&state), 1);
+
+    cleanup_tree(case_dir);
+}
+
+TEST(empty_token_cycles_all_files_in_current_dir) {
+    struct shell_completion_state state;
+    char case_dir[256];
+    char path[320];
+    char overlay[160];
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(path, sizeof(path), case_dir, "alpha.txt"));
+    ASSERT(write_text_file(path, ""));
+    ASSERT(join_path(path, sizeof(path), case_dir, "beta.txt"));
+    ASSERT(write_text_file(path, ""));
+
+    shell_completion_state_init(&state);
+    shell_completion_state_set_shell_pid(&state, 42);
+    observe_prompt(&state, case_dir);
+
+    ASSERT_EQ(feed_text(&state, "cat "), 4);
+    ASSERT(complete_once(&state, 0) > 0);
+    ASSERT_STR_EQ(shell_completion_state_line(&state), "cat alpha.txt");
+    ASSERT(shell_completion_state_overlay_text(&state, overlay, sizeof(overlay)) > 0);
+    ASSERT_STR_EQ(overlay, "CMP 1/2 alpha.txt");
+
+    ASSERT(complete_once(&state, 0) > 0);
+    ASSERT_STR_EQ(shell_completion_state_line(&state), "cat beta.txt");
+    ASSERT(shell_completion_state_overlay_text(&state, overlay, sizeof(overlay)) > 0);
+    ASSERT_STR_EQ(overlay, "CMP 2/2 beta.txt");
+
+    ASSERT(cancel_once(&state) > 0);
+    ASSERT_STR_EQ(shell_completion_state_line(&state), "cat ");
+    ASSERT_EQ(shell_completion_state_active(&state), 0);
 
     cleanup_tree(case_dir);
 }
@@ -427,7 +482,9 @@ int main(void)
     RUN_TEST(feed_input_tracks_utf8_and_backspace);
     RUN_TEST(unique_file_completion_appends_space);
     RUN_TEST(unique_directory_completion_appends_slash);
+    RUN_TEST(empty_token_unique_completion_appends_space);
     RUN_TEST(multiple_candidates_extend_cycle_and_cancel);
+    RUN_TEST(empty_token_cycles_all_files_in_current_dir);
     RUN_TEST(escaped_space_completion_uses_backslash_escape);
     RUN_TEST(quoted_completion_preserves_open_quote);
     RUN_TEST(redirection_completion_targets_last_word);

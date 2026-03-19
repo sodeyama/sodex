@@ -375,8 +375,41 @@ static int shell_completion_parse_token(const struct shell_completion_state *sta
     token->logical[logical_len] = '\0';
   }
 
-  if (active == 0 || logical_len <= 0 || escape != 0)
+  if (escape != 0)
     return 0;
+
+  if (active == 0) {
+    if (state->line_len > 0 &&
+        shell_completion_is_delim(state->line[state->line_len - 1]) != 0) {
+      token->raw_start = state->line_len;
+      token->raw_len = 0;
+      token->raw_chars = 0;
+      token->logical[0] = '\0';
+      token->typed_dir[0] = '\0';
+      token->lookup_dir[0] = '\0';
+      token->prefix[0] = '\0';
+      token->quote_char = '\0';
+      return 1;
+    }
+    return 0;
+  }
+
+  if (logical_len <= 0) {
+    if (quote != '\0' &&
+        open_quote_start >= 0 &&
+        open_quote_start == raw_start - 1) {
+      token->raw_start = raw_start;
+      token->raw_len = 0;
+      token->raw_chars = 0;
+      token->logical[0] = '\0';
+      token->typed_dir[0] = '\0';
+      token->lookup_dir[0] = '\0';
+      token->prefix[0] = '\0';
+      token->quote_char = quote;
+      return 1;
+    }
+    return 0;
+  }
 
   token->raw_start = raw_start;
   token->raw_len = state->line_len - raw_start;

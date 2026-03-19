@@ -277,6 +277,7 @@ def assert_completion_state(fsboot: pathlib.Path) -> None:
     unique_copy_entry = user_entries.get("unique_copy.txt")
     dir_entry = user_entries.get("dir_only")
     dir_copy_entry = user_entries.get("dir_copy.txt")
+    empty_case_entry = user_entries.get("empty_case")
 
     if unique_entry is None:
         raise AssertionError("unique.txt was not created")
@@ -286,11 +287,16 @@ def assert_completion_state(fsboot: pathlib.Path) -> None:
         raise AssertionError("dir_only was not created")
     if dir_copy_entry is None:
         raise AssertionError("dir_copy.txt was not created via directory completion")
+    if empty_case_entry is None:
+        raise AssertionError("empty_case was not created")
 
     dir_entries = read_dir_entries(image, dir_entry[0])
     inner_entry = dir_entries.get("inner.txt")
+    empty_case_entries = read_dir_entries(image, empty_case_entry[0])
     if inner_entry is None:
         raise AssertionError("dir_only/inner.txt was not created")
+    if "delete_me.txt" in empty_case_entries:
+        raise AssertionError("delete_me.txt was not removed via empty token completion")
 
     unique_text = read_file(image, unique_entry[0]).decode("ascii", errors="ignore")
     unique_copy_text = read_file(image, unique_copy_entry[0]).decode("ascii", errors="ignore")
@@ -381,6 +387,8 @@ def main() -> int:
         monitor.send_command("ls > dir_only/inner.txt")
         monitor.send_command("touch pair_apple.txt")
         monitor.send_command("touch pair_apricot.txt")
+        monitor.send_command("mkdir empty_case")
+        monitor.send_command("touch empty_case/delete_me.txt")
 
         monitor.send_text("cat uni")
         monitor.send_key("tab")
@@ -410,6 +418,13 @@ def main() -> int:
         monitor.send_key("esc")
         monitor.send_key("ret")
         time.sleep(1.0)
+
+        monitor.send_command("cd empty_case")
+        monitor.send_text("rm ")
+        monitor.send_key("tab")
+        monitor.send_key("ret")
+        time.sleep(1.0)
+        monitor.send_command("cd ..")
 
         monitor.command("quit", pause=0.1)
         qemu.wait(timeout=5)

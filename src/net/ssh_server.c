@@ -751,7 +751,6 @@ PRIVATE char ssh_tty_cooked_chunk[SSH_TTY_COOKED_CHUNK];
 PRIVATE int ssh_runtime_loaded = FALSE;
 PRIVATE int ssh_tick_active = FALSE;
 PRIVATE void ssh_close_signer_socket(void);
-PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn);
 PRIVATE int ssh_channel_data_cap(const struct ssh_connection *conn);
 PRIVATE char *ssh_metric_append_u32(char *dst, u_int32_t value);
 PRIVATE void ssh_emit_output_metric(struct ssh_connection *conn);
@@ -2479,8 +2478,6 @@ PRIVATE int ssh_handle_channel_data(struct ssh_connection *conn,
     ssh_completion_context(conn, &foreground_pid, &lflag);
 #endif
     for (i = 0; i < request.data_len; i++) {
-      if (request.data[i] == 0x03)
-        ssh_interrupt_foreground(conn);
 #ifdef USERLAND_SSHD_BUILD
       if (ssh_handle_completion_input(conn,
                                       request.data[i],
@@ -2734,19 +2731,6 @@ PRIVATE void ssh_flush_outbox(struct ssh_connection *conn)
     conn->tx_encrypted = TRUE;
   conn->out_tail = (conn->out_tail + 1) % SSH_OUTBOX_MAX;
   conn->out_count--;
-}
-
-PRIVATE void ssh_interrupt_foreground(struct ssh_connection *conn)
-{
-  pid_t pid;
-
-  if (conn == 0 || conn->channel.tty == 0)
-    return;
-
-  pid = tty_get_foreground_pid(conn->channel.tty);
-  if (pid <= 0)
-    return;
-  sys_kill(pid, SIGINT);
 }
 
 #ifdef USERLAND_SSHD_BUILD

@@ -1,5 +1,6 @@
 #include <tty.h>
 #include <key.h>
+#include <signal.h>
 #include <string.h>
 
 #ifndef TEST_BUILD
@@ -50,6 +51,32 @@ PUBLIC void poll_notify_all(void)
 {
 }
 
+PRIVATE pid_t g_tty_test_last_signal_pid;
+PRIVATE int g_tty_test_last_signal_num;
+PRIVATE int g_tty_test_signal_pending;
+
+PUBLIC void tty_test_reset_signal_state(void)
+{
+  g_tty_test_last_signal_pid = 0;
+  g_tty_test_last_signal_num = 0;
+  g_tty_test_signal_pending = 0;
+}
+
+PUBLIC pid_t tty_test_last_signal_pid(void)
+{
+  return g_tty_test_last_signal_pid;
+}
+
+PUBLIC int tty_test_last_signal_num(void)
+{
+  return g_tty_test_last_signal_num;
+}
+
+PUBLIC void tty_test_set_signal_pending(int pending)
+{
+  g_tty_test_signal_pending = pending != 0;
+}
+
 #define kalloc _tty_test_kalloc
 #define kfree  _tty_test_kfree
 #endif
@@ -77,6 +104,8 @@ PRIVATE void tty_echo_erase(struct tty *tty, int width);
 PRIVATE void tty_echo_interrupt(struct tty *tty);
 PRIVATE void tty_push_slave_byte(struct tty *tty, char c);
 PRIVATE void tty_receive_char(struct tty *tty, char c);
+PRIVATE void tty_interrupt_foreground(struct tty *tty);
+PRIVATE int tty_current_has_signal(void);
 PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,
                                   struct tty *tty);
 PRIVATE int tty_utf8_prev_char_start(const char *data, int len, int index);
@@ -333,6 +362,9 @@ PUBLIC ssize_t tty_slave_read(struct tty *tty, void *buf, size_t count,
     if (block == FALSE)
       return 0;
     sleep_on(&tty->slave_wait);
+    if (tty_ring_empty(&tty->slave_rx) == TRUE &&
+        tty_current_has_signal() != 0)
+      return -1;
   }
 
   while (total < count && tty_ring_pop(&tty->slave_rx, &c) == TRUE) {
@@ -605,7 +637,9 @@ PRIVATE void tty_receive_char(struct tty *tty, char c)
     tty->canon_len = 0;
     if (tty->flags & TTY_FLAG_ECHO)
       tty_echo_interrupt(tty);
-    if ((tty->flags & TTY_FLAG_ICANON) && tty->foreground_pid <= 0)
+    if (tty->foreground_pid > 0)
+      tty_interrupt_foreground(tty);
+    else if (tty->flags & TTY_FLAG_ICANON)
       tty_push_slave_byte(tty, '\0');
     return;
   }
@@ -653,6 +687,29 @@ PRIVATE void tty_receive_char(struct tty *tty, char c)
     if (tty->flags & TTY_FLAG_ECHO)
       tty_emit_output(tty, c);
   }
+}
+
+PRIVATE void tty_interrupt_foreground(struct tty *tty)
+{
+  if (tty == NULL || tty->foreground_pid <= 0)
+    return;
+
+#ifdef TEST_BUILD
+  g_tty_test_last_signal_pid = tty->foreground_pid;
+  g_tty_test_last_signal_num = SIGINT;
+  g_tty_test_signal_pending = 1;
+#else
+  sys_kill(tty->foreground_pid, SIGINT);
+#endif
+}
+
+PRIVATE int tty_current_has_signal(void)
+{
+#ifdef TEST_BUILD
+  return g_tty_test_signal_pending != 0;
+#else
+  return current != NULL && current->signal != 0;
+#endif
 }
 
 PRIVATE struct file *tty_new_file(int stdioflag, const struct file_ops *ops,

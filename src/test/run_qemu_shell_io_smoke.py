@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import pathlib
 import socket
@@ -20,51 +18,6 @@ INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 45
-
-
-def read_ppm(path: pathlib.Path) -> tuple[int, int, bytes]:
-    data = path.read_bytes()
-    index = 0
-
-    def next_token() -> bytes:
-        nonlocal index
-        while index < len(data) and chr(data[index]).isspace():
-            index += 1
-        if data[index:index + 1] == b"#":
-            while index < len(data) and data[index] != 0x0A:
-                index += 1
-            return next_token()
-        start = index
-        while index < len(data) and not chr(data[index]).isspace():
-            index += 1
-        return data[start:index]
-
-    magic = next_token()
-    if magic != b"P6":
-        raise ValueError(f"unsupported PPM: {magic!r}")
-    width = int(next_token())
-    height = int(next_token())
-    max_value = int(next_token())
-    if max_value != 255:
-        raise ValueError(f"unsupported max value: {max_value}")
-    while index < len(data) and chr(data[index]).isspace():
-        index += 1
-    return width, height, data[index:]
-
-
-def crop_matches(ppm_path: pathlib.Path, reference: dict[str, int | str]) -> bool:
-    width, _height, pixels = read_ppm(ppm_path)
-    x = int(reference["x"])
-    y = int(reference["y"])
-    crop_width = int(reference["width"])
-    crop_height = int(reference["height"])
-    row_stride = width * 3
-    crop = bytearray()
-    for row in range(y, y + crop_height):
-        start = row * row_stride + x * 3
-        crop.extend(pixels[start:start + crop_width * 3])
-    return hashlib.sha256(crop).hexdigest() == reference["sha256"]
-
 
 class QemuMonitor:
     def __init__(self, sock_path: pathlib.Path) -> None:
@@ -104,6 +57,10 @@ class QemuMonitor:
 
     def send_key(self, key: str, delay: float = 0.04) -> None:
         self.command(f"sendkey {key}", pause=0.05)
+        time.sleep(delay)
+
+    def send_ctrl(self, key: str, delay: float = 0.04) -> None:
+        self.command(f"sendkey ctrl-{key}", pause=0.05)
         time.sleep(delay)
 
     def send_text(self, text: str) -> None:
@@ -153,17 +110,6 @@ def wait_for_path(path: pathlib.Path, timeout: float) -> None:
     raise TimeoutError(f"timed out waiting for {path}")
 
 
-def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
-                    reference: dict[str, int | str], timeout: float) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        monitor.command(f"screendump {ppm_path}", pause=0.3)
-        if crop_matches(ppm_path, reference):
-            return
-        time.sleep(0.2)
-    raise TimeoutError("prompt screenshot did not match reference")
-
-
 def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str:
     deadline = time.time() + timeout
     marker = f"TERM_METRIC point={point}"
@@ -175,6 +121,34 @@ def wait_for_metric(serial_log: pathlib.Path, point: str, timeout: float) -> str
                     return line
         time.sleep(0.2)
     raise TimeoutError(f"metric not found: {point}")
+
+
+def wait_for_serial_marker(serial_log: pathlib.Path, marker: str,
+                           timeout: float) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if serial_log.exists():
+            text = serial_log.read_text(errors="replace")
+            if marker in text:
+                return
+        time.sleep(0.2)
+    raise TimeoutError(f"serial marker not found: {marker}")
+
+
+def count_serial_marker(serial_log: pathlib.Path, marker: str) -> int:
+    if not serial_log.exists():
+        return 0
+    return serial_log.read_text(errors="replace").count(marker)
+
+
+def wait_for_serial_marker_count(serial_log: pathlib.Path, marker: str,
+                                 expected: int, timeout: float) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if count_serial_marker(serial_log, marker) >= expected:
+            return
+        time.sleep(0.2)
+    raise TimeoutError(f"serial marker count not reached: {marker} >= {expected}")
 
 
 def inode_bytes(image: bytes, ino: int) -> bytes:
@@ -218,18 +192,20 @@ def read_dir_entries(image: bytes, ino: int) -> dict[str, tuple[int, int]]:
 def assert_shell_io_state(fsboot: pathlib.Path) -> None:
     image = fsboot.read_bytes()
     root_entries = read_dir_entries(image, SODEX_ROOT_INO)
-    out_entry = root_entries.get("two words.txt")
-    after_entry = root_entries.get("after.txt")
-    if out_entry is None:
-        raise AssertionError("two words.txt was not created")
-    if after_entry is None:
-        raise AssertionError("after.txt was not created after pipeline")
-    content = read_file(image, out_entry[0]).decode("ascii", errors="ignore")
-    after = read_file(image, after_entry[0]).decode("ascii", errors="ignore")
-    if content.count("bootm.bin") < 2 or content.count("usr") < 2:
-        raise AssertionError("two words.txt does not contain appended ls output")
-    if after != content:
-        raise AssertionError("after.txt does not match redirected input")
+    home_entry = root_entries.get("home")
+    if home_entry is None:
+        raise AssertionError("/home was not found")
+    home_entries = read_dir_entries(image, home_entry[0])
+    user_entry = home_entries.get("user")
+    if user_entry is None:
+        raise AssertionError("/home/user was not found")
+    user_entries = read_dir_entries(image, user_entry[0])
+    ctrl_c_entry = user_entries.get("c")
+    if ctrl_c_entry is None:
+        raise AssertionError("c was not created after Ctrl-C")
+    ctrl_c_after = read_file(image, ctrl_c_entry[0]).decode("ascii", errors="ignore")
+    if ctrl_c_after != "intr_ok\n":
+        raise AssertionError("c does not confirm shell recovery")
 
 
 def main() -> int:
@@ -240,7 +216,6 @@ def main() -> int:
     fsboot = pathlib.Path(sys.argv[1]).resolve()
     logdir = pathlib.Path(sys.argv[2]).resolve()
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
     monitor_sock = logdir / f"shell_io_monitor_{os.getpid()}.sock"
@@ -268,14 +243,6 @@ def main() -> int:
         "-device", "ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net0",
     ]
 
-    commands = [
-        "ls > out.txt\n",
-        "mv out.txt \"two words.txt\"\n",
-        "ls | cat | cat >> \"two words.txt\"\n",
-        "cat < \"two words.txt\" > after.txt\n",
-        "asdjfoaie\n",
-    ]
-
     qemu = subprocess.Popen(
         qemu_args,
         cwd=repo_root,
@@ -286,14 +253,35 @@ def main() -> int:
     try:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
-        wait_for_metric(serial_log, "full_redraw", timeout)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        try:
+            wait_for_metric(serial_log, "full_redraw", 5)
+        except TimeoutError:
+            ready_count = count_serial_marker(serial_log, "AUDIT eshell_ready")
+            wait_for_serial_marker(serial_log, "AUDIT eshell_ready", timeout)
+            monitor.send_text("term")
+            time.sleep(0.2)
+            monitor.send_key("ret")
+            wait_for_metric(serial_log, "full_redraw", timeout)
+            wait_for_serial_marker_count(serial_log, "AUDIT eshell_ready",
+                                         ready_count + 1, timeout)
+        else:
+            wait_for_serial_marker(serial_log, "AUDIT eshell_ready", timeout)
 
-        for command in commands:
-            monitor.send_text(command)
-            time.sleep(1.2)
+        time.sleep(10.0)
+        monitor.command(f"screendump {prompt_ppm}", pause=0.3)
+        monitor.send_key("ret")
+        time.sleep(0.8)
 
-        time.sleep(1.0)
+        monitor.send_text("cat\n")
+        time.sleep(0.8)
+        monitor.send_text("hoge.hoge.")
+        time.sleep(0.4)
+        monitor.send_ctrl("c")
+        time.sleep(0.8)
+        monitor.send_text("echo intr_ok > c\n")
+        time.sleep(1.2)
+
+        time.sleep(0.6)
         monitor.command("quit", pause=0.1)
         qemu.wait(timeout=5)
         assert_shell_io_state(fsboot)

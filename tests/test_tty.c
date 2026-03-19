@@ -1,4 +1,5 @@
 #include "test_framework.h"
+#include <signal.h>
 #include <string.h>
 
 typedef unsigned short u_int16_t;
@@ -72,6 +73,11 @@ extern ssize_t tty_master_write(struct tty *tty, const void *buf, size_t count);
 extern ssize_t tty_master_read(struct tty *tty, void *buf, size_t count);
 extern ssize_t tty_slave_read(struct tty *tty, void *buf, size_t count, int block);
 extern ssize_t tty_slave_write(struct tty *tty, const void *buf, size_t count);
+extern int tty_set_foreground_pid(struct tty *tty, int pid);
+extern void tty_test_reset_signal_state(void);
+extern int tty_test_last_signal_num(void);
+extern int tty_test_last_signal_pid(void);
+extern void tty_test_set_signal_pending(int pending);
 
 TEST(canonical_input_waits_for_enter) {
     struct tty *tty;
@@ -288,6 +294,47 @@ TEST(ctrl_c_discards_pending_line) {
     tty_release(tty);
 }
 
+TEST(ctrl_c_signals_foreground_process) {
+    struct tty *tty;
+    char master_buf[8];
+    char slave_buf[8];
+    const char intr = 0x03;
+
+    init_tty();
+    tty = tty_alloc_pty();
+    ASSERT_NOT_NULL(tty);
+
+    tty_test_reset_signal_state();
+    ASSERT_EQ(tty_set_foreground_pid(tty, 42), 0);
+    ASSERT_EQ(tty_master_write(tty, "abc", 3), 3);
+    ASSERT_EQ(tty_master_write(tty, &intr, 1), 1);
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 0), 0);
+    ASSERT_EQ(tty_test_last_signal_pid(), 42);
+    ASSERT_EQ(tty_test_last_signal_num(), SIGINT);
+    ASSERT_EQ(tty_master_read(tty, master_buf, sizeof(master_buf)), 6);
+    ASSERT_EQ(master_buf[0], 'a');
+    ASSERT_EQ(master_buf[1], 'b');
+    ASSERT_EQ(master_buf[2], 'c');
+    ASSERT_EQ(master_buf[3], '^');
+    ASSERT_EQ(master_buf[4], 'C');
+    ASSERT_EQ(master_buf[5], '\n');
+    tty_release(tty);
+}
+
+TEST(blocking_slave_read_returns_on_signal) {
+    struct tty *tty;
+    char slave_buf[8];
+
+    init_tty();
+    tty = tty_alloc_pty();
+    ASSERT_NOT_NULL(tty);
+
+    tty_test_reset_signal_state();
+    tty_test_set_signal_pending(1);
+    ASSERT_EQ(tty_slave_read(tty, slave_buf, sizeof(slave_buf), 1), -1);
+    tty_release(tty);
+}
+
 TEST(pty_empty_lines_keep_prompts_separated) {
     struct tty *tty;
     char line_buf[8];
@@ -336,6 +383,8 @@ int main(void)
     RUN_TEST(pty_winsize_can_be_updated);
     RUN_TEST(termios_can_switch_console_tty_to_raw_noecho);
     RUN_TEST(ctrl_c_discards_pending_line);
+    RUN_TEST(ctrl_c_signals_foreground_process);
+    RUN_TEST(blocking_slave_read_returns_on_signal);
     RUN_TEST(pty_empty_lines_keep_prompts_separated);
 
     TEST_REPORT();

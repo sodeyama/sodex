@@ -503,7 +503,7 @@ int claude_send_message_with_key(
     const char *api_key,
     struct claude_response *out)
 {
-    static char request_buf[4096];
+    static char request_buf[CLAUDE_SINGLE_REQUEST_BUF];
     struct json_writer jw;
     struct claude_message msgs[1];
     int ret;
@@ -568,7 +568,7 @@ int claude_send_conversation_with_key(
     const char *api_key,
     struct claude_response *out)
 {
-    static char request_buf[16384];  /* static: too large for stack */
+    static char request_buf[CLAUDE_CONVERSATION_REQUEST_BUF];
     struct json_writer jw;
     int ret;
     int attempt;

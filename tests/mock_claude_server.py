@@ -215,7 +215,7 @@ def _find_scenario_keyword(messages):
     Returns the keyword string if found, else None.
     """
     keywords = ("test_immediate", "test_one_tool", "test_two_tools",
-                "test_max_steps", "test_perm_blocked",
+                "test_max_steps", "test_perm_blocked", "test_fetch_url_weather",
                 "test_session_resume_b", "test_session_resume_a",
                 "test_repl_turn2", "test_repl_turn1")
     for msg in reversed(messages):
@@ -248,8 +248,11 @@ def _messages_contain_text(messages, needle):
                 return True
         elif isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and needle in block.get("text", ""):
-                    return True
+                if isinstance(block, dict):
+                    if needle in block.get("text", ""):
+                        return True
+                    if needle in block.get("content", ""):
+                        return True
     return False
 
 
@@ -331,6 +334,23 @@ def _agent_scenario_events(scenario, tool_results_count, messages):
             return text_response_stream(
                 text="Permission recovery succeeded.",
                 msg_id="msg_integ_perm_done")
+
+    if scenario == "test_fetch_url_weather":
+        if tool_results_count == 0:
+            return tool_use_response_stream(
+                tool_name="fetch_url",
+                tool_id="toolu_integ_fetch_weather",
+                tool_input_json='{"url":"http://127.0.0.1:18081/weather/tokyo"}',
+                text_before="Fetching weather source.",
+                msg_id="msg_integ_fetch_weather_a")
+        if (_messages_contain_text(messages, "Tokyo Weather 2026-03-19") and
+                _messages_contain_text(messages, "http://127.0.0.1:18081/weather/tokyo")):
+            return text_response_stream(
+                text="Tokyo weather sourced from http://127.0.0.1:18081/weather/tokyo",
+                msg_id="msg_integ_fetch_weather_b")
+        return text_response_stream(
+            text="fetch_url result missing weather data",
+            msg_id="msg_integ_fetch_weather_missing")
 
     if scenario == "test_repl_turn1":
         return text_response_stream(

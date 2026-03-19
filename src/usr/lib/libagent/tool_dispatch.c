@@ -18,6 +18,22 @@
 static void debug_printf(const char *fmt, ...) { (void)fmt; }
 #endif
 
+static int result_has_error_field(const char *result_json, int result_len)
+{
+    struct json_parser jp;
+    struct json_token tokens[32];
+    int token_count;
+
+    if (!result_json || result_len <= 0)
+        return 0;
+
+    json_init(&jp);
+    token_count = json_parse(&jp, result_json, result_len, tokens, 32);
+    if (token_count < 0)
+        return 0;
+    return json_find_key(result_json, tokens, token_count, 0, "error") >= 0;
+}
+
 int tool_dispatch(const struct claude_tool_use *tu,
                   struct tool_dispatch_result *out)
 {
@@ -62,7 +78,7 @@ int tool_dispatch(const struct claude_tool_use *tu,
     }
 
     out->result_len = result_len;
-    out->is_error = 0;
+    out->is_error = result_has_error_field(out->result_json, result_len);
     debug_printf("[TOOL] '%s' completed, result_len=%d\n", tu->name, result_len);
     return 0;
 }

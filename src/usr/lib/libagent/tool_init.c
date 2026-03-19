@@ -49,5 +49,10 @@ void tool_init(void)
                   TOOL_SCHEMA_MANAGE_PROCESS,
                   tool_manage_process);
 
+    tool_register("fetch_url",
+                  "Fetch a URL via the host-side structured web gateway",
+                  TOOL_SCHEMA_FETCH_URL,
+                  tool_fetch_url);
+
     debug_printf("[TOOL] initialized %d built-in tools\n", tool_count());
 }

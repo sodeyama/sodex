@@ -1,7 +1,7 @@
 # Root makefile - delegates to src/makefile
 # All build artifacts go to build/
 
-.PHONY: all clean remake tools ptest test-qemu test-qemu-curl-https test-qemu-websearch test-qemu-server test-qemu-debug-shell test-qemu-ssh test-agent-bringup test docker-server-image test-docker-server
+.PHONY: all clean remake tools ptest test-qemu test-qemu-curl-https test-qemu-websearch test-qemu-webfetch test-qemu-server test-qemu-debug-shell test-qemu-ssh test-agent-bringup test-agent-full test-web-fetch-host test docker-server-image test-docker-server
 
 SODEX_ADMIN_STATUS_TOKEN ?= status-secret
 SODEX_ADMIN_CONTROL_TOKEN ?= control-secret
@@ -38,6 +38,9 @@ test-qemu-curl-https:
 test-qemu-websearch:
 	$(MAKE) -C src test-qemu-websearch
 
+test-qemu-webfetch:
+	$(MAKE) -C src test-qemu-webfetch
+
 test-qemu-server:
 	$(MAKE) -C src test-qemu-server
 
@@ -49,6 +52,12 @@ test-qemu-ssh:
 
 test-agent-bringup:
 	$(MAKE) -C src test-agent-bringup
+
+test-agent-full:
+	$(MAKE) -C src test-agent-full
+
+test-web-fetch-host:
+	python3 tests/test_web_fetch_gateway.py
 
 # Host-side unit tests
 test:

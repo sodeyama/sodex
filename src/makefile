@@ -349,6 +349,21 @@ test-qemu-websearch:
 	@echo "=== Running websearch smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_websearch_smoke.py $(FSBOOT) $(LOGDIR)
 
+test-qemu-webfetch:
+	@$(MAKE) clean
+	@mkdir -p $(LOGDIR)/webfetch-overlay/etc/init.d
+	@printf '#!/bin/sh\nwebfetch http://127.0.0.1:18081/article\n' > $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_article $$?\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'webfetch -m 120 http://127.0.0.1:18081/long\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_long $$?\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'webfetch http://denied.invalid/article\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_deny $$?\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'echo AUDIT init_webfetch_smoke_done\n' >> $(LOGDIR)/webfetch-overlay/etc/init.d/rcS
+	@printf 'console:rescue:/usr/bin/sh\nsysinit:/etc/init.d/rcS\n' > $(LOGDIR)/webfetch-overlay/etc/inittab
+	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/webfetch-overlay all
+	@echo "=== Running webfetch smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_webfetch_smoke.py $(FSBOOT) $(LOGDIR)
+
 $(OBJDIR)/test/ktest.o: ${TESTDIR}/ktest.c
 	$(CC) -c ${CFLAGS} ${EXTRA_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 

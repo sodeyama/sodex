@@ -24,6 +24,8 @@ from qemu_config import get_qemu_memory_mb
 
 DEFAULT_TIMEOUT = 120
 CLAUDE_TLS_PORT = 4443
+WEBFETCH_GATEWAY_PORT = 8081
+WEBFETCH_SOURCE_PORT = 18081
 
 
 def dump_file(path: pathlib.Path) -> None:
@@ -78,14 +80,19 @@ def main() -> int:
     logdir.mkdir(parents=True, exist_ok=True)
     fsboot = repo_root / "build" / "bin" / "fsboot.bin"
     claude_server = repo_root / "tests" / "mock_claude_server.py"
+    gateway_server = repo_root / "src" / "tools" / "web_fetch_gateway.py"
+    source_server = repo_root / "tests" / "mock_web_fetch_source.py"
 
     serial_log = logdir / "agent_integ_serial.log"
     qemu_log = logdir / "agent_integ_qemu_debug.log"
     claude_log = logdir / "agent_integ_claude_mock.log"
+    gateway_log = logdir / "agent_integ_webfetch_gateway.log"
+    source_log = logdir / "agent_integ_webfetch_source.log"
     monitor_log = logdir / "agent_integ_monitor.log"
     monitor_sock = logdir / "agent_integ_monitor.sock"
 
-    for p in (serial_log, qemu_log, claude_log, monitor_log, monitor_sock):
+    for p in (serial_log, qemu_log, claude_log, gateway_log, source_log,
+              monitor_log, monitor_sock):
         if p.exists():
             p.unlink()
 
@@ -141,14 +148,33 @@ def main() -> int:
     qemu_memory_mb = get_qemu_memory_mb()
 
     # Start mock Claude TLS server (with multi-scenario support)
-    with claude_log.open("w") as claude_fp:
-        claude_proc = subprocess.Popen(
-            [sys.executable, str(claude_server), str(CLAUDE_TLS_PORT), "--tls"],
-            cwd=repo_root,
-            stdout=claude_fp,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+    claude_fp = claude_log.open("w")
+    claude_proc = subprocess.Popen(
+        [sys.executable, str(claude_server), str(CLAUDE_TLS_PORT), "--tls"],
+        cwd=repo_root,
+        stdout=claude_fp,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    source_fp = source_log.open("w")
+    source_proc = subprocess.Popen(
+        [sys.executable, str(source_server), str(WEBFETCH_SOURCE_PORT)],
+        cwd=repo_root,
+        stdout=source_fp,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    gateway_fp = gateway_log.open("w")
+    gateway_env = os.environ.copy()
+    gateway_env["SODEX_WEBFETCH_ALLOWLIST"] = "127.0.0.1,localhost"
+    gateway_proc = subprocess.Popen(
+        [sys.executable, str(gateway_server), str(WEBFETCH_GATEWAY_PORT)],
+        cwd=repo_root,
+        env=gateway_env,
+        stdout=gateway_fp,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
 
     try:
         if not wait_for_port("127.0.0.1", CLAUDE_TLS_PORT, timeout=5.0):
@@ -157,6 +183,22 @@ def main() -> int:
             claude_proc.kill()
             return 1
         print(f"Mock Claude TLS server on port {CLAUDE_TLS_PORT}")
+        if not wait_for_port("127.0.0.1", WEBFETCH_SOURCE_PORT, timeout=5.0):
+            print("ERROR: Mock webfetch source failed to start", file=sys.stderr)
+            dump_file(source_log)
+            claude_proc.kill()
+            gateway_proc.kill()
+            source_proc.kill()
+            return 1
+        print(f"Mock webfetch source on port {WEBFETCH_SOURCE_PORT}")
+        if not wait_for_port("127.0.0.1", WEBFETCH_GATEWAY_PORT, timeout=5.0):
+            print("ERROR: Mock webfetch gateway failed to start", file=sys.stderr)
+            dump_file(gateway_log)
+            claude_proc.kill()
+            gateway_proc.kill()
+            source_proc.kill()
+            return 1
+        print(f"Mock webfetch gateway on port {WEBFETCH_GATEWAY_PORT}")
 
         # QEMU: SLiRP maps guest 10.0.2.2 -> host 127.0.0.1
         qemu_args = [
@@ -233,6 +275,8 @@ def main() -> int:
         print(f"\nLogs: {serial_log}")
         print(f"QEMU debug: {qemu_log}")
         print(f"Claude mock: {claude_log}")
+        print(f"Webfetch gateway: {gateway_log}")
+        print(f"Webfetch source: {source_log}")
 
         if timed_out:
             print(f"\nQEMU timed out after {timeout}s", file=sys.stderr)
@@ -268,9 +312,13 @@ def main() -> int:
         return 1
 
     finally:
-        if claude_proc.poll() is None:
-            claude_proc.kill()
-            claude_proc.wait()
+        for proc in (claude_proc, gateway_proc, source_proc):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        claude_fp.close()
+        gateway_fp.close()
+        source_fp.close()
 
 
 if __name__ == "__main__":

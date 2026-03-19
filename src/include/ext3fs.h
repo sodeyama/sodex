@@ -288,6 +288,7 @@ PUBLIC int ext3_rmdir(const char* pathname);
 PUBLIC int ext3_rename(const char* oldpath, const char* newpath);
 PUBLIC void ext3_flush();
 PUBLIC void ext3_dirty_print();
+PUBLIC ext3_dentry* get_dentry_by_path(const char* pathname);
 PUBLIC ext3_dentry* get_dentry_from_current(const char* filename);
 PUBLIC ext3_dentry* get_dentry_absolutely(const char* filename);
 

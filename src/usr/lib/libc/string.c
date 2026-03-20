@@ -82,6 +82,7 @@ char* strcpy(char* dest, const char* src)
   char *p = dest;
   for (; *src; dest++, src++)
     *dest = *src;
+  *dest = '\0';
   return p;
 }
 

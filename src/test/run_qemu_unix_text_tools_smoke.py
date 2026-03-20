@@ -147,7 +147,8 @@ def read_user_file(fsboot: pathlib.Path, name: str) -> str:
 def assert_unix_text_state(fsboot: pathlib.Path) -> None:
     if read_user_file(fsboot, "sort.txt") != "1\n2\n2\n10\n":
         raise AssertionError("sort.txt mismatch")
-    if read_user_file(fsboot, "sort_rev.txt") != "10\n2\n2\n1\n":
+    sort_rev = read_user_file(fsboot, "sort_rev.txt")
+    if sort_rev != "10\n2\n2\n1\n":
         raise AssertionError("sort_rev.txt mismatch")
     if read_user_file(fsboot, "uniq.txt") != "1 1\n2 2\n1 10\n":
         raise AssertionError("uniq.txt mismatch")
@@ -165,8 +166,15 @@ def assert_unix_text_state(fsboot: pathlib.Path) -> None:
         raise AssertionError("tail_from_second.txt mismatch")
     if read_user_file(fsboot, "grep_out.txt") != "1:foo\n3:foo bar\n":
         raise AssertionError("grep_out.txt mismatch")
-    if read_user_file(fsboot, "grep_count.txt") != "2\n":
+    grep_count = read_user_file(fsboot, "grep_count.txt")
+    if grep_count != "2\n":
         raise AssertionError("grep_count.txt mismatch")
+    find_direct_rc = read_user_file(fsboot, "grep.txt")
+    if find_direct_rc != "/etc/init.d/rcS\n":
+        raise AssertionError("find direct grep.txt mismatch")
+    find_root_rc = read_user_file(fsboot, "numbers.txt")
+    if "/etc/init.d/rcS\n" not in find_root_rc:
+        raise AssertionError("find root numbers.txt mismatch")
     if read_user_file(fsboot, "cut_out.txt") != "aa:cc\n":
         raise AssertionError("cut_out.txt mismatch")
     if read_user_file(fsboot, "tr_out.txt") != "a b\n":

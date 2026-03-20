@@ -32,4 +32,8 @@ echo NEEDLE >> /home/user/grep_long.txt
 grep --fixed-strings --ignore-case --count needle - < /home/user/grep_long.txt > /home/user/grep_count.txt
 echo AUDIT unix_text_tools_after_grep
 
+find /etc/init.d/rcS -name 'rc*' > /home/user/grep.txt
+find / -name 'rc*' > /home/user/numbers.txt
+echo AUDIT unix_text_tools_after_find
+
 echo AUDIT unix_text_tools_extra_done

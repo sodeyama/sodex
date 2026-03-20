@@ -17,18 +17,64 @@
 #include <utf8.h>
 #endif
 
-#ifndef TEST_BUILD
-#include <debug.h>
-#else
-static void debug_printf(const char *fmt, ...) { (void)fmt; }
-#endif
-
 #define UTT_IO_BUF_SIZE 512
+#define UTT_DIR_BUF_SIZE 4096
 #define UTT_PATH_MAX 512
 #define UTT_FIELD_MAX 64
 #define UTT_EXPR_MAX 16
 #define UTT_STMT_MAX 16
 #define UTT_VAR_MAX 16
+
+#ifndef TEST_BUILD
+struct utt_dir_entry {
+  unsigned int inode;
+  unsigned short rec_len;
+  unsigned char name_len;
+  unsigned char file_type;
+  char name[255];
+};
+
+#define UTT_FTYPE_FILE 1
+#define UTT_FTYPE_DIR 2
+
+static int utt_build_dentry_path(ext3_dentry *dentry, char *buf, int cap)
+{
+  int pos;
+  int name_len;
+
+  if (dentry == 0 || buf == 0 || cap <= 1)
+    return -1;
+  if (dentry->d_parent == 0 ||
+      (dentry->d_namelen == 1 && dentry->d_name[0] == '/')) {
+    buf[0] = '/';
+    buf[1] = '\0';
+    return 1;
+  }
+
+  pos = utt_build_dentry_path(dentry->d_parent, buf, cap);
+  if (pos < 0)
+    return -1;
+  if (pos > 1) {
+    if (pos >= cap - 1)
+      return -1;
+    buf[pos++] = '/';
+    buf[pos] = '\0';
+  }
+
+  name_len = dentry->d_namelen;
+  if (name_len <= 0)
+    return pos;
+  if (pos + name_len >= cap)
+    name_len = cap - pos - 1;
+  if (name_len <= 0)
+    return -1;
+
+  memcpy(buf + pos, dentry->d_name, (size_t)name_len);
+  pos += name_len;
+  buf[pos] = '\0';
+  return pos;
+}
+#endif
 
 struct utt_string {
   char *data;
@@ -1211,11 +1257,20 @@ static int utt_is_dir_path(const char *path)
     return 0;
   return S_ISDIR(st.st_mode);
 #else
-  int fd = open(path, O_RDONLY | O_DIRECTORY, 0);
+  char cwd[UTT_PATH_MAX];
+  ext3_dentry *dentry;
 
-  if (fd < 0)
+  if (path == 0 || path[0] == '\0')
     return 0;
-  close(fd);
+  if (strcmp(path, "/") == 0)
+    return 1;
+
+  dentry = getdentry();
+  if (dentry == 0 || utt_build_dentry_path(dentry, cwd, sizeof(cwd)) < 0)
+    return 0;
+  if (chdir(path) != 0)
+    return 0;
+  chdir(cwd);
   return 1;
 #endif
 }
@@ -1291,6 +1346,11 @@ static int utt_path_join(char *buf, int cap, const char *left, const char *right
 static int utt_find_walk(const char *path,
                          int depth,
                          const struct utt_find_options *opts);
+static int utt_find_walk_known(const char *path,
+                               int depth,
+                               const struct utt_find_options *opts,
+                               int has_is_dir,
+                               int is_dir);
 
 static int utt_find_walk_dir(const char *path,
                              int depth,
@@ -1310,56 +1370,60 @@ static int utt_find_walk_dir(const char *path,
       continue;
     if (utt_path_join(child, sizeof(child), path, de->d_name) < 0)
       continue;
-    if (utt_find_walk(child, depth + 1, opts) != 0) {
+    if (utt_find_walk_known(child, depth + 1, opts,
+                            1, utt_is_dir_path(child)) != 0) {
       closedir(dirp);
       return 1;
     }
   }
   closedir(dirp);
 #else
-  struct {
-    unsigned int inode;
-    unsigned short rec_len;
-    unsigned char name_len;
-    unsigned char file_type;
-    char name[255];
-  } *de;
-  char *data = 0;
-  int len = 0;
-  int offset = 0;
+  struct utt_dir_entry *de;
+  int fd;
+  char buf[UTT_DIR_BUF_SIZE];
+  int bytes_read;
 
-  if (utt_read_path_all(path, &data, &len) < 0)
+  fd = open(path, O_RDONLY, 0);
+  if (fd < 0)
     return utt_print_error("find", "open failed", path);
-  while (offset < len) {
-    char name[256];
-    char child[UTT_PATH_MAX];
-    int nlen;
 
-    de = (void *)(data + offset);
-    if (de->rec_len == 0 || offset + de->rec_len > len)
-      break;
-    if (de->inode == 0 || de->name_len == 0) {
-      offset += de->rec_len;
-      continue;
-    }
-    nlen = (int)de->name_len;
-    if (nlen >= (int)sizeof(name))
-      nlen = (int)sizeof(name) - 1;
-    memcpy(name, de->name, (size_t)nlen);
-    name[nlen] = '\0';
-    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-      offset += de->rec_len;
-      continue;
-    }
-    if (utt_path_join(child, sizeof(child), path, name) == 0) {
-      if (utt_find_walk(child, depth + 1, opts) != 0) {
-        free(data);
-        return 1;
+  while ((bytes_read = (int)read(fd, buf, sizeof(buf))) > 0) {
+    int offset = 0;
+
+    while (offset < bytes_read) {
+      char name[256];
+      char child[UTT_PATH_MAX];
+      int nlen;
+
+      de = (void *)(buf + offset);
+      if (de->rec_len < 8 || offset + de->rec_len > bytes_read)
+        break;
+      if (de->inode == 0 || de->name_len == 0) {
+        offset += de->rec_len;
+        continue;
       }
+      nlen = (int)de->name_len;
+      if (nlen >= (int)sizeof(name))
+        nlen = (int)sizeof(name) - 1;
+      memcpy(name, de->name, (size_t)nlen);
+      name[nlen] = '\0';
+      if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        offset += de->rec_len;
+        continue;
+      }
+      if (utt_path_join(child, sizeof(child), path, name) == 0) {
+        if (utt_find_walk_known(child, depth + 1, opts,
+                                1, de->file_type == UTT_FTYPE_DIR) != 0) {
+          close(fd);
+          return 1;
+        }
+      }
+      offset += de->rec_len;
     }
-    offset += de->rec_len;
   }
-  free(data);
+  close(fd);
+  if (bytes_read < 0)
+    return utt_print_error("find", "open failed", path);
 #endif
   return 0;
 }
@@ -1368,7 +1432,17 @@ static int utt_find_walk(const char *path,
                          int depth,
                          const struct utt_find_options *opts)
 {
-  int is_dir = utt_is_dir_path(path);
+  return utt_find_walk_known(path, depth, opts, 0, 0);
+}
+
+static int utt_find_walk_known(const char *path,
+                               int depth,
+                               const struct utt_find_options *opts,
+                               int has_is_dir,
+                               int is_dir)
+{
+  if (has_is_dir == 0)
+    is_dir = utt_is_dir_path(path);
 
   if (utt_find_depth_match(depth, opts) &&
       utt_find_name_match(path, opts) &&

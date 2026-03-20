@@ -11,7 +11,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_pager test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_shell_completion test_usr_stdlib test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_agent_autonomy test_tool_get_system_info test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_tool_run_command test_tool_file_access test_conversation test_hooks_permissions test_chunked_decoder test_unix_text_tools
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_pager test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_shell_completion test_usr_stdlib test_usr_string test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_agent_autonomy test_tool_get_system_info test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_tool_run_command test_tool_file_access test_conversation test_hooks_permissions test_chunked_decoder test_unix_text_tools
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -442,6 +442,12 @@ test_usr_stdlib: test_usr_stdlib.c test_usr_stdlib_stdlib.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_usr_stdlib.c test_usr_stdlib_stdlib.o
 
 test_usr_stdlib_stdlib.o: $(SRC)/usr/lib/libc/stdlib.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_usr_string: test_usr_string.c test_usr_string_string.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_usr_string.c test_usr_string_string.o
+
+test_usr_string_string.o: $(SRC)/usr/lib/libc/string.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # init policy tests

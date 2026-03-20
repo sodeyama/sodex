@@ -7,6 +7,12 @@ struct utt_wc_counts {
   long bytes;
 };
 
+static void utt_wc_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: wc [-l] [-w] [-c] [file ...]\n");
+}
+
 int unix_wc_main(int argc, char **argv)
 {
   int show_lines = 0;
@@ -20,6 +26,10 @@ int unix_wc_main(int argc, char **argv)
 
   memset(&total, 0, sizeof(total));
   for (i = 1; i < argc; i++) {
+    if (utt_is_help_option(argv[i])) {
+      utt_wc_print_usage();
+      return 0;
+    }
     if (strcmp(argv[i], "--") == 0) {
       file_start = i + 1;
       break;

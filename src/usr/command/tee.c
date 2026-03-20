@@ -1,6 +1,12 @@
 #include <unix_text_tool_lib.h>
 #include <unix_text_tools.h>
 
+static void utt_tee_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: tee [-a] [-i] [file ...]\n");
+}
+
 int unix_tee_main(int argc, char **argv)
 {
   int append = 0;
@@ -10,7 +16,10 @@ int unix_tee_main(int argc, char **argv)
   int i;
 
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--") == 0) {
+    if (utt_is_help_option(argv[i])) {
+      utt_tee_print_usage();
+      return 0;
+    } else if (strcmp(argv[i], "--") == 0) {
       file_start = i + 1;
       break;
     } else if (strcmp(argv[i], "-a") == 0 ||

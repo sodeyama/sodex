@@ -16,6 +16,13 @@ struct utt_sed_program {
   int command_count;
 };
 
+static void utt_sed_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: sed [-n] [-e script]... [-f script_file]... "
+                 "[script] [file ...]\n");
+}
+
 static void utt_sed_free_program(struct utt_sed_program *prog)
 {
   int i;
@@ -250,7 +257,11 @@ int unix_sed_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
-    if (strcmp(argv[i], "--") == 0) {
+    if (utt_is_help_option(argv[i])) {
+      utt_sed_print_usage();
+      utt_sed_free_program(&prog);
+      return 0;
+    } else if (strcmp(argv[i], "--") == 0) {
       i++;
       break;
     } else if (strcmp(argv[i], "-n") == 0 ||

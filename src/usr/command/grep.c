@@ -12,6 +12,13 @@ struct utt_grep_options {
   int pattern_count;
 };
 
+static void utt_grep_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: grep [-F] [-i] [-v] [-n] [-c] [-q] "
+                 "[-e pattern]... pattern [file ...]\n");
+}
+
 static int utt_match_grep_patterns(const struct utt_grep_options *opts,
                                    const char *line,
                                    int len)
@@ -64,6 +71,10 @@ int unix_grep_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
+    if (utt_is_help_option(argv[i])) {
+      utt_grep_print_usage();
+      return 0;
+    }
     if (strcmp(argv[i], "--") == 0) {
       file_start = i + 1;
       break;

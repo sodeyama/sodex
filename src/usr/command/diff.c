@@ -1,6 +1,12 @@
 #include <unix_text_tool_lib.h>
 #include <unix_text_tools.h>
 
+static void utt_diff_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: diff [-q] [-u] file1 file2\n");
+}
+
 static int utt_diff_equal_lines(struct utt_loaded_text *a,
                                 struct utt_loaded_text *b)
 {
@@ -31,6 +37,10 @@ int unix_diff_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
+    if (utt_is_help_option(argv[i])) {
+      utt_diff_print_usage();
+      return 0;
+    }
     if (strcmp(argv[i], "--") == 0) {
       i++;
       break;

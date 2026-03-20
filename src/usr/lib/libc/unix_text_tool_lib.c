@@ -196,6 +196,12 @@ int utt_match_long_option(const char *arg,
   return 0;
 }
 
+int utt_is_help_option(const char *arg)
+{
+  return (arg != 0 && strcmp(arg, "-h") == 0) ||
+         utt_match_long_option(arg, "help", 0);
+}
+
 int utt_is_stdin_path(const char *path)
 {
   return path != 0 && path[0] == '-' && path[1] == '\0';

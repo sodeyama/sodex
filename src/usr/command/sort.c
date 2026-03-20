@@ -12,6 +12,13 @@ struct utt_sort_options {
   const char *output_path;
 };
 
+static void utt_sort_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: sort [-n] [-r] [-u] [-o path] [-t delim] "
+                 "[-k start[,end]] [file ...]\n");
+}
+
 static void utt_get_sort_key(const struct utt_sort_options *opts,
                              const char *text,
                              int len,
@@ -159,6 +166,10 @@ int unix_sort_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
+    if (utt_is_help_option(argv[i])) {
+      utt_sort_print_usage();
+      return 0;
+    }
     if (strcmp(argv[i], "--") == 0) {
       file_start = i + 1;
       break;

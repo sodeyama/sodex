@@ -1,6 +1,12 @@
 #include <unix_text_tool_lib.h>
 #include <unix_text_tools.h>
 
+static void utt_tr_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: tr [-d] [-s] [-c] string1 [string2]\n");
+}
+
 static int utt_expand_tr_class(const char *name,
                                unsigned char *out,
                                int *len_io)
@@ -148,7 +154,10 @@ int unix_tr_main(int argc, char **argv)
   unsigned char prev_out = 0;
 
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--") == 0) {
+    if (utt_is_help_option(argv[i])) {
+      utt_tr_print_usage();
+      return 0;
+    } else if (strcmp(argv[i], "--") == 0) {
       i++;
       break;
     } else if (strcmp(argv[i], "-d") == 0 ||

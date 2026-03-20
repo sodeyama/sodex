@@ -71,6 +71,7 @@ int utt_parse_long_value(const char *text, long *value_out);
 int utt_match_long_option(const char *arg,
                           const char *name,
                           const char **value_out);
+int utt_is_help_option(const char *arg);
 int utt_is_stdin_path(const char *path);
 long utt_count_newlines(const char *text, int len);
 int utt_parse_head_count_spec(const char *text,

@@ -9,6 +9,12 @@ struct utt_uniq_options {
   int skip_chars;
 };
 
+static void utt_uniq_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: uniq [-c] [-d] [-u] [-f fields] [-s chars] [file ...]\n");
+}
+
 static int utt_uniq_key_start(const struct utt_line_ref *line,
                               const struct utt_uniq_options *opts)
 {
@@ -56,6 +62,10 @@ int unix_uniq_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
+    if (utt_is_help_option(argv[i])) {
+      utt_uniq_print_usage();
+      return 0;
+    }
     if (strcmp(argv[i], "--") == 0) {
       i++;
       break;

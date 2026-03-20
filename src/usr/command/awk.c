@@ -56,6 +56,13 @@ struct utt_awk_record {
   long nr;
 };
 
+static void utt_awk_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: awk [-F fs] [-v var=value]... [-f program_file]... "
+                 "[program] [file ...]\n");
+}
+
 static int utt_append_program_text(struct utt_string *prog_buf, const char *text)
 {
   if (prog_buf == 0 || text == 0)
@@ -389,7 +396,11 @@ int unix_awk_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
-    if (strcmp(argv[i], "--") == 0) {
+    if (utt_is_help_option(argv[i])) {
+      utt_awk_print_usage();
+      utt_string_free(&program_buf);
+      return 0;
+    } else if (strcmp(argv[i], "--") == 0) {
       i++;
       break;
     } else if (strcmp(argv[i], "-F") == 0 && i + 1 < argc) {

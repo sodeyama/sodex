@@ -26,6 +26,13 @@ struct utt_find_options {
   char type_filter;
 };
 
+static void utt_find_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: find [path ...] [-name pattern] [-type f|d] "
+                 "[-mindepth n] [-maxdepth n] [-print]\n");
+}
+
 #ifndef TEST_BUILD
 static int utt_build_dentry_path(ext3_dentry *dentry, char *buf, int cap)
 {
@@ -287,7 +294,10 @@ int unix_find_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
-    if (strcmp(argv[i], "--") == 0) {
+    if (utt_is_help_option(argv[i])) {
+      utt_find_print_usage();
+      return 0;
+    } else if (strcmp(argv[i], "--") == 0) {
       i++;
       break;
     } else if ((strcmp(argv[i], "-name") == 0 && i + 1 < argc) ||

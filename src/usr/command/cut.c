@@ -11,6 +11,13 @@ struct utt_cut_options {
   int range_count;
 };
 
+static void utt_cut_print_usage(void)
+{
+  utt_write_text(STDOUT_FILENO,
+                 "usage: cut (-c list | -f list [-d delim] [-s]) "
+                 "[--complement] [file ...]\n");
+}
+
 int unix_cut_main(int argc, char **argv)
 {
   struct utt_cut_options opts;
@@ -23,7 +30,10 @@ int unix_cut_main(int argc, char **argv)
   for (i = 1; i < argc; i++) {
     const char *value = 0;
 
-    if (strcmp(argv[i], "--") == 0) {
+    if (utt_is_help_option(argv[i])) {
+      utt_cut_print_usage();
+      return 0;
+    } else if (strcmp(argv[i], "--") == 0) {
       i++;
       break;
     } else if ((strcmp(argv[i], "-c") == 0 && i + 1 < argc) ||

@@ -467,6 +467,43 @@ TEST(awk_supports_script_files_and_compact_F) {
     cleanup_tree(case_dir);
 }
 
+TEST(unix_text_tools_support_help_options) {
+    struct help_case {
+        const char *name;
+        int (*fn)(int, char **);
+    };
+    struct help_case cases[] = {
+        { "find", unix_find_main },
+        { "sort", unix_sort_main },
+        { "uniq", unix_uniq_main },
+        { "wc", unix_wc_main },
+        { "head", unix_head_main },
+        { "tail", unix_tail_main },
+        { "grep", unix_grep_main },
+        { "cut", unix_cut_main },
+        { "tr", unix_tr_main },
+        { "diff", unix_diff_main },
+        { "tee", unix_tee_main },
+        { "sed", unix_sed_main },
+        { "awk", unix_awk_main },
+    };
+    char out[1024];
+    int i;
+
+    for (i = 0; i < (int)(sizeof(cases) / sizeof(cases[0])); i++) {
+        char *long_argv[] = { (char *)cases[i].name, "--help" };
+        char *short_argv[] = { (char *)cases[i].name, "-h" };
+
+        ASSERT_EQ(run_tool_capture(cases[i].fn, 2, long_argv, NULL, out, sizeof(out)), 0);
+        ASSERT(strncmp(out, "usage: ", 7) == 0);
+        ASSERT(strstr(out, cases[i].name) != NULL);
+
+        ASSERT_EQ(run_tool_capture(cases[i].fn, 2, short_argv, NULL, out, sizeof(out)), 0);
+        ASSERT(strncmp(out, "usage: ", 7) == 0);
+        ASSERT(strstr(out, cases[i].name) != NULL);
+    }
+}
+
 int main(void)
 {
     RUN_TEST(find_filters_by_name_type_and_depth);
@@ -487,5 +524,6 @@ int main(void)
     RUN_TEST(tee_supports_long_append);
     RUN_TEST(sed_supports_long_options_and_script_files);
     RUN_TEST(awk_supports_script_files_and_compact_F);
+    RUN_TEST(unix_text_tools_support_help_options);
     TEST_REPORT();
 }

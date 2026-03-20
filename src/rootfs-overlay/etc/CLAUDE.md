@@ -65,3 +65,21 @@ curl -v http://10.0.2.2:8080/healthz
 - raw HTTP を見る必要があるときだけ `curl`
 - 天気、ニュース、株価、為替などの最新情報は、tool を1回以上使って確認してから答える
 - プロジェクト固有の指示は、起動ディレクトリ直下の `CLAUDE.md` を優先する
+
+## unix text tools テスト
+
+- guest 内の初期化スクリプト: `sh /etc/init.d/rcS.unix-text`
+- guest 内の追加ケース: `sh /etc/init.d/rcS.unix-text-extra`
+- host 側 unit test: `make -C tests test_unix_text_tools test_usr_string`
+- host 側実行: `./tests/test_unix_text_tools`
+- host 側実行: `./tests/test_usr_string`
+- QEMU smoke 一括実行: `make -C src test-qemu-unix-text-tools`
+- QEMU smoke を直接実行: `python3 src/test/run_qemu_unix_text_tools_smoke.py build/bin/fsboot.bin build/log`
+
+### 対象ファイル
+
+- `src/test/data/unix_text_tools_rcS.sh`: main の smoke 用スクリプト
+- `src/test/data/unix_text_tools_rcS_extra.sh`: `find`, `diff`, `tee`, long option 追加ケース
+- `src/test/run_qemu_unix_text_tools_smoke.py <fsboot> <logdir>`: QEMU 起動と検証
+- `tests/test_unix_text_tools.c`: host 側の GNU 互換引数テスト
+- `tests/test_usr_string.c`: userland libc `strcpy` 回帰テスト

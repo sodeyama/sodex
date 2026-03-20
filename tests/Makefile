@@ -614,10 +614,49 @@ test_tool_file_access_json.o: $(SRC)/usr/lib/libagent/json.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Unix text command tests
-test_unix_text_tools: test_unix_text_tools.c test_unix_text_tools_unix_text_tools.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_unix_text_tools.c test_unix_text_tools_unix_text_tools.o
+test_unix_text_tools: test_unix_text_tools.c test_unix_text_tools_lib.o test_unix_text_tools_find.o test_unix_text_tools_sort.o test_unix_text_tools_uniq.o test_unix_text_tools_wc.o test_unix_text_tools_head.o test_unix_text_tools_tail.o test_unix_text_tools_grep.o test_unix_text_tools_cut.o test_unix_text_tools_tr.o test_unix_text_tools_diff.o test_unix_text_tools_tee.o test_unix_text_tools_sed.o test_unix_text_tools_awk.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_unix_text_tools.c test_unix_text_tools_lib.o test_unix_text_tools_find.o test_unix_text_tools_sort.o test_unix_text_tools_uniq.o test_unix_text_tools_wc.o test_unix_text_tools_head.o test_unix_text_tools_tail.o test_unix_text_tools_grep.o test_unix_text_tools_cut.o test_unix_text_tools_tr.o test_unix_text_tools_diff.o test_unix_text_tools_tee.o test_unix_text_tools_sed.o test_unix_text_tools_awk.o
 
-test_unix_text_tools_unix_text_tools.o: $(SRC)/usr/lib/libc/unix_text_tools.c
+test_unix_text_tools_lib.o: $(SRC)/usr/lib/libc/unix_text_tool_lib.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_find.o: $(SRC)/usr/command/find.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_sort.o: $(SRC)/usr/command/sort.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_uniq.o: $(SRC)/usr/command/uniq.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_wc.o: $(SRC)/usr/command/wc.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_head.o: $(SRC)/usr/command/head.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_tail.o: $(SRC)/usr/command/tail.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_grep.o: $(SRC)/usr/command/grep.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_cut.o: $(SRC)/usr/command/cut.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_tr.o: $(SRC)/usr/command/tr.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_diff.o: $(SRC)/usr/command/diff.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_tee.o: $(SRC)/usr/command/tee.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_sed.o: $(SRC)/usr/command/sed.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_unix_text_tools_awk.o: $(SRC)/usr/command/awk.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # Conversation management tests

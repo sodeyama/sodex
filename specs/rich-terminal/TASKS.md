@@ -272,6 +272,10 @@
 | [x] | RT-142 | agent 既定 prompt / system info に command 群の存在を反映し、`run_command` 前提の discoverability を上げる | RT-141 | agent が guest 側 text command 群を前提に使いやすくなる |
 | [x] | RT-143 | host test を追加し、shared helper と `sed` / `awk` / `diff` の主要ロジックを回帰検知できるようにする | RT-138, RT-139, RT-140 | command 本体を跨ぐ pure logic の退行を host test で検知できる |
 | [x] | RT-144 | QEMU smoke を追加し、find->grep->sort->uniq->wc、sed/awk/cut/tr、diff/tee の代表 workflow を固定する | RT-141, RT-142, RT-143 | shell / agent から使う主要導線を QEMU 上で回帰検知できる |
+| [x] | RT-145 | Unix text command 共通 helper を `unix_text_tool_lib` へ切り出し、文字列 builder、line 読み込み、range/regex を共有 API に整理する | RT-144 | command 間共有の最小 helper が `libc` に残り、monolith を分解できる |
+| [x] | RT-146 | `find` から `tee` までの実装本体を `src/usr/command/*.c` へ戻し、wrapper-only 構成を解消する | RT-145 | 各 command source が `unix_*_main()` 本体を持ち、責務を局所的に追える |
+| [x] | RT-147 | `sed` / `awk` の parser / engine を command 側へ移し、`src/usr/lib/libc/unix_text_tools.c` を削除する | RT-146 | 最後の重い text tool 実装も command 側へ移り、monolith file が消える |
+| [x] | RT-148 | `tests/Makefile` を更新し、`test_unix_text_tools` を各 command object + 共通 helper object 直結に切り替えて host/QEMU 回帰を再確認する | RT-147 | 分割後も host test と QEMU smoke が通り、link 構成が実装責務と一致する |
 
 ## 先送りする項目
 

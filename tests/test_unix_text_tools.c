@@ -257,6 +257,216 @@ TEST(diff_reports_quiet_and_unified) {
     cleanup_tree(case_dir);
 }
 
+TEST(find_supports_long_options_and_print) {
+    char case_dir[256];
+    char subdir[320];
+    char root_txt[320];
+    char nested_txt[320];
+    char out[1024];
+    char *argv[] = { "find", case_dir, "--type=f", "--name=*.txt", "--maxdepth=1", "-print" };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(subdir, sizeof(subdir), case_dir, "sub"));
+    ASSERT(mkdir(subdir, 0755) == 0);
+    ASSERT(join_path(root_txt, sizeof(root_txt), case_dir, "root.txt"));
+    ASSERT(join_path(nested_txt, sizeof(nested_txt), subdir, "nested.txt"));
+    ASSERT(write_text_file(root_txt, "root\n"));
+    ASSERT(write_text_file(nested_txt, "nested\n"));
+
+    ASSERT_EQ(run_tool_capture(unix_find_main, 6, argv, NULL, out, sizeof(out)), 0);
+    ASSERT(strstr(out, "root.txt") != NULL);
+    ASSERT(strstr(out, "nested.txt") == NULL);
+
+    cleanup_tree(case_dir);
+}
+
+TEST(sort_supports_long_options_and_output_file) {
+    char case_dir[256];
+    char data_path[320];
+    char sorted_path[320];
+    char output_arg[384];
+    char out[1024];
+    char *argv[] = { "sort", "--numeric-sort", "--reverse", output_arg, data_path };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(data_path, sizeof(data_path), case_dir, "numbers.txt"));
+    ASSERT(join_path(sorted_path, sizeof(sorted_path), case_dir, "sorted.txt"));
+    ASSERT(write_text_file(data_path, "1\n10\n2\n2\n"));
+    ASSERT(snprintf(output_arg, sizeof(output_arg), "--output=%s", sorted_path) < (int)sizeof(output_arg));
+
+    ASSERT_EQ(run_tool_capture(unix_sort_main, 5, argv, NULL, out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "");
+    ASSERT(read_text_file(sorted_path, out, sizeof(out)));
+    ASSERT_STR_EQ(out, "10\n2\n2\n1\n");
+
+    cleanup_tree(case_dir);
+}
+
+TEST(uniq_supports_long_options) {
+    char out[1024];
+    char *argv[] = { "uniq", "--count", "--repeated" };
+
+    ASSERT_EQ(run_tool_capture(unix_uniq_main, 3, argv, "a\na\nb\nc\nc\n", out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "2 a\n2 c\n");
+}
+
+TEST(wc_supports_long_options_and_counts_newlines_only) {
+    char case_dir[256];
+    char data_path[320];
+    char out[1024];
+    char *argv[] = { "wc", "--lines", "--words", "--bytes", data_path };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(data_path, sizeof(data_path), case_dir, "wc.txt"));
+    ASSERT(write_text_file(data_path, "aa\nbb"));
+
+    ASSERT_EQ(run_tool_capture(unix_wc_main, 5, argv, NULL, out, sizeof(out)), 0);
+    ASSERT(strstr(out, "1 2 5") != NULL);
+
+    cleanup_tree(case_dir);
+}
+
+TEST(head_supports_negative_line_counts) {
+    char case_dir[256];
+    char data_path[320];
+    char out[1024];
+    char *argv[] = { "head", "--lines=-1", data_path };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(data_path, sizeof(data_path), case_dir, "head.txt"));
+    ASSERT(write_text_file(data_path, "1\n2\n3\n"));
+
+    ASSERT_EQ(run_tool_capture(unix_head_main, 3, argv, NULL, out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "1\n2\n");
+
+    cleanup_tree(case_dir);
+}
+
+TEST(tail_supports_from_start_line_counts) {
+    char case_dir[256];
+    char data_path[320];
+    char out[1024];
+    char *argv[] = { "tail", "--lines=+2", data_path };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(data_path, sizeof(data_path), case_dir, "tail.txt"));
+    ASSERT(write_text_file(data_path, "1\n2\n3\n"));
+
+    ASSERT_EQ(run_tool_capture(unix_tail_main, 3, argv, NULL, out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "2\n3\n");
+
+    cleanup_tree(case_dir);
+}
+
+TEST(grep_supports_long_options_and_stdin_operand) {
+    char out[1024];
+    char *argv[] = { "grep", "--fixed-strings", "--ignore-case", "--count", "needle", "-" };
+
+    ASSERT_EQ(run_tool_capture(unix_grep_main, 6, argv,
+                               "Needle\nother\nNEEDLE\n",
+                               out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "2\n");
+}
+
+TEST(cut_supports_long_options_and_complement) {
+    char out[1024];
+    char *argv[] = { "cut", "--delimiter=:", "--fields=2", "--complement" };
+
+    ASSERT_EQ(run_tool_capture(unix_cut_main, 4, argv, "aa:bb:cc\n", out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "aa:cc\n");
+}
+
+TEST(tr_supports_long_options) {
+    char out[1024];
+    char *argv[] = { "tr", "--complement", "--delete", "a-z" };
+
+    ASSERT_EQ(run_tool_capture(unix_tr_main, 4, argv, "abc123\n", out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "abc");
+}
+
+TEST(diff_supports_long_options) {
+    char case_dir[256];
+    char left[320];
+    char right[320];
+    char out[2048];
+    char *brief_argv[] = { "diff", "--brief", left, right };
+    char *unified_argv[] = { "diff", "--unified", left, right };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(left, sizeof(left), case_dir, "left.txt"));
+    ASSERT(join_path(right, sizeof(right), case_dir, "right.txt"));
+    ASSERT(write_text_file(left, "one\ntwo\n"));
+    ASSERT(write_text_file(right, "one\nthree\n"));
+
+    ASSERT_EQ(run_tool_capture(unix_diff_main, 4, brief_argv, NULL, out, sizeof(out)), 1);
+    ASSERT(strstr(out, "differ") != NULL);
+
+    ASSERT_EQ(run_tool_capture(unix_diff_main, 4, unified_argv, NULL, out, sizeof(out)), 1);
+    ASSERT(strstr(out, "--- ") != NULL);
+    ASSERT(strstr(out, "+++ ") != NULL);
+
+    cleanup_tree(case_dir);
+}
+
+TEST(tee_supports_long_append) {
+    char case_dir[256];
+    char tee_path[320];
+    char out[1024];
+    char *argv[] = { "tee", "--append", tee_path };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(tee_path, sizeof(tee_path), case_dir, "tee.txt"));
+    ASSERT(write_text_file(tee_path, "old\n"));
+
+    ASSERT_EQ(run_tool_capture(unix_tee_main, 3, argv, "new\n", out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "new\n");
+    ASSERT(read_text_file(tee_path, out, sizeof(out)));
+    ASSERT_STR_EQ(out, "old\nnew\n");
+
+    cleanup_tree(case_dir);
+}
+
+TEST(sed_supports_long_options_and_script_files) {
+    char case_dir[256];
+    char data_path[320];
+    char script_path[320];
+    char out[1024];
+    char *argv[] = { "sed", "--quiet", "--file", script_path, data_path };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(data_path, sizeof(data_path), case_dir, "sed.txt"));
+    ASSERT(join_path(script_path, sizeof(script_path), case_dir, "script.sed"));
+    ASSERT(write_text_file(data_path, "one\ntwo\n"));
+    ASSERT(write_text_file(script_path, "2p\n"));
+
+    ASSERT_EQ(run_tool_capture(unix_sed_main, 5, argv, NULL, out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "two\n");
+
+    cleanup_tree(case_dir);
+}
+
+TEST(awk_supports_script_files_and_compact_F) {
+    char case_dir[256];
+    char data_path[320];
+    char script_path[320];
+    char out[1024];
+    char *argv[] = { "awk", "-F:", "-v", "label=start", "-f", script_path, data_path };
+
+    ASSERT(make_case_dir(case_dir, sizeof(case_dir)));
+    ASSERT(join_path(data_path, sizeof(data_path), case_dir, "awk.txt"));
+    ASSERT(join_path(script_path, sizeof(script_path), case_dir, "script.awk"));
+    ASSERT(write_text_file(data_path, "aa:bb\n"));
+    ASSERT(write_text_file(script_path,
+                           "BEGIN { print label }\n"
+                           "{ print $2 }\n"
+                           "END { print \"done\" }\n"));
+
+    ASSERT_EQ(run_tool_capture(unix_awk_main, 7, argv, NULL, out, sizeof(out)), 0);
+    ASSERT_STR_EQ(out, "start\nbb\ndone\n");
+
+    cleanup_tree(case_dir);
+}
+
 int main(void)
 {
     RUN_TEST(find_filters_by_name_type_and_depth);
@@ -264,5 +474,18 @@ int main(void)
     RUN_TEST(grep_cut_tr_and_tee_workflow);
     RUN_TEST(sed_and_awk_transform_text);
     RUN_TEST(diff_reports_quiet_and_unified);
+    RUN_TEST(find_supports_long_options_and_print);
+    RUN_TEST(sort_supports_long_options_and_output_file);
+    RUN_TEST(uniq_supports_long_options);
+    RUN_TEST(wc_supports_long_options_and_counts_newlines_only);
+    RUN_TEST(head_supports_negative_line_counts);
+    RUN_TEST(tail_supports_from_start_line_counts);
+    RUN_TEST(grep_supports_long_options_and_stdin_operand);
+    RUN_TEST(cut_supports_long_options_and_complement);
+    RUN_TEST(tr_supports_long_options);
+    RUN_TEST(diff_supports_long_options);
+    RUN_TEST(tee_supports_long_append);
+    RUN_TEST(sed_supports_long_options_and_script_files);
+    RUN_TEST(awk_supports_script_files_and_compact_F);
     TEST_REPORT();
 }

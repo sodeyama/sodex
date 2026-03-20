@@ -28,13 +28,6 @@ sed -e 's/foo/bar/g' -e '2d' /home/user/sed.txt > /home/user/sed_out.txt
 echo aa:bb:cc > /home/user/awk.txt
 awk -F : '{ print $1, $3 }' /home/user/awk.txt > /home/user/awk_out.txt
 
-echo one > /home/user/diff_left.txt
-echo two >> /home/user/diff_left.txt
-echo one > /home/user/diff_right.txt
-echo three >> /home/user/diff_right.txt
-diff -q /home/user/diff_left.txt /home/user/diff_right.txt > /home/user/diff_q.txt
-diff -u /home/user/diff_left.txt /home/user/diff_right.txt > /home/user/diff_u.txt
-
-tee /home/user/tee_file.txt < /home/user/diff_right.txt > /home/user/tee_stdout.txt
-find /home/user -type f -name '*.txt' > /home/user/find.txt
+echo AUDIT unix_text_tools_main_ready
+/usr/bin/sh /etc/init.d/rcS.unix-text-extra
 echo AUDIT unix_text_tools_done

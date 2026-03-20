@@ -298,6 +298,7 @@ test-qemu-unix-text-tools:
 	@mkdir -p $(LOGDIR)/unix-text-tools-overlay/etc/init.d
 	@cp -R $(BASEDIR)/src/rootfs-overlay/. $(LOGDIR)/unix-text-tools-overlay/
 	@cp $(BASEDIR)/src/test/data/unix_text_tools_rcS.sh $(LOGDIR)/unix-text-tools-overlay/etc/init.d/rcS.unix-text
+	@cp $(BASEDIR)/src/test/data/unix_text_tools_rcS_extra.sh $(LOGDIR)/unix-text-tools-overlay/etc/init.d/rcS.unix-text-extra
 	@printf 'initdefault:rescue\nsysinit:/etc/init.d/rcS.unix-text\nrespawn:rescue:/usr/bin/sh\n' > $(LOGDIR)/unix-text-tools-overlay/etc/inittab
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(LOGDIR)/unix-text-tools-overlay all
 	@echo "=== Running unix text tools smoke in QEMU ==="

@@ -147,16 +147,26 @@ def read_user_file(fsboot: pathlib.Path, name: str) -> str:
 def assert_unix_text_state(fsboot: pathlib.Path) -> None:
     if read_user_file(fsboot, "sort.txt") != "1\n2\n2\n10\n":
         raise AssertionError("sort.txt mismatch")
+    if read_user_file(fsboot, "sort_rev.txt") != "10\n2\n2\n1\n":
+        raise AssertionError("sort_rev.txt mismatch")
     if read_user_file(fsboot, "uniq.txt") != "1 1\n2 2\n1 10\n":
         raise AssertionError("uniq.txt mismatch")
+    if read_user_file(fsboot, "uniq_repeated.txt") != "2 a\n2 c\n":
+        raise AssertionError("uniq_repeated.txt mismatch")
     if "4 4 9" not in read_user_file(fsboot, "wc.txt"):
         raise AssertionError("wc.txt mismatch")
     if read_user_file(fsboot, "head.txt") != "10\n2\n":
         raise AssertionError("head.txt mismatch")
     if read_user_file(fsboot, "tail.txt") != "2\n1\n":
         raise AssertionError("tail.txt mismatch")
+    if read_user_file(fsboot, "head_skip_last.txt") != "1\n2\n":
+        raise AssertionError("head_skip_last.txt mismatch")
+    if read_user_file(fsboot, "tail_from_second.txt") != "2\n3\n":
+        raise AssertionError("tail_from_second.txt mismatch")
     if read_user_file(fsboot, "grep_out.txt") != "1:foo\n3:foo bar\n":
         raise AssertionError("grep_out.txt mismatch")
+    if read_user_file(fsboot, "grep_count.txt") != "2\n":
+        raise AssertionError("grep_count.txt mismatch")
     if read_user_file(fsboot, "cut_out.txt") != "aa:cc\n":
         raise AssertionError("cut_out.txt mismatch")
     if read_user_file(fsboot, "tr_out.txt") != "a b\n":
@@ -174,10 +184,6 @@ def assert_unix_text_state(fsboot: pathlib.Path) -> None:
         raise AssertionError("tee_file.txt mismatch")
     if read_user_file(fsboot, "tee_stdout.txt") != "one\nthree\n":
         raise AssertionError("tee_stdout.txt mismatch")
-    find_text = read_user_file(fsboot, "find.txt")
-    for expected in ("sort.txt", "grep.txt", "awk.txt"):
-        if expected not in find_text:
-            raise AssertionError(f"find.txt missing {expected}")
 
 
 def main() -> int:

@@ -108,6 +108,7 @@ struct utt_cut_options {
   int mode_chars;
   int mode_fields;
   int suppress_no_delim;
+  int complement;
   char delim;
   struct utt_range *ranges;
   int range_count;
@@ -351,6 +352,77 @@ static int utt_parse_long_value(const char *text, long *value_out)
   if (endptr == text || *endptr != '\0')
     return -1;
   *value_out = value;
+  return 0;
+}
+
+static int utt_match_long_option(const char *arg,
+                                 const char *name,
+                                 const char **value_out)
+{
+  int name_len;
+
+  if (value_out != 0)
+    *value_out = 0;
+  if (arg == 0 || name == 0 || strncmp(arg, "--", 2) != 0)
+    return 0;
+  arg += 2;
+  name_len = utt_strlen_int(name);
+  if (strcmp(arg, name) == 0)
+    return 1;
+  if (strncmp(arg, name, (size_t)name_len) == 0 && arg[name_len] == '=') {
+    if (value_out != 0)
+      *value_out = arg + name_len + 1;
+    return 1;
+  }
+  return 0;
+}
+
+static int utt_is_stdin_path(const char *path)
+{
+  return path != 0 && path[0] == '-' && path[1] == '\0';
+}
+
+static long utt_count_newlines(const char *text, int len)
+{
+  long count = 0;
+  int i;
+
+  for (i = 0; i < len; i++) {
+    if (text[i] == '\n')
+      count++;
+  }
+  return count;
+}
+
+static int utt_parse_head_count_spec(const char *text,
+                                     long *count_out,
+                                     int *all_but_last_out)
+{
+  long value;
+
+  if (utt_parse_long_value(text, &value) < 0 ||
+      count_out == 0 || all_but_last_out == 0)
+    return -1;
+  *all_but_last_out = value < 0;
+  if (value < 0)
+    value = -value;
+  *count_out = value;
+  return 0;
+}
+
+static int utt_parse_tail_count_spec(const char *text,
+                                     long *count_out,
+                                     int *from_start_out)
+{
+  long value;
+
+  if (utt_parse_long_value(text, &value) < 0 ||
+      count_out == 0 || from_start_out == 0)
+    return -1;
+  *from_start_out = text[0] == '+';
+  if (value < 0)
+    value = -value;
+  *count_out = value;
   return 0;
 }
 
@@ -619,6 +691,8 @@ static int utt_load_text_from_path(const char *path,
 
   if (path == 0 || out == 0)
     return -1;
+  if (utt_is_stdin_path(path))
+    return utt_load_text_from_fd(STDIN_FILENO, "-", out);
   fd = open(path, O_RDONLY, 0);
   if (fd < 0)
     return -1;
@@ -1331,6 +1405,24 @@ static int utt_match_grep_patterns(const struct utt_grep_options *opts,
   return opts->invert != 0 ? 1 : 0;
 }
 
+static int utt_grep_add_pattern(struct utt_grep_options *opts, const char *pattern)
+{
+  char **next;
+  int j;
+
+  next = (char **)malloc(sizeof(char *) * (size_t)(opts->pattern_count + 1));
+  if (next == 0)
+    return -1;
+  for (j = 0; j < opts->pattern_count; j++)
+    next[j] = opts->patterns[j];
+  next[opts->pattern_count] = (char *)pattern;
+  if (opts->patterns != 0)
+    free(opts->patterns);
+  opts->patterns = next;
+  opts->pattern_count++;
+  return 0;
+}
+
 static int utt_uniq_key_start(const struct utt_line_ref *line,
                               const struct utt_uniq_options *opts)
 {
@@ -1520,21 +1612,42 @@ int unix_find_main(int argc, char **argv)
 
   memset(&opts, 0, sizeof(opts));
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
-      strcpy(opts.name_pattern, argv[++i]);
-    } else if (strcmp(argv[i], "-type") == 0 && i + 1 < argc) {
-      opts.type_filter = argv[++i][0];
-    } else if (strcmp(argv[i], "-maxdepth") == 0 && i + 1 < argc) {
-      opts.maxdepth = atoi(argv[++i]);
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      i++;
+      break;
+    } else if ((strcmp(argv[i], "-name") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "name", &value)) {
+      const char *pattern = value != 0 ? value : argv[++i];
+      strcpy(opts.name_pattern, pattern);
+    } else if ((strcmp(argv[i], "-type") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "type", &value)) {
+      const char *type = value != 0 ? value : argv[++i];
+      opts.type_filter = type[0];
+    } else if ((strcmp(argv[i], "-maxdepth") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "maxdepth", &value)) {
+      const char *depth = value != 0 ? value : argv[++i];
+      opts.maxdepth = atoi(depth);
       opts.has_maxdepth = 1;
-    } else if (strcmp(argv[i], "-mindepth") == 0 && i + 1 < argc) {
-      opts.mindepth = atoi(argv[++i]);
+    } else if ((strcmp(argv[i], "-mindepth") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "mindepth", &value)) {
+      const char *depth = value != 0 ? value : argv[++i];
+      opts.mindepth = atoi(depth);
+    } else if (strcmp(argv[i], "-print") == 0 ||
+               utt_match_long_option(argv[i], "print", 0)) {
+      continue;
     } else if (argv[i][0] == '-') {
       return utt_print_error("find", "unsupported option", argv[i]);
     } else {
       if (path_count < (int)(sizeof(paths) / sizeof(paths[0])))
         paths[path_count++] = argv[i];
     }
+  }
+
+  for (; i < argc; i++) {
+    if (path_count < (int)(sizeof(paths) / sizeof(paths[0])))
+      paths[path_count++] = argv[i];
   }
 
   if (path_count == 0) {
@@ -1563,19 +1676,35 @@ int unix_sort_main(int argc, char **argv)
 
   memset(&opts, 0, sizeof(opts));
   for (i = 1; i < argc; i++) {
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      file_start = i + 1;
+      break;
+    }
     if (strcmp(argv[i], "-n") == 0) {
+      opts.numeric = 1;
+    } else if (utt_match_long_option(argv[i], "numeric-sort", 0)) {
       opts.numeric = 1;
     } else if (strcmp(argv[i], "-r") == 0) {
       opts.reverse = 1;
+    } else if (utt_match_long_option(argv[i], "reverse", 0)) {
+      opts.reverse = 1;
     } else if (strcmp(argv[i], "-u") == 0) {
       opts.unique = 1;
-    } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
-      opts.output_path = argv[++i];
-    } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
+    } else if (utt_match_long_option(argv[i], "unique", 0)) {
+      opts.unique = 1;
+    } else if ((strcmp(argv[i], "-o") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "output", &value)) {
+      opts.output_path = value != 0 ? value : argv[++i];
+    } else if ((strcmp(argv[i], "-t") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "field-separator", &value)) {
+      const char *delim = value != 0 ? value : argv[++i];
       opts.has_delim = 1;
-      opts.delim = argv[++i][0];
-    } else if (strcmp(argv[i], "-k") == 0 && i + 1 < argc) {
-      const char *spec = argv[++i];
+      opts.delim = delim[0];
+    } else if ((strcmp(argv[i], "-k") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "key", &value)) {
+      const char *spec = value != 0 ? value : argv[++i];
       opts.key_start = atoi(spec);
       while (*spec != '\0' && *spec != ',')
         spec++;
@@ -1641,16 +1770,32 @@ int unix_uniq_main(int argc, char **argv)
 
   memset(&opts, 0, sizeof(opts));
   for (i = 1; i < argc; i++) {
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      i++;
+      break;
+    }
     if (strcmp(argv[i], "-c") == 0) {
+      opts.show_count = 1;
+    } else if (utt_match_long_option(argv[i], "count", 0)) {
       opts.show_count = 1;
     } else if (strcmp(argv[i], "-d") == 0) {
       opts.only_repeated = 1;
+    } else if (utt_match_long_option(argv[i], "repeated", 0)) {
+      opts.only_repeated = 1;
     } else if (strcmp(argv[i], "-u") == 0) {
       opts.only_unique = 1;
-    } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
-      opts.skip_fields = atoi(argv[++i]);
-    } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-      opts.skip_chars = atoi(argv[++i]);
+    } else if (utt_match_long_option(argv[i], "unique", 0)) {
+      opts.only_unique = 1;
+    } else if ((strcmp(argv[i], "-f") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "skip-fields", &value)) {
+      const char *count = value != 0 ? value : argv[++i];
+      opts.skip_fields = atoi(count);
+    } else if ((strcmp(argv[i], "-s") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "skip-chars", &value)) {
+      const char *count = value != 0 ? value : argv[++i];
+      opts.skip_chars = atoi(count);
     } else if (argv[i][0] == '-') {
       return utt_print_error("uniq", "unsupported option", argv[i]);
     } else {
@@ -1710,11 +1855,21 @@ int unix_wc_main(int argc, char **argv)
 
   memset(&total, 0, sizeof(total));
   for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--") == 0) {
+      file_start = i + 1;
+      break;
+    }
     if (strcmp(argv[i], "-l") == 0) {
+      show_lines = 1;
+    } else if (utt_match_long_option(argv[i], "lines", 0)) {
       show_lines = 1;
     } else if (strcmp(argv[i], "-w") == 0) {
       show_words = 1;
+    } else if (utt_match_long_option(argv[i], "words", 0)) {
+      show_words = 1;
     } else if (strcmp(argv[i], "-c") == 0) {
+      show_bytes = 1;
+    } else if (utt_match_long_option(argv[i], "bytes", 0)) {
       show_bytes = 1;
     } else if (argv[i][0] == '-') {
       return utt_print_error("wc", "unsupported option", argv[i]);
@@ -1741,7 +1896,7 @@ int unix_wc_main(int argc, char **argv)
     int len = 0;
 
     memset(&counts, 0, sizeof(counts));
-    counts.lines = texts[i].line_count;
+    counts.lines = utt_count_newlines(texts[i].raw_data, texts[i].len);
     counts.bytes = texts[i].len;
     for (pos = 0; pos < texts[i].len; pos++) {
       if (utt_is_space(texts[i].raw_data[pos])) {
@@ -1796,9 +1951,15 @@ int unix_wc_main(int argc, char **argv)
   return 0;
 }
 
-static void utt_print_header_if_needed(const char *name, int index, int total)
+static void utt_print_header_if_needed(const char *name,
+                                       int index,
+                                       int total,
+                                       int quiet,
+                                       int verbose)
 {
-  if (total <= 1)
+  if (quiet != 0)
+    return;
+  if (verbose == 0 && total <= 1)
     return;
   if (index > 0)
     utt_write_text(STDOUT_FILENO, "\n");
@@ -1809,19 +1970,53 @@ static void utt_print_header_if_needed(const char *name, int index, int total)
 
 int unix_head_main(int argc, char **argv)
 {
-  int count_lines = 10;
-  int count_bytes = -1;
+  long count_lines = 10;
+  long count_bytes = -1;
+  int lines_all_but_last = 0;
+  int bytes_all_but_last = 0;
+  int quiet_headers = 0;
+  int verbose_headers = 0;
   int i;
   int file_start = argc;
   struct utt_loaded_text *texts = 0;
   int text_count = 0;
 
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
-      count_lines = atoi(argv[++i]);
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      file_start = i + 1;
+      break;
+    } else if (strcmp(argv[i], "-q") == 0 ||
+               utt_match_long_option(argv[i], "quiet", 0) ||
+               utt_match_long_option(argv[i], "silent", 0)) {
+      quiet_headers = 1;
+      verbose_headers = 0;
+    } else if (strcmp(argv[i], "-v") == 0 ||
+               utt_match_long_option(argv[i], "verbose", 0)) {
+      verbose_headers = 1;
+      quiet_headers = 0;
+    } else if ((strcmp(argv[i], "-n") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "lines", &value)) {
+      if (utt_parse_head_count_spec(value != 0 ? value : argv[++i],
+                                    &count_lines,
+                                    &lines_all_but_last) < 0)
+        return utt_print_error("head", "bad count", value != 0 ? value : argv[i]);
       count_bytes = -1;
-    } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
-      count_bytes = atoi(argv[++i]);
+      bytes_all_but_last = 0;
+    } else if ((strcmp(argv[i], "-c") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "bytes", &value)) {
+      if (utt_parse_head_count_spec(value != 0 ? value : argv[++i],
+                                    &count_bytes,
+                                    &bytes_all_but_last) < 0)
+        return utt_print_error("head", "bad count", value != 0 ? value : argv[i]);
+    } else if (i == 1 && argv[i][0] == '-' && utt_is_digit(argv[i][1])) {
+      if (utt_parse_head_count_spec(argv[i] + 1,
+                                    &count_lines,
+                                    &lines_all_but_last) < 0)
+        return utt_print_error("head", "bad count", argv[i]);
+      count_bytes = -1;
+      bytes_all_but_last = 0;
     } else if (argv[i][0] == '-') {
       return utt_print_error("head", "unsupported option", argv[i]);
     } else {
@@ -1837,16 +2032,34 @@ int unix_head_main(int argc, char **argv)
   for (i = 0; i < text_count; i++) {
     int j;
 
-    utt_print_header_if_needed(texts[i].name, i, text_count);
+    utt_print_header_if_needed(texts[i].name, i, text_count,
+                               quiet_headers, verbose_headers);
     if (count_bytes >= 0) {
-      int bytes = count_bytes < texts[i].len ? count_bytes : texts[i].len;
+      int bytes = 0;
+
+      if (bytes_all_but_last != 0)
+        bytes = texts[i].len - (int)count_bytes;
+      else if (count_bytes < texts[i].len)
+        bytes = (int)count_bytes;
+      else
+        bytes = texts[i].len;
+      if (bytes < 0)
+        bytes = 0;
       utt_write_raw(STDOUT_FILENO, texts[i].raw_data, bytes);
       if (bytes > 0 && texts[i].raw_data[bytes - 1] != '\n')
         utt_write_text(STDOUT_FILENO, "\n");
       continue;
     }
-    for (j = 0; j < texts[i].line_count && j < count_lines; j++)
-      utt_print_line_ref((struct utt_line_ref *)&texts[i].lines[j]);
+    {
+      long line_limit = count_lines;
+
+      if (lines_all_but_last != 0)
+        line_limit = texts[i].line_count - line_limit;
+      if (line_limit < 0)
+        line_limit = 0;
+      for (j = 0; j < texts[i].line_count && j < line_limit; j++)
+        utt_print_line_ref((struct utt_line_ref *)&texts[i].lines[j]);
+    }
   }
 
   utt_free_texts(texts, text_count);
@@ -1855,19 +2068,55 @@ int unix_head_main(int argc, char **argv)
 
 int unix_tail_main(int argc, char **argv)
 {
-  int count_lines = 10;
-  int count_bytes = -1;
+  long count_lines = 10;
+  long count_bytes = -1;
+  int lines_from_start = 0;
+  int bytes_from_start = 0;
+  int quiet_headers = 0;
+  int verbose_headers = 0;
   int i;
   int file_start = argc;
   struct utt_loaded_text *texts = 0;
   int text_count = 0;
 
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
-      count_lines = atoi(argv[++i]);
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      file_start = i + 1;
+      break;
+    } else if (strcmp(argv[i], "-q") == 0 ||
+               utt_match_long_option(argv[i], "quiet", 0) ||
+               utt_match_long_option(argv[i], "silent", 0)) {
+      quiet_headers = 1;
+      verbose_headers = 0;
+    } else if (strcmp(argv[i], "-v") == 0 ||
+               utt_match_long_option(argv[i], "verbose", 0)) {
+      verbose_headers = 1;
+      quiet_headers = 0;
+    } else if ((strcmp(argv[i], "-n") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "lines", &value)) {
+      if (utt_parse_tail_count_spec(value != 0 ? value : argv[++i],
+                                    &count_lines,
+                                    &lines_from_start) < 0)
+        return utt_print_error("tail", "bad count", value != 0 ? value : argv[i]);
       count_bytes = -1;
-    } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
-      count_bytes = atoi(argv[++i]);
+      bytes_from_start = 0;
+    } else if ((strcmp(argv[i], "-c") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "bytes", &value)) {
+      if (utt_parse_tail_count_spec(value != 0 ? value : argv[++i],
+                                    &count_bytes,
+                                    &bytes_from_start) < 0)
+        return utt_print_error("tail", "bad count", value != 0 ? value : argv[i]);
+    } else if (i == 1 &&
+               (argv[i][0] == '+' || argv[i][0] == '-') &&
+               utt_is_digit(argv[i][1])) {
+      if (utt_parse_tail_count_spec(argv[i],
+                                    &count_lines,
+                                    &lines_from_start) < 0)
+        return utt_print_error("tail", "bad count", argv[i]);
+      count_bytes = -1;
+      bytes_from_start = 0;
     } else if (argv[i][0] == '-') {
       return utt_print_error("tail", "unsupported option", argv[i]);
     } else {
@@ -1884,21 +2133,33 @@ int unix_tail_main(int argc, char **argv)
     int j;
     int start;
 
-    utt_print_header_if_needed(texts[i].name, i, text_count);
+    utt_print_header_if_needed(texts[i].name, i, text_count,
+                               quiet_headers, verbose_headers);
     if (count_bytes >= 0) {
-      int start_byte = texts[i].len - count_bytes;
+      int start_byte;
 
+      if (bytes_from_start != 0)
+        start_byte = count_bytes <= 1 ? 0 : (int)count_bytes - 1;
+      else
+        start_byte = texts[i].len - (int)count_bytes;
       if (start_byte < 0)
         start_byte = 0;
+      if (start_byte > texts[i].len)
+        start_byte = texts[i].len;
       utt_write_raw(STDOUT_FILENO, texts[i].raw_data + start_byte,
                     texts[i].len - start_byte);
       if (texts[i].len > 0 && texts[i].raw_data[texts[i].len - 1] != '\n')
         utt_write_text(STDOUT_FILENO, "\n");
       continue;
     }
-    start = texts[i].line_count - count_lines;
+    if (lines_from_start != 0)
+      start = count_lines <= 1 ? 0 : (int)count_lines - 1;
+    else
+      start = texts[i].line_count - (int)count_lines;
     if (start < 0)
       start = 0;
+    if (start > texts[i].line_count)
+      start = texts[i].line_count;
     for (j = start; j < texts[i].line_count; j++)
       utt_print_line_ref((struct utt_line_ref *)&texts[i].lines[j]);
   }
@@ -1918,41 +2179,48 @@ int unix_grep_main(int argc, char **argv)
 
   memset(&opts, 0, sizeof(opts));
   for (i = 1; i < argc; i++) {
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      file_start = i + 1;
+      break;
+    }
     if (strcmp(argv[i], "-F") == 0) {
+      opts.fixed = 1;
+    } else if (utt_match_long_option(argv[i], "fixed-strings", 0)) {
       opts.fixed = 1;
     } else if (strcmp(argv[i], "-i") == 0) {
       opts.ignore_case = 1;
+    } else if (utt_match_long_option(argv[i], "ignore-case", 0)) {
+      opts.ignore_case = 1;
     } else if (strcmp(argv[i], "-v") == 0) {
+      opts.invert = 1;
+    } else if (utt_match_long_option(argv[i], "invert-match", 0)) {
       opts.invert = 1;
     } else if (strcmp(argv[i], "-n") == 0) {
       opts.show_line_numbers = 1;
+    } else if (utt_match_long_option(argv[i], "line-number", 0)) {
+      opts.show_line_numbers = 1;
     } else if (strcmp(argv[i], "-c") == 0) {
+      opts.count_only = 1;
+    } else if (utt_match_long_option(argv[i], "count", 0)) {
       opts.count_only = 1;
     } else if (strcmp(argv[i], "-q") == 0) {
       opts.quiet = 1;
-    } else if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
-      char **next = (char **)malloc(sizeof(char *) * (size_t)(opts.pattern_count + 1));
-      int j;
+    } else if (utt_match_long_option(argv[i], "quiet", 0)) {
+      opts.quiet = 1;
+    } else if ((strcmp(argv[i], "-e") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "regexp", &value)) {
+      const char *pattern = value != 0 ? value : argv[++i];
 
-      if (next == 0)
+      if (utt_grep_add_pattern(&opts, pattern) < 0)
         return utt_print_error("grep", "out of memory", "");
-      for (j = 0; j < opts.pattern_count; j++)
-        next[j] = opts.patterns[j];
-      next[opts.pattern_count++] = argv[++i];
-      if (opts.patterns != 0)
-        free(opts.patterns);
-      opts.patterns = next;
     } else if (argv[i][0] == '-') {
       return utt_print_error("grep", "unsupported option", argv[i]);
     } else {
       if (opts.pattern_count == 0) {
-        char **patterns = (char **)malloc(sizeof(char *));
-
-        if (patterns == 0)
+        if (utt_grep_add_pattern(&opts, argv[i]) < 0)
           return utt_print_error("grep", "out of memory", "");
-        patterns[0] = argv[i];
-        opts.patterns = patterns;
-        opts.pattern_count = 1;
         file_start = i + 1;
       } else {
         file_start = i;
@@ -2025,18 +2293,33 @@ int unix_cut_main(int argc, char **argv)
   memset(&opts, 0, sizeof(opts));
   opts.delim = '\t';
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      i++;
+      break;
+    } else if ((strcmp(argv[i], "-c") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "characters", &value)) {
+      const char *list = value != 0 ? value : argv[++i];
       opts.mode_chars = 1;
-      if (utt_parse_range_list(argv[++i], &opts.ranges, &opts.range_count) < 0)
-        return utt_print_error("cut", "bad list", argv[i]);
-    } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
+      if (utt_parse_range_list(list, &opts.ranges, &opts.range_count) < 0)
+        return utt_print_error("cut", "bad list", list);
+    } else if ((strcmp(argv[i], "-f") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "fields", &value)) {
+      const char *list = value != 0 ? value : argv[++i];
       opts.mode_fields = 1;
-      if (utt_parse_range_list(argv[++i], &opts.ranges, &opts.range_count) < 0)
-        return utt_print_error("cut", "bad list", argv[i]);
-    } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
-      opts.delim = argv[++i][0];
+      if (utt_parse_range_list(list, &opts.ranges, &opts.range_count) < 0)
+        return utt_print_error("cut", "bad list", list);
+    } else if ((strcmp(argv[i], "-d") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "delimiter", &value)) {
+      const char *delim = value != 0 ? value : argv[++i];
+      opts.delim = delim[0];
     } else if (strcmp(argv[i], "-s") == 0) {
       opts.suppress_no_delim = 1;
+    } else if (utt_match_long_option(argv[i], "only-delimited", 0)) {
+      opts.suppress_no_delim = 1;
+    } else if (utt_match_long_option(argv[i], "complement", 0)) {
+      opts.complement = 1;
     } else if (argv[i][0] == '-') {
       return utt_print_error("cut", "unsupported option", argv[i]);
     } else {
@@ -2044,7 +2327,8 @@ int unix_cut_main(int argc, char **argv)
     }
   }
 
-  if (opts.mode_chars == 0 && opts.mode_fields == 0)
+  if ((opts.mode_chars == 0 && opts.mode_fields == 0) ||
+      (opts.mode_chars != 0 && opts.mode_fields != 0))
     return utt_print_error("cut", "missing -c or -f", "");
   if (utt_collect_input_texts(argv + i, argc - i, &texts, &text_count) < 0) {
     free(opts.ranges);
@@ -2065,7 +2349,12 @@ int unix_cut_main(int argc, char **argv)
         while (pos < texts[i].lines[j].len) {
           int next = utt_next_char_end(texts[i].lines[j].text,
                                        texts[i].lines[j].len, pos);
-          if (utt_range_contains(opts.ranges, opts.range_count, char_index))
+          int selected = utt_range_contains(opts.ranges, opts.range_count,
+                                            char_index);
+
+          if (opts.complement != 0)
+            selected = !selected;
+          if (selected)
             utt_string_append_len(&out, texts[i].lines[j].text + pos, next - pos);
           pos = next;
           char_index++;
@@ -2082,11 +2371,17 @@ int unix_cut_main(int argc, char **argv)
             continue;
           if (pos2 != texts[i].lines[j].len)
             saw_delim = 1;
-          if (utt_range_contains(opts.ranges, opts.range_count, field)) {
+          {
+            int selected = utt_range_contains(opts.ranges, opts.range_count, field);
+
+            if (opts.complement != 0)
+              selected = !selected;
+            if (selected) {
             if (!first_written)
               utt_string_append_char(&out, opts.delim);
             utt_string_append_len(&out, texts[i].lines[j].text + start, pos2 - start);
             first_written = 0;
+            }
           }
           start = pos2 + 1;
           field++;
@@ -2130,11 +2425,17 @@ int unix_tr_main(int argc, char **argv)
   unsigned char prev_out = 0;
 
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-d") == 0)
+    if (strcmp(argv[i], "--") == 0) {
+      i++;
+      break;
+    } else if (strcmp(argv[i], "-d") == 0 ||
+               utt_match_long_option(argv[i], "delete", 0))
       delete_mode = 1;
-    else if (strcmp(argv[i], "-s") == 0)
+    else if (strcmp(argv[i], "-s") == 0 ||
+             utt_match_long_option(argv[i], "squeeze-repeats", 0))
       squeeze_mode = 1;
-    else if (strcmp(argv[i], "-c") == 0)
+    else if (strcmp(argv[i], "-c") == 0 ||
+             utt_match_long_option(argv[i], "complement", 0))
       complement = 1;
     else if (argv[i][0] == '-')
       return utt_print_error("tr", "unsupported option", argv[i]);
@@ -2225,9 +2526,18 @@ int unix_diff_main(int argc, char **argv)
   memset(&a, 0, sizeof(a));
   memset(&b, 0, sizeof(b));
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-q") == 0)
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      i++;
+      break;
+    }
+    if (strcmp(argv[i], "-q") == 0 ||
+        utt_match_long_option(argv[i], "brief", 0) ||
+        utt_match_long_option(argv[i], "quiet", 0))
       quiet = 1;
-    else if (strcmp(argv[i], "-u") == 0)
+    else if (strcmp(argv[i], "-u") == 0 ||
+             utt_match_long_option(argv[i], "unified", &value))
       unified = 1;
     else if (argv[i][0] == '-')
       return utt_print_error("diff", "unsupported option", argv[i]);
@@ -2291,15 +2601,30 @@ int unix_diff_main(int argc, char **argv)
 int unix_tee_main(int argc, char **argv)
 {
   int append = 0;
-  int file_start = 1;
+  int file_start = argc;
   int *fds = 0;
   int fd_count = 0;
   int i;
 
-  if (argc > 1 && strcmp(argv[1], "-a") == 0) {
-    append = 1;
-    file_start = 2;
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--") == 0) {
+      file_start = i + 1;
+      break;
+    } else if (strcmp(argv[i], "-a") == 0 ||
+               utt_match_long_option(argv[i], "append", 0)) {
+      append = 1;
+    } else if (strcmp(argv[i], "-i") == 0 ||
+               utt_match_long_option(argv[i], "ignore-interrupts", 0)) {
+      continue;
+    } else if (argv[i][0] == '-') {
+      return utt_print_error("tee", "unsupported option", argv[i]);
+    } else {
+      file_start = i;
+      break;
+    }
   }
+  if (file_start == argc)
+    file_start = i;
 
   if (argc - file_start > 0) {
     fds = (int *)malloc(sizeof(int) * (size_t)(argc - file_start));
@@ -2461,7 +2786,7 @@ static int utt_sed_parse_script(const char *script, struct utt_sed_program *prog
   char quote = '\0';
 
   while (*p != '\0') {
-    if (quote == '\0' && *p == ';') {
+    if (quote == '\0' && (*p == ';' || *p == '\n')) {
       char *piece = utt_strdup_len(start, (int)(p - start));
       int ret;
 
@@ -2499,6 +2824,20 @@ static int utt_sed_parse_script(const char *script, struct utt_sed_program *prog
       return -1;
   }
   return 0;
+}
+
+static int utt_sed_add_script_file(const char *path,
+                                   struct utt_sed_program *prog)
+{
+  char *data = 0;
+  int len = 0;
+  int ret;
+
+  if (utt_read_path_all(path, &data, &len) < 0)
+    return -1;
+  ret = utt_sed_parse_script(data, prog);
+  free(data);
+  return ret;
 }
 
 static int utt_sed_addr_match(const struct utt_sed_command *cmd,
@@ -2561,12 +2900,30 @@ int unix_sed_main(int argc, char **argv)
 
   memset(&prog, 0, sizeof(prog));
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-n") == 0) {
+    const char *value = 0;
+
+    if (strcmp(argv[i], "--") == 0) {
+      i++;
+      break;
+    } else if (strcmp(argv[i], "-n") == 0 ||
+               utt_match_long_option(argv[i], "quiet", 0) ||
+               utt_match_long_option(argv[i], "silent", 0)) {
       prog.suppress_default = 1;
-    } else if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
-      if (utt_sed_parse_script(argv[++i], &prog) < 0) {
+    } else if ((strcmp(argv[i], "-e") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "expression", &value)) {
+      const char *script = value != 0 ? value : argv[++i];
+
+      if (utt_sed_parse_script(script, &prog) < 0) {
         utt_sed_free_program(&prog);
-        return utt_print_error("sed", "bad script", argv[i]);
+        return utt_print_error("sed", "bad script", script);
+      }
+    } else if ((strcmp(argv[i], "-f") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "file", &value)) {
+      const char *path = value != 0 ? value : argv[++i];
+
+      if (utt_sed_add_script_file(path, &prog) < 0) {
+        utt_sed_free_program(&prog);
+        return utt_print_error("sed", "bad script", path);
       }
     } else if (argv[i][0] == '-') {
       utt_sed_free_program(&prog);
@@ -2634,6 +2991,57 @@ int unix_sed_main(int argc, char **argv)
 
   utt_free_texts(texts, text_count);
   utt_sed_free_program(&prog);
+  return 0;
+}
+
+static int utt_append_program_text(struct utt_string *prog_buf, const char *text)
+{
+  if (prog_buf == 0 || text == 0)
+    return -1;
+  if (prog_buf->len > 0 && prog_buf->data[prog_buf->len - 1] != '\n') {
+    if (utt_string_append_char(prog_buf, '\n') < 0)
+      return -1;
+  }
+  return utt_string_append_text(prog_buf, text);
+}
+
+static int utt_append_program_file(struct utt_string *prog_buf, const char *path)
+{
+  char *data = 0;
+  int len = 0;
+  int ret = 0;
+
+  if (utt_read_path_all(path, &data, &len) < 0)
+    return -1;
+  if (prog_buf->len > 0 && prog_buf->data[prog_buf->len - 1] != '\n') {
+    if (utt_string_append_char(prog_buf, '\n') < 0)
+      ret = -1;
+  }
+  if (ret == 0 && utt_string_append_len(prog_buf, data, len) < 0)
+    ret = -1;
+  free(data);
+  return ret;
+}
+
+static int utt_awk_add_assignment(struct utt_awk_program *prog, const char *assign)
+{
+  const char *eq;
+  int name_len;
+
+  if (prog == 0 || assign == 0 || prog->var_count >= UTT_VAR_MAX)
+    return -1;
+  eq = strchr(assign, '=');
+  if (eq == 0)
+    return -1;
+  name_len = (int)(eq - assign);
+  if (name_len <= 0 ||
+      name_len >= (int)sizeof(prog->vars[prog->var_count].name))
+    return -1;
+  memcpy(prog->vars[prog->var_count].name, assign, (size_t)name_len);
+  prog->vars[prog->var_count].name[name_len] = '\0';
+  strncpy(prog->vars[prog->var_count].value, eq + 1,
+          sizeof(prog->vars[prog->var_count].value) - 1);
+  prog->var_count++;
   return 0;
 }
 
@@ -2906,6 +3314,7 @@ static void utt_awk_run_stmt(const struct utt_awk_program *prog,
 int unix_awk_main(int argc, char **argv)
 {
   struct utt_awk_program prog;
+  struct utt_string program_buf;
   struct utt_loaded_text *texts = 0;
   int text_count = 0;
   int i;
@@ -2913,34 +3322,69 @@ int unix_awk_main(int argc, char **argv)
   long nr = 0;
 
   memset(&prog, 0, sizeof(prog));
+  utt_string_init(&program_buf);
   strcpy(prog.fs, " ");
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-F") == 0 && i + 1 < argc) {
-      strncpy(prog.fs, argv[++i], sizeof(prog.fs) - 1);
-    } else if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
-      char *eq = strchr(argv[++i], '=');
+    const char *value = 0;
 
-      if (eq == 0 || prog.var_count >= UTT_VAR_MAX)
+    if (strcmp(argv[i], "--") == 0) {
+      i++;
+      break;
+    } else if (strcmp(argv[i], "-F") == 0 && i + 1 < argc) {
+      strncpy(prog.fs, argv[++i], sizeof(prog.fs) - 1);
+    } else if (strncmp(argv[i], "-F", 2) == 0 && argv[i][2] != '\0') {
+      strncpy(prog.fs, argv[i] + 2, sizeof(prog.fs) - 1);
+    } else if (utt_match_long_option(argv[i], "field-separator", &value)) {
+      const char *fs = value != 0 ? value : argv[++i];
+      strncpy(prog.fs, fs, sizeof(prog.fs) - 1);
+    } else if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
+      if (utt_awk_add_assignment(&prog, argv[++i]) < 0) {
+        utt_string_free(&program_buf);
         return utt_print_error("awk", "bad -v", argv[i]);
-      strncpy(prog.vars[prog.var_count].name, argv[i], (size_t)(eq - argv[i]));
-      prog.vars[prog.var_count].name[eq - argv[i]] = '\0';
-      strncpy(prog.vars[prog.var_count].value, eq + 1,
-              sizeof(prog.vars[prog.var_count].value) - 1);
-      prog.var_count++;
+      }
+    } else if (utt_match_long_option(argv[i], "assign", &value)) {
+      const char *assign = value != 0 ? value : argv[++i];
+
+      if (utt_awk_add_assignment(&prog, assign) < 0) {
+        utt_string_free(&program_buf);
+        return utt_print_error("awk", "bad -v", assign);
+      }
+    } else if ((strcmp(argv[i], "-f") == 0 && i + 1 < argc) ||
+               utt_match_long_option(argv[i], "file", &value)) {
+      const char *path = value != 0 ? value : argv[++i];
+
+      if (utt_append_program_file(&program_buf, path) < 0) {
+        utt_string_free(&program_buf);
+        return utt_print_error("awk", "bad program", path);
+      }
     } else if (argv[i][0] == '-') {
+      utt_string_free(&program_buf);
       return utt_print_error("awk", "unsupported option", argv[i]);
     } else {
-      program_text = argv[i++];
+      if (program_buf.len == 0) {
+        if (utt_append_program_text(&program_buf, argv[i++]) < 0) {
+          utt_string_free(&program_buf);
+          return utt_print_error("awk", "out of memory", "");
+        }
+      }
       break;
     }
   }
 
-  if (program_text == 0)
+  if (program_buf.len > 0)
+    program_text = program_buf.data;
+  if (program_text == 0) {
+    utt_string_free(&program_buf);
     return utt_print_error("awk", "missing program", "");
-  if (utt_awk_parse_program(program_text, &prog) < 0)
+  }
+  if (utt_awk_parse_program(program_text, &prog) < 0) {
+    utt_string_free(&program_buf);
     return utt_print_error("awk", "bad program", program_text);
-  if (utt_collect_input_texts(argv + i, argc - i, &texts, &text_count) < 0)
+  }
+  if (utt_collect_input_texts(argv + i, argc - i, &texts, &text_count) < 0) {
+    utt_string_free(&program_buf);
     return utt_print_error("awk", "read failed", "");
+  }
 
   for (i = 0; i < prog.stmt_count; i++) {
     struct utt_awk_record empty;
@@ -2982,5 +3426,6 @@ int unix_awk_main(int argc, char **argv)
   }
 
   utt_free_texts(texts, text_count);
+  utt_string_free(&program_buf);
   return 0;
 }

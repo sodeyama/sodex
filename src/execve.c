@@ -34,6 +34,8 @@ PRIVATE void set_default_sigaction(struct task_struct* task);
 PRIVATE u_int32_t get_proc_stackmem(u_int32_t *pg_dir);
 PRIVATE int get_argc(char *const argv[]);
 PRIVATE char** get_argv(char *const argv[]);
+PRIVATE void free_argv_copy(char **argv);
+PRIVATE void cleanup_exec_task(struct task_struct *task);
 PRIVATE pid_t alloc_pid();
 PRIVATE struct tty *inherit_stdio_tty(struct tty *stdio_tty);
 
@@ -126,6 +128,8 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
                                      struct tty *stdio_tty)
 {
   struct tty *child_tty;
+  int argc;
+  char **argv_copy;
   /* timer IRQ の mask は caller 側で握り、run list 更新までまとめて保護する。 */
   /* set the memory translation using page feature for user process */
   // alloc 4096Byte from kernel memory manager
@@ -143,11 +147,19 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   // shared memory area between stack and task_struct
   struct task_struct* kern_task = kalloc(sizeof(struct task_struct));
   if (kern_task == NULL) {
+    kfree(pg_dir_raw);
     _kprintf("%s: kern_task kalloc error\n", __func__);
     return NULL;
   }
   memset(kern_task, 0, sizeof(struct task_struct));
+  kern_task->pg_dir = pg_dir;
+  kern_task->pg_dir_raw = pg_dir_raw;
   kern_task->files = kalloc(sizeof(struct files_struct));
+  if (kern_task->files == NULL) {
+    _kprintf("%s: kern_task->files kalloc error\n", __func__);
+    cleanup_exec_task(kern_task);
+    return NULL;
+  }
   memset(kern_task->files, 0, sizeof(struct files_struct));
   child_tty = inherit_stdio_tty(stdio_tty);
   if (current != NULL && stdio_tty == NULL) {
@@ -173,8 +185,10 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
                          &allocation_point);
     current = saved_current;
   }
-  if (elf_ret == ELF_FAIL)
-	return NULL;
+  if (elf_ret == ELF_FAIL) {
+    cleanup_exec_task(kern_task);
+    return NULL;
+  }
   kern_task->allocpoint = allocation_point;
   init_dlist_set(&(kern_task->run_list));
   init_dlist_set(&(kern_task->children));
@@ -194,19 +208,25 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   kern_task->context = kalloc(sizeof(struct hard_context));
   if (kern_task->context == NULL) {
     _kprintf("%s: kern_task->context kalloc error\n", __func__);
+    cleanup_exec_task(kern_task);
     return NULL;
   }
   memset(kern_task->context, 0, sizeof(struct hard_context));
   kern_task->context->eip = entrypoint;
   kern_task->context->esp = get_proc_stackmem(pg_dir);
-  kern_task->pg_dir = pg_dir;
-  kern_task->pg_dir_raw = pg_dir_raw;
   kern_task->context->cr3 = (u_int32_t)pg_dir - __PAGE_OFFSET;
   kern_task->context->cs = __USER_CS;
   kern_task->context->ds = __USER_DS;
   kern_task->context->eflags = DEFAULT_EFLAGS;
-  kern_task->context->eax = get_argc(argv);
-  kern_task->context->ebx = get_argv(argv);
+  argc = get_argc(argv);
+  argv_copy = get_argv(argv);
+  if (argc > 0 && argv_copy == NULL) {
+    _kprintf("%s: argv copy failed\n", __func__);
+    cleanup_exec_task(kern_task);
+    return NULL;
+  }
+  kern_task->context->eax = argc;
+  kern_task->context->ebx = (u_int32_t)argv_copy;
   kern_task->is_usermode = OUTER_PRIVILEGE;
   kern_task->state = TASK_RUNNING;
 
@@ -215,6 +235,7 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   kern_task->esp0_raw = kalloc(BLOCK_SIZE * (PROC_KERNEL_STACK_PAGES + 1));
   if (kern_task->esp0_raw == NULL) {
     _kprintf("%s: kern_task->esp0 kalloc error\n", __func__);
+    cleanup_exec_task(kern_task);
     return NULL;
   }
   // 割り込みと exec の深い call stack に備えて、kernel stack は複数 page 分を確保する。
@@ -309,7 +330,8 @@ PRIVATE char** get_argv(char *const argv[])
     ret_argv[i] = kalloc(ARGV_MAX_LEN);
     if (ret_argv[i] == NULL) {
       _kprintf("%s argv[%d] kalloc error\n", __func__, i);
-      break;
+      free_argv_copy(ret_argv);
+      return NULL;
     }
     memset(ret_argv[i], 0, ARGV_MAX_LEN);
     arg_len = strlen(argv[i]);
@@ -326,4 +348,46 @@ PRIVATE char** get_argv(char *const argv[])
   }
   */
   return ret_argv;
+}
+
+PRIVATE void free_argv_copy(char **argv)
+{
+  int i;
+
+  if (argv == NULL)
+    return;
+  for (i = 0; i < ARGV_MAX_NUMS; i++) {
+    if (argv[i] == NULL)
+      break;
+    kfree(argv[i]);
+  }
+  kfree(argv);
+}
+
+PRIVATE void cleanup_exec_task(struct task_struct *task)
+{
+  if (task == NULL)
+    return;
+
+  if (task->files != NULL) {
+    files_close_all(task->files);
+    kfree(task->files);
+    task->files = NULL;
+  }
+  if (task->context != NULL) {
+    free_argv_copy((char **)task->context->ebx);
+    kfree(task->context);
+    task->context = NULL;
+  }
+  if (task->esp0_raw != NULL) {
+    kfree(task->esp0_raw);
+    task->esp0_raw = NULL;
+  }
+  if (task->pg_dir != NULL)
+    free_process_pages(task->pg_dir);
+  if (task->pg_dir_raw != NULL) {
+    kfree(task->pg_dir_raw);
+    task->pg_dir_raw = NULL;
+  }
+  kfree(task);
 }

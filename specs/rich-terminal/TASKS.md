@@ -257,6 +257,22 @@
 | [ ] | RT-132 | `/usr/bin/less` の最小 subset を追加し、後退、先頭/末尾移動、検索の基本操作を通す | RT-130, RT-131 | `less file.log` で前後移動と検索が成立する |
 | [ ] | RT-133 | pager の host test と QEMU smoke / reference data を追加し、長文閲覧と shell 復帰を回帰検知できるようにする | RT-131, RT-132 | pager workflow を host / QEMU の両方で固定できる |
 
+## M20: Unix 系 text command 群
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | RT-134 | 共通 `unix_text_tools` helper を追加し、line 読み込み、line 配列、range/list parse、wildcard、basic regex、sort key compare の pure logic を切り出す | RT-40, RT-70 | 複数 command が共有できる text 処理基盤が userland libc に入る |
+| [x] | RT-135 | `find` を追加し、`-name`, `-type`, `-maxdepth`, `-mindepth` の tree walk を host/guest 両対応の helper で通す | RT-134 | `find . -type f -name "*.txt"` が guest 内で動く |
+| [x] | RT-136 | `sort`, `uniq`, `wc`, `head`, `tail` を追加し、line/byte/count 系の基本 workflow を host test で固定する | RT-134 | 並べ替え、隣接重複、件数、先頭末尾表示が file/stdin の両方で成立する |
+| [x] | RT-137 | `grep`, `cut`, `tr`, `tee` を追加し、検索、列抽出、文字変換、pipe 分岐の基本 workflow を固定する | RT-134, RT-136 | `grep -n`, `cut -d`, `tr -d/-s`, `tee -a` が shell pipeline で動く |
+| [x] | RT-138 | `sed` の最小 script engine を追加し、`-n`, `-e`, `s///`, `p`, `d`, `q` を host test で固定する | RT-134, RT-137 | 単純な stream 編集が guest 内で成立する |
+| [x] | RT-139 | `awk` の最小 pattern-action engine を追加し、`-F`, `-v`, `BEGIN`, `END`, `print`, `$0`, `$N`, `NF`, `NR` を通す | RT-134, RT-137 | field 指向の抽出と集計の最小 subset が guest 内で動く |
+| [x] | RT-140 | line 単位 LCS ベースの `diff -q/-u` を追加し、比較 workflow を host test で固定する | RT-134 | line 差分の確認が guest 内で成立する |
+| [x] | RT-141 | 新規 command 群を `/usr/bin` へ収録し、README と command 一覧を更新する | RT-135, RT-136, RT-137, RT-138, RT-139, RT-140 | shell から各 command が起動でき、build/image へ載る |
+| [x] | RT-142 | agent 既定 prompt / system info に command 群の存在を反映し、`run_command` 前提の discoverability を上げる | RT-141 | agent が guest 側 text command 群を前提に使いやすくなる |
+| [x] | RT-143 | host test を追加し、shared helper と `sed` / `awk` / `diff` の主要ロジックを回帰検知できるようにする | RT-138, RT-139, RT-140 | command 本体を跨ぐ pure logic の退行を host test で検知できる |
+| [x] | RT-144 | QEMU smoke を追加し、find->grep->sort->uniq->wc、sed/awk/cut/tr、diff/tee の代表 workflow を固定する | RT-141, RT-142, RT-143 | shell / agent から使う主要導線を QEMU 上で回帰検知できる |
+
 ## 先送りする項目
 
 - 複数 terminal セッション

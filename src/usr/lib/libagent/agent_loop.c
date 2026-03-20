@@ -41,7 +41,9 @@ static void debug_printf(const char *fmt, ...) { (void)fmt; }
 static const char DEFAULT_SYSTEM_PROMPT[] =
     "You are Sodex OS system agent. Sodex is a custom i486 OS kernel. "
     "You can use tools to read/write files, list directories, get system info, "
-    "and run commands. Be concise and helpful.";
+    "and run commands. Common shell commands include find, sort, uniq, wc, "
+    "head, tail, grep, sed, awk, cut, tr, diff, tee, ls, cat, vi, curl, "
+    "websearch, and webfetch. Be concise and helpful.";
 
 static agent_event_fn s_event_callback = (agent_event_fn)0;
 static void *s_event_userdata = (void *)0;

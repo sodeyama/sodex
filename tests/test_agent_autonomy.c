@@ -436,11 +436,27 @@ static void test_plain_prompt_does_not_force_retry(void)
     TEST_PASS("plain_prompt_does_not_force_retry");
 }
 
+static void test_system_prompt_mentions_text_commands(void)
+{
+    struct agent_config config;
+
+    TEST_START("system_prompt_mentions_text_commands");
+    agent_config_init(&config);
+    ASSERT(strstr(config.system_prompt, "find") != 0,
+           "system prompt should mention find");
+    ASSERT(strstr(config.system_prompt, "grep") != 0,
+           "system prompt should mention grep");
+    ASSERT(strstr(config.system_prompt, "tee") != 0,
+           "system prompt should mention tee");
+    TEST_PASS("system_prompt_mentions_text_commands");
+}
+
 int main(void)
 {
     printf("=== agent autonomy tests ===\n\n");
     test_fresh_lookup_retries_after_text_only_end_turn();
     test_plain_prompt_does_not_force_retry();
+    test_system_prompt_mentions_text_commands();
     printf("\n=== RESULT: %d passed, %d failed ===\n", passed, failed);
     return failed ? 1 : 0;
 }

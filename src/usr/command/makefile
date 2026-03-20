@@ -58,6 +58,19 @@ CLAUDE  = ${USRDIR}/bin/claude
 ASK     = ${USRDIR}/bin/ask
 WEBSEARCH = ${USRDIR}/bin/websearch
 WEBFETCH = ${USRDIR}/bin/webfetch
+FIND     = ${USRDIR}/bin/find
+SORT     = ${USRDIR}/bin/sort
+UNIQ     = ${USRDIR}/bin/uniq
+WC       = ${USRDIR}/bin/wc
+HEAD     = ${USRDIR}/bin/head
+TAIL     = ${USRDIR}/bin/tail
+GREP     = ${USRDIR}/bin/grep
+SED      = ${USRDIR}/bin/sed
+AWK      = ${USRDIR}/bin/awk
+CUT      = ${USRDIR}/bin/cut
+TR       = ${USRDIR}/bin/tr
+DIFF     = ${USRDIR}/bin/diff
+TEE      = ${USRDIR}/bin/tee
 
 all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
@@ -99,6 +112,19 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/ask.o -o ${ASK} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/websearch.o -o ${WEBSEARCH} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/webfetch.o -o ${WEBFETCH} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/find.o -o ${FIND} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/sort.o -o ${SORT} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/uniq.o -o ${UNIQ} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/wc.o -o ${WC} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/head.o -o ${HEAD} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/tail.o -o ${TAIL} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/grep.o -o ${GREP} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/sed.o -o ${SED} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/awk.o -o ${AWK} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/cut.o -o ${CUT} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/tr.o -o ${TR} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/diff.o -o ${DIFF} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/tee.o -o ${TEE} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/sshd.o: sshd.c ../../include/ssh_server.h
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

@@ -1,0 +1,6 @@
+let raw = "{\"name\":\"sodex\",\"ok\":true,\"code\":7}";
+
+io.println(text.concat(json.get_str(raw, "name"), "-json"));
+io.println(json.get_bool(raw, "ok"));
+io.println(json.get_i32(raw, "code"));
+io.println(json.valid(raw));

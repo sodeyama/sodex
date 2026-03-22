@@ -10,6 +10,7 @@ all: ${OBJS}
 	cd libc; make
 	cd bearssl; make
 	cd libagent; make
+	cd libsx; make
 
 $(SUB_OBJDIR)/%.o: %.S
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<
@@ -22,4 +23,5 @@ clean:
 	cd libc; make clean
 	cd bearssl; make clean
 	cd libagent; make clean
+	cd libsx; make clean
 	rm -f ${OBJS}

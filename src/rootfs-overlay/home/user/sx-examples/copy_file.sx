@@ -1,0 +1,13 @@
+fn copy_with_banner(src, dst) -> bool {
+  let body = fs.read_text(src);
+  fs.write_text(dst, body);
+  fs.append_text(dst, "\nCOPIED_BY_SX");
+  return fs.exists(dst);
+}
+
+let src = "/home/user/sx-examples/copy_source.txt";
+let dst = "/tmp/sx-copy.txt";
+let ok = copy_with_banner(src, dst);
+
+io.println(ok);
+io.println(fs.read_text(dst));

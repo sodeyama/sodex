@@ -1,0 +1,3 @@
+fn imported_name() -> str {
+  return "IMPORT_OK";
+}

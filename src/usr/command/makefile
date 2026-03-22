@@ -71,6 +71,7 @@ CUT      = ${USRDIR}/bin/cut
 TR       = ${USRDIR}/bin/tr
 DIFF     = ${USRDIR}/bin/diff
 TEE      = ${USRDIR}/bin/tee
+SXI      = ${USRDIR}/bin/sxi
 
 all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/eshell.o -o ${ESHELL} ${STATIC_LIBS}
@@ -125,6 +126,7 @@ all: ${OBJS} ${SSHD_EXTRA_OBJS} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/tr.o -o ${TR} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/diff.o -o ${DIFF} ${STATIC_LIBS}
 	${LD} ${LFLAGS} $(SUB_OBJDIR)/tee.o -o ${TEE} ${STATIC_LIBS}
+	${LD} ${LFLAGS} $(SUB_OBJDIR)/sxi.o -o ${SXI} ${STATIC_LIBS}
 
 $(SUB_OBJDIR)/sshd.o: sshd.c ../../include/ssh_server.h
 	${CC} -c ${CFLAGS} -I ${USR_INCLUDE} -I . -o $@ $<

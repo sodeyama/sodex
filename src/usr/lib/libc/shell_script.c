@@ -4,6 +4,11 @@
 #include <malloc.h>
 #include <fs.h>
 
+#ifdef TEST_BUILD
+#include <unistd.h>
+#include <fcntl.h>
+#endif
+
 static int shell_copy_text(char *dst, int cap, const char *src)
 {
   int i;

@@ -43,6 +43,8 @@ PRIVATE void ext3_read_inodes(ext3_inode *inode);
 PRIVATE void ext3_read_inodebitmap(u_int8_t *ino_bitmap);
 PRIVATE void ext3_read_blockbitmap(u_int8_t *blk_bitmap);
 PRIVATE void ext3_init_dirty();
+PRIVATE void ext3_read_dir_entries_from_block(ext3_dentry *parent,
+                                              char *blockbuf, int limit);
 PRIVATE void __read_dentry(ext3_inode* inode, ext3_dentry* parent);
 PRIVATE ext3_dentry* __read_rootdir(u_int32_t ino);
 PRIVATE ext3_dentry* __create_file(const char* pathname,
@@ -176,6 +178,61 @@ PRIVATE void ext3_init_dirty()
   memset((char*)rootdirty, 0, sizeof(ext3_dirty));
   init_dlist_set(&(rootdirty->d_inodirty.list));
   init_dlist_set(&(rootdirty->d_blkdirty.list));
+}
+
+PRIVATE void ext3_read_dir_entries_from_block(ext3_dentry *parent,
+                                              char *blockbuf, int limit)
+{
+  char *p;
+  u_int16_t len;
+  u_int16_t sum_len = 0;
+
+  if (parent == NULL || blockbuf == NULL || limit <= 0)
+    return;
+  if (limit > BLOCK_SIZE)
+    limit = BLOCK_SIZE;
+
+  p = blockbuf;
+  while (sum_len + 8 <= limit) {
+    ext3_dentry* dentry = (ext3_dentry*)kalloc(sizeof(ext3_dentry));
+    if (dentry == NULL) {
+      _kprintf("%s kalloc error\n", __func__);
+      return;
+    }
+    len = (u_int16_t)((u_int16_t*)(p+4))[0];
+    if (len < 8 || sum_len + len > limit) {
+      int err = kfree(dentry);
+
+      if (err)
+        _kprintf("%s:kfree error:%x\n", __func__, err);
+      return;
+    }
+    dentry->d_inonum = (u_int32_t)((u_int32_t*)p)[0];
+    dentry->d_inode = ext3_get_inode(dentry->d_inonum);
+    dentry->d_reclen = len;
+    dentry->d_namelen = p[6];
+    dentry->d_filetype = p[7];
+    dentry->d_name = (char*)kalloc(EXT3_NAME_LEN);
+    if (dentry->d_name == NULL) {
+      _kprintf("%s kalloc error\n", __func__);
+      return;
+    }
+    memset(dentry->d_name, 0, EXT3_NAME_LEN);
+    if (dentry->d_namelen > 0)
+      memcpy(dentry->d_name, p+8, dentry->d_namelen);
+    dentry->d_name[dentry->d_namelen] = '\0';
+    dentry->d_flags = dentry->d_inode->i_flags;
+    dentry->d_parent = parent;
+    init_dentry_lists(dentry);
+
+    dlist_insert_after(&(dentry->d_child), &(parent->d_subdirs));
+    if (ext3_name_equal(".", dentry) == FALSE &&
+        ext3_name_equal("..", dentry) == FALSE) {
+      __read_dentry(dentry->d_inode, dentry);
+    }
+    p += len;
+    sum_len += len;
+  }
 }
 
 PRIVATE int __alloc_ino()
@@ -794,51 +851,42 @@ PRIVATE void __read_dentry(ext3_inode* inode, ext3_dentry* parent)
   switch (kind) {
   case SODEX_S_IFDIR:
     {
-      char* blockbuf = kalloc(BLOCK_SIZE);
-      if (blockbuf == NULL) {
-        _kprintf("%s kalloc error\n", __func__);
-        return;
-      }
-      char* p = blockbuf;
-      rawdev.raw_read(BLOCK_SIZE*(inode->i_block[0])/FDC_SECTOR_SIZE,
-               BLOCK_SIZE/FDC_SECTOR_SIZE, blockbuf);
-      parent->d_dirblock = p;
-      u_int16_t len, sum_len = 0;
-      while (TRUE) {
-        ext3_dentry* dentry = (ext3_dentry*)kalloc(sizeof(ext3_dentry));
-        if (dentry == NULL) {
-          _kprintf("%s kalloc error\n", __func__);
-          return;
-        }
-        len = (u_int16_t)((u_int16_t*)(p+4))[0];
-        dentry->d_inonum = (u_int32_t)((u_int32_t*)p)[0];
-        dentry->d_inode = ext3_get_inode(dentry->d_inonum);
-        dentry->d_reclen = len;
-        dentry->d_namelen = p[6];
-        dentry->d_filetype = p[7];
-        dentry->d_name = (char*)kalloc(EXT3_NAME_LEN);
-        if (dentry->d_name == NULL) {
-          _kprintf("%s kalloc error\n", __func__);
-          return;
-        }
-        memset(dentry->d_name, 0, EXT3_NAME_LEN);
-        memcpy(dentry->d_name, p+8, dentry->d_namelen);
-        dentry->d_name[dentry->d_namelen] = '\0';
-        dentry->d_flags = dentry->d_inode->i_flags;
-        dentry->d_parent = parent;
-        init_dentry_lists(dentry);
+      int lblock = 0;
+      int remaining = inode->i_size;
 
-        // chain between the parent and childrens
-        dlist_insert_after(&(dentry->d_child), &(parent->d_subdirs));
-        if (ext3_name_equal(".", dentry) == FALSE &&
-            ext3_name_equal("..", dentry) == FALSE) {
-          // get the dentry recursively
-          __read_dentry(dentry->d_inode, dentry);
+      while (remaining > 0) {
+        char* blockbuf = kalloc(BLOCK_SIZE);
+        int iblock;
+        int limit;
+
+        if (blockbuf == NULL) {
+          _kprintf("%s kalloc error\n", __func__);
+          return;
         }
-        p += len;
-        sum_len += len;
-        if (sum_len == BLOCK_SIZE)
-          break;
+        iblock = ext3_inode_get_block(inode, lblock);
+        if (iblock == 0) {
+          int err = kfree(blockbuf);
+
+          if (err)
+            _kprintf("%s:kfree error:%x\n", __func__, err);
+          return;
+        }
+        rawdev.raw_read(BLOCK_SIZE * iblock / FDC_SECTOR_SIZE,
+                        BLOCK_SIZE / FDC_SECTOR_SIZE, blockbuf);
+        if (lblock == 0)
+          parent->d_dirblock = blockbuf;
+        limit = remaining;
+        if (limit > BLOCK_SIZE)
+          limit = BLOCK_SIZE;
+        ext3_read_dir_entries_from_block(parent, blockbuf, limit);
+        if (lblock != 0) {
+          int err = kfree(blockbuf);
+
+          if (err)
+            _kprintf("%s:kfree error:%x\n", __func__, err);
+        }
+        remaining -= BLOCK_SIZE;
+        lblock++;
       }
     }
     break;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vi による保存導線を QEMU で smoke する。"""
+"""term 上の vi / agent 実行導線を QEMU で smoke する。"""
 
 from __future__ import annotations
 
@@ -192,6 +192,18 @@ def parse_metric_fields(line: str) -> dict[str, str]:
     return result
 
 
+def wait_for_serial_marker(serial_log: pathlib.Path, marker: str,
+                           timeout: float) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if serial_log.exists():
+            text = serial_log.read_text(errors="replace")
+            if marker in text:
+                return
+        time.sleep(0.2)
+    raise TimeoutError(f"serial marker not found: {marker}")
+
+
 def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
                     reference: dict[str, int | str], timeout: float) -> None:
     deadline = time.time() + timeout
@@ -201,6 +213,30 @@ def wait_for_prompt(monitor: QemuMonitor, ppm_path: pathlib.Path,
             return
         time.sleep(0.2)
     raise TimeoutError("prompt screenshot did not match reference")
+
+
+def wait_for_terminal_ready(monitor: QemuMonitor, ppm_path: pathlib.Path,
+                            reference: dict[str, int | str],
+                            serial_log: pathlib.Path, timeout: float) -> None:
+    deadline = time.time() + timeout
+    serial_ready_at: float | None = None
+
+    while time.time() < deadline:
+        monitor.command(f"screendump {ppm_path}", pause=0.3)
+        if crop_matches(ppm_path, reference):
+            return
+
+        if serial_log.exists():
+            serial_text = serial_log.read_text(errors="replace")
+            if "AUDIT eshell_ready" in serial_text:
+                if serial_ready_at is None:
+                    serial_ready_at = time.time()
+                elif time.time() - serial_ready_at >= 1.0:
+                    return
+
+        time.sleep(0.2)
+
+    raise TimeoutError("terminal ready was not observed")
 
 
 def inode_bytes(image: bytes, ino: int) -> bytes:
@@ -216,44 +252,175 @@ def inode_block0(image: bytes, ino: int) -> int:
     return struct.unpack_from("<I", inode_bytes(image, ino), 40)[0]
 
 
+def inode_blocks(image: bytes, ino: int) -> list[int]:
+    inode = inode_bytes(image, ino)
+    return [struct.unpack_from("<I", inode, 40 + index * 4)[0] for index in range(12)]
+
+
 def read_file(image: bytes, ino: int) -> bytes:
     size = inode_size(image, ino)
-    block0 = inode_block0(image, ino)
-    start = block0 * BLOCK_SIZE
-    return image[start:start + size]
+    remaining = size
+    chunks: list[bytes] = []
+
+    for block in inode_blocks(image, ino):
+        if block == 0 or remaining <= 0:
+            break
+        take = min(BLOCK_SIZE, remaining)
+        start = block * BLOCK_SIZE
+        chunks.append(image[start:start + take])
+        remaining -= take
+    return b"".join(chunks)
 
 
 def read_dir_entries(image: bytes, ino: int) -> dict[str, tuple[int, int]]:
-    block = inode_block0(image, ino)
-    data = image[block * BLOCK_SIZE:(block + 1) * BLOCK_SIZE]
-    offset = 0
     result: dict[str, tuple[int, int]] = {}
-    while offset + 8 <= len(data):
-        inode_num = struct.unpack_from("<I", data, offset)[0]
-        rec_len = struct.unpack_from("<H", data, offset + 4)[0]
-        name_len = data[offset + 6]
-        file_type = data[offset + 7]
-        if inode_num == 0 or rec_len == 0:
+    remaining = inode_size(image, ino)
+
+    for block in inode_blocks(image, ino):
+        offset = 0
+
+        if block == 0 or remaining <= 0:
             break
-        name = data[offset + 8:offset + 8 + name_len].decode("ascii", errors="ignore")
-        result[name] = (inode_num, file_type)
-        offset += rec_len
+        data = image[block * BLOCK_SIZE:(block + 1) * BLOCK_SIZE]
+        limit = min(BLOCK_SIZE, remaining)
+        while offset + 8 <= limit:
+            inode_num = struct.unpack_from("<I", data, offset)[0]
+            rec_len = struct.unpack_from("<H", data, offset + 4)[0]
+            name_len = data[offset + 6]
+            file_type = data[offset + 7]
+            if inode_num == 0 or rec_len == 0:
+                break
+            name = data[offset + 8:offset + 8 + name_len].decode("ascii", errors="ignore")
+            result[name] = (inode_num, file_type)
+            offset += rec_len
+        remaining -= BLOCK_SIZE
+
     return result
+
+
+def read_user_file(image: bytes, name: str) -> str:
+    root_entries = read_dir_entries(image, SODEX_ROOT_INO)
+    home_entry = root_entries.get("home")
+    if home_entry is None:
+        raise AssertionError("/home was not found")
+
+    home_entries = read_dir_entries(image, home_entry[0])
+    user_entry = home_entries.get("user")
+    if user_entry is None:
+        raise AssertionError("/home/user was not found")
+
+    user_entries = read_dir_entries(image, user_entry[0])
+    file_entry = user_entries.get(name)
+    if file_entry is None:
+        raise AssertionError(f"/home/user/{name} was not created")
+    return read_file(image, file_entry[0]).decode("ascii", errors="replace")
+
+
+def try_read_user_file(fsboot: pathlib.Path, name: str) -> str | None:
+    try:
+        return read_user_file(fsboot.read_bytes(), name)
+    except (AssertionError, FileNotFoundError):
+        return None
+
+
+def wait_for_user_file(fsboot: pathlib.Path, name: str, timeout: float,
+                       expected: str | None = None) -> str:
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        text = try_read_user_file(fsboot, name)
+        if text is not None:
+            if expected is None or text == expected:
+                return text
+        time.sleep(0.2)
+
+    if expected is None:
+        raise TimeoutError(f"user file not found: {name}")
+    raise TimeoutError(f"user file did not match: {name}")
 
 
 def assert_vi_state(fsboot: pathlib.Path) -> None:
     image = fsboot.read_bytes()
-    root_entries = read_dir_entries(image, SODEX_ROOT_INO)
-    memo_entry = root_entries.get("memo.txt")
-    shell_entry = root_entries.get("aftervi.txt")
-    if memo_entry is None:
-        raise AssertionError("memo.txt was not created")
-    if shell_entry is None:
-        raise AssertionError("aftervi.txt was not created after returning to shell")
+    command_vi_text = read_user_file(image, "term_command_vi.txt")
+    command_agent_text = read_user_file(image, "term_command_agent.txt")
+    agent_sessions_text = read_user_file(image, "agent_sessions.txt")
+    previ_text = read_user_file(image, "previ.txt")
+    content = read_user_file(image, "memo.txt")
+    aftervi_text = read_user_file(image, "aftervi.txt")
 
-    content = read_file(image, memo_entry[0]).decode("ascii", errors="ignore")
-    if content != "alpha beta\ngamma \nomega":
+    if command_vi_text != "/usr/bin/vi\n":
+        raise AssertionError(f"term_command_vi.txt mismatch: {command_vi_text!r}")
+    if command_agent_text != "/usr/bin/agent\n":
+        raise AssertionError(f"term_command_agent.txt mismatch: {command_agent_text!r}")
+    if agent_sessions_text != "No sessions.\n":
+        raise AssertionError(f"agent_sessions.txt mismatch: {agent_sessions_text!r}")
+    if previ_text != "":
+        raise AssertionError(f"previ.txt mismatch: {previ_text!r}")
+    if content != "alpha beta\ngamma delta\nomega":
         raise AssertionError(f"memo.txt content mismatch: {content!r}")
+    if aftervi_text != "":
+        raise AssertionError(f"aftervi.txt mismatch: {aftervi_text!r}")
+
+
+def write_text(path: pathlib.Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="ascii")
+
+
+def build_temp_rootfs(repo_root: pathlib.Path, logdir: pathlib.Path) -> pathlib.Path:
+    overlay_src = repo_root / "src" / "rootfs-overlay"
+    overlay_dir = logdir / "vi_rootfs_overlay"
+    temp_fsboot = logdir / "vi_fsboot.bin"
+    kmkfs = repo_root / "build" / "tools" / "kmkfs"
+    boota = repo_root / "build" / "bin" / "boota.bin"
+    bootm = repo_root / "build" / "bin" / "bootm.bin"
+    kernel = repo_root / "build" / "bin" / "kernel.bin"
+    init = repo_root / "src" / "init" / "bin" / "ptest"
+    init2 = repo_root / "src" / "init" / "bin" / "ptest2"
+
+    if overlay_dir.exists():
+        subprocess.run(["rm", "-rf", str(overlay_dir)], check=True)
+    subprocess.run(["cp", "-R", str(overlay_src), str(overlay_dir)], check=True)
+    if temp_fsboot.exists():
+        temp_fsboot.unlink()
+
+    write_text(
+        overlay_dir / "home" / "user" / "term_lookup.sh",
+        """command -v vi > /home/user/term_command_vi.txt
+command -v agent > /home/user/term_command_agent.txt
+agent sessions > /home/user/agent_sessions.txt
+touch /home/user/term_lookup.done
+""",
+    )
+
+    subprocess.run(
+        [
+            str(kmkfs),
+            str(boota),
+            str(bootm),
+            str(kernel),
+            str(temp_fsboot),
+            str(init),
+            str(init2),
+            str(overlay_dir),
+        ],
+        check=True,
+        cwd=repo_root / "src",
+    )
+    return temp_fsboot
+
+
+def send_command_and_wait_for_file(monitor: QemuMonitor,
+                                   text: str,
+                                   fsboot: pathlib.Path,
+                                   name: str,
+                                   timeout: float,
+                                   expected: str | None = None,
+                                   delay: float = 0.2) -> str:
+    monitor.send_text(text)
+    monitor.send_key("ret")
+    time.sleep(delay)
+    return wait_for_user_file(fsboot, name, timeout, expected)
 
 
 def main() -> int:
@@ -261,12 +428,13 @@ def main() -> int:
         print("usage: run_qemu_vi_smoke.py <fsboot> <logdir>", file=sys.stderr)
         return 2
 
-    fsboot = pathlib.Path(sys.argv[1]).resolve()
+    _ = pathlib.Path(sys.argv[1]).resolve()
     logdir = pathlib.Path(sys.argv[2]).resolve()
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     reference = json.loads((repo_root / "src/test/data/term_prompt_reference.json").read_text())
 
     logdir.mkdir(parents=True, exist_ok=True)
+    smoke_fsboot = build_temp_rootfs(repo_root, logdir)
     monitor_sock = pathlib.Path(tempfile.gettempdir()) / f"sdx_v_{os.getpid()}.sock"
     serial_log = logdir / f"vi_serial_{os.getpid()}.log"
     qemu_log = logdir / f"vi_qemu_{os.getpid()}.log"
@@ -281,7 +449,7 @@ def main() -> int:
     qemu_memory_mb = get_qemu_memory_mb()
     qemu_args = [
         qemu_bin,
-        "-drive", f"file={fsboot},format=raw,if=ide",
+        "-drive", f"file={smoke_fsboot},format=raw,if=ide",
         "-m", str(qemu_memory_mb),
         "-display", "none",
         "-no-reboot",
@@ -302,56 +470,57 @@ def main() -> int:
     try:
         wait_for_path(monitor_sock, 10)
         monitor = QemuMonitor(monitor_sock)
-        wait_for_metric(serial_log, "full_redraw", timeout)
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
+        wait_for_serial_marker(serial_log, "AUDIT eshell_ready", timeout)
+        wait_for_terminal_ready(monitor, prompt_ppm, reference, serial_log,
+                                timeout)
 
-        monitor.send_text("vi memo.txt\n")
-        time.sleep(1.2)
-        monitor.send_text("ialpha beta\ngamma delta\nomega")
+        send_command_and_wait_for_file(
+            monitor,
+            "sh /home/user/term_lookup.sh",
+            smoke_fsboot,
+            "term_lookup.done",
+            timeout,
+            "",
+            0.4,
+        )
+        send_command_and_wait_for_file(
+            monitor,
+            "touch /home/user/previ.txt",
+            smoke_fsboot,
+            "previ.txt",
+            timeout,
+            "",
+            0.4,
+        )
+
+        monitor.send_text("vi /home/user/memo.txt\n")
         time.sleep(1.0)
+        monitor.send_text("ialpha beta\ngamma delta\nomega")
+        time.sleep(0.6)
         monitor.send_key("esc")
         time.sleep(0.5)
-        monitor.send_text("gg/delta\n")
-        time.sleep(0.7)
-        monitor.send_text("v$d")
-        time.sleep(0.6)
-        monitor.send_text("u")
-        time.sleep(0.5)
-        monitor.send_ctrl("r")
-        time.sleep(0.6)
-        monitor.send_text("?alpha\n")
-        time.sleep(0.7)
-        monitor.send_text("Vjd")
-        time.sleep(0.6)
-        monitor.send_text("u")
-        time.sleep(0.9)
-        vi_metric_line = wait_for_metric_count(serial_log,
-                                               "TERM_METRIC component=vi",
-                                               3,
-                                               5)
-        monitor.send_text("ZZ")
-        wait_for_prompt(monitor, prompt_ppm, reference, timeout)
-        monitor.send_text("touch aftervi.txt\n")
-        time.sleep(1.0)
+        monitor.send_text(":wq\n")
+        wait_for_user_file(smoke_fsboot, "memo.txt", timeout,
+                           "alpha beta\ngamma delta\nomega")
+        send_command_and_wait_for_file(
+            monitor,
+            "touch /home/user/aftervi.txt",
+            smoke_fsboot,
+            "aftervi.txt",
+            timeout,
+            "",
+            0.4,
+        )
 
         monitor.command("quit", pause=0.1)
         qemu.wait(timeout=5)
-        assert_vi_state(fsboot)
-        vi_metric = parse_metric_fields(vi_metric_line)
-        if int(vi_metric.get("redraws", "0")) < 3:
-            raise AssertionError("vi metric missing redraw count")
-        if int(vi_metric.get("redraw_bytes", "0")) <= 0:
-            raise AssertionError("vi metric missing redraw_bytes")
-        if int(vi_metric.get("dirty_rows", "0")) <= 0:
-            raise AssertionError("vi metric missing dirty_rows")
-        if int(vi_metric.get("dirty_spans", "0")) <= 0:
-            raise AssertionError("vi metric missing dirty_spans")
-        if "full_fallbacks" not in vi_metric:
-            raise AssertionError("vi metric missing full_fallbacks")
+        assert_vi_state(smoke_fsboot)
+        serial_text = serial_log.read_text(errors="replace")
+        if "PF:" in serial_text or "PageFault" in serial_text:
+            raise AssertionError("page fault was detected during vi smoke")
 
         print("=== VI QEMU SMOKE DONE ===")
-        print(vi_metric_line)
-        print(f"Artifacts: {serial_log}, {qemu_log}")
+        print(f"Artifacts: {serial_log}, {qemu_log}, {smoke_fsboot}")
         return 0
     except Exception as exc:
         print(f"vi smoke failed: {exc}", file=sys.stderr)

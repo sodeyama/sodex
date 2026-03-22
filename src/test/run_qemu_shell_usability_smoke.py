@@ -165,6 +165,9 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
     type_alias_text = read_user_file(fsboot, "type_alias.txt")
     type_builtin_text = read_user_file(fsboot, "type_builtin.txt")
     command_ls_text = read_user_file(fsboot, "command_ls.txt")
+    command_vi_text = read_user_file(fsboot, "command_vi.txt")
+    command_agent_text = read_user_file(fsboot, "command_agent.txt")
+    vi_usage_text = read_user_file(fsboot, "vi_usage.txt")
     home_text = read_user_file(fsboot, "home.txt")
     glob_text = read_user_file(fsboot, "glob.txt")
     history_replay_text = read_user_file(fsboot, "history_replay.txt")
@@ -183,6 +186,12 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
         raise AssertionError(f"type_builtin.txt mismatch: {type_builtin_text!r}")
     if command_ls_text != "/usr/bin/ls\n":
         raise AssertionError(f"command_ls.txt mismatch: {command_ls_text!r}")
+    if command_vi_text != "/usr/bin/vi\n":
+        raise AssertionError(f"command_vi.txt mismatch: {command_vi_text!r}")
+    if command_agent_text != "/usr/bin/agent\n":
+        raise AssertionError(f"command_agent.txt mismatch: {command_agent_text!r}")
+    if vi_usage_text != "usage: vi <path>\n":
+        raise AssertionError(f"vi_usage.txt mismatch: {vi_usage_text!r}")
     if home_text != "/home/user\n":
         raise AssertionError(f"home.txt mismatch: {home_text!r}")
     if glob_text != "/home/user/globdir/a.txt /home/user/globdir/b.txt\n":
@@ -239,6 +248,9 @@ hi > /home/user/alias.txt
 type hi > /home/user/type_alias.txt
 type echo > /home/user/type_builtin.txt
 command -v ls > /home/user/command_ls.txt
+command -v vi > /home/user/command_vi.txt
+command -v agent > /home/user/command_agent.txt
+vi > /home/user/vi_usage.txt
 echo ~ > /home/user/home.txt
 echo /home/user/globdir/*.txt > /home/user/glob.txt
 unalias hi

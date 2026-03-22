@@ -1,0 +1,5 @@
+let captured = proc.capture("/bin/sh", "-c", "printf PROC_OK");
+let status = proc.run("/bin/sh", "-c", "exit 0");
+
+io.println(captured);
+io.println(proc.status_ok(status));

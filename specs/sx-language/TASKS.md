@@ -11,6 +11,7 @@
 - 2026-03-22: initial bring-up として、`let` と `io.print` / `io.println` を持つ最小 frontend を `libsx` と host test / QEMU smoke に載せた
 - 2026-03-22: `fn` / `let` / block / `if` / `while` / `return`、`str` / `bool` / `i32`、namespace call、relative `import` を `libsx` + `sxi` で通し、host test と QEMU smoke を更新した
 - 2026-03-22: call 引数を expression 化し、nested call を AST / runtime / host test / QEMU smoke で扱えるようにした
+- 2026-03-22: guest 同梱の `/home/user/sx-examples/` を追加し、README 付きで hello / import / json / fs / proc の実例を置いた
 
 ## 優先順
 

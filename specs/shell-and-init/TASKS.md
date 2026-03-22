@@ -11,6 +11,8 @@
 - 2026-03-19: `bin/start.sh --ssh` / `bin/restart.sh --ssh` が、そのモード向け overlay を自動で再生成してから起動するようにし、plain build 後に rescue shell へ落ちる導線を塞いだ
 - 2026-03-22: Plan 07 / M7 として、programmable shell 向けの制御構文、`test`、継続 prompt の計画を追加した
 - 2026-03-22: M7 を実装し、compound AST、`if` / loop / `break` / `continue`、最小 `test` / `[`, `eshell` 継続 prompt、host test、boot-time `sh` / redirected `eshell` の QEMU smoke を追加した
+- 2026-03-22: 追加調査で、`alias`, `type` / `command -v`, interactive history, `~`, glob が次の shell usability gap と分かり、Plan 08 / M8 候補へ切り出した
+- 2026-03-22: M8 を実装し、`alias` / `unalias`, `type` / `command -v`, session history, `!!`, `!prefix`, `~`, glob、host test、boot-time `sh` / redirected `eshell` の QEMU smoke を追加した
 - default rootfs は `user` runlevel の `term` を維持し、server overlay は `server-headless` で `sshd` を起動する
 - `init` は `/etc/init.d/rcS` を起動し、`sshd` は service script 経由で起動する
 - `sh` / `eshell` は共通 shell core を使い、service helper と smoke で回帰を固定した
@@ -89,3 +91,17 @@
 | [x] | SIS-33 | host unit test を拡張し、AST、実行、`test` helper、継続入力判定の回帰を固定する | SIS-29, SIS-30, SIS-31 | 制御構文の主要分岐と loop を host 側で回帰検知できる |
 | [x] | SIS-34 | QEMU smoke を追加し、`sh` script と `eshell` の両方で条件分岐、繰り返し、変数利用、`break` / `continue` を固定する | SIS-30, SIS-31, SIS-32, SIS-33 | guest 上の代表 script workflow を回帰検知できる |
 | [x] | SIS-35 | README / spec / guest 内サンプル script を更新し、使い方と非対応範囲を明文化する | SIS-34 | 使用例と制約が docs と smoke で一致する |
+
+## M8: shell 使い勝手と展開
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SIS-36 | alias table と command resolution helper を追加し、alias / builtin / external の lookup 順序を固定する | SIS-03, SIS-05, SIS-07 | shell 本体と `type` 系が同じ lookup 経路を使える |
+| [x] | SIS-37 | `alias` / `unalias` builtin を実装し、command position の先頭 word に最小 alias 展開を入れる | SIS-36 | current shell 状態で alias を定義・参照・削除できる |
+| [x] | SIS-38 | `type` / `command -v` を追加し、alias / builtin / external / not found を表示できるようにする | SIS-36, SIS-37 | lookup 結果を対話確認できる |
+| [x] | SIS-39 | interactive history buffer と `history` builtin を追加する | SIS-03, SIS-05, SIS-32 | current shell session の履歴を保持・表示できる |
+| [x] | SIS-40 | `!!` / `!prefix` の最小 history 展開を interactive shell に追加する | SIS-39 | 直前再実行と prefix 再実行が使える |
+| [x] | SIS-41 | `~` 展開と pathname glob (`*`, `?`) を word expansion 層へ追加する | SIS-05, SIS-07 | quote を壊さず basic expansion が使える |
+| [x] | SIS-42 | host unit test を追加し、alias / lookup / history / expansion の回帰を固定する | SIS-37, SIS-38, SIS-40, SIS-41 | 主要経路を host 側で回帰検知できる |
+| [x] | SIS-43 | QEMU smoke を追加し、redirected `eshell` と script 経由で alias / history / expansion を固定する | SIS-37, SIS-38, SIS-40, SIS-41, SIS-42 | guest 上の代表的な日常利用経路を回帰検知できる |
+| [x] | SIS-44 | README / spec / 制約事項を更新し、completion との関係と未対応機能を明文化する | SIS-43 | docs と実装の範囲が一致する |

@@ -14,6 +14,11 @@
 #define SHELL_MAX_VARS 64
 #define SHELL_VAR_NAME_MAX 32
 #define SHELL_VAR_VALUE_MAX 256
+#define SHELL_MAX_ALIASES 32
+#define SHELL_ALIAS_NAME_MAX 32
+#define SHELL_ALIAS_VALUE_MAX 256
+#define SHELL_HISTORY_MAX 32
+#define SHELL_HISTORY_TEXT_MAX 512
 #define SHELL_MAX_PARAMS 16
 #define SHELL_MAX_BG_PIDS 16
 #define SHELL_JOB_TEXT_MAX 160
@@ -141,6 +146,11 @@ struct shell_var {
   int exported;
 };
 
+struct shell_alias {
+  char name[SHELL_ALIAS_NAME_MAX];
+  char value[SHELL_ALIAS_VALUE_MAX];
+};
+
 struct shell_job {
   int id;
   pid_t pid;
@@ -158,6 +168,11 @@ struct shell_state {
   int param_count;
   struct shell_var vars[SHELL_MAX_VARS];
   int var_count;
+  struct shell_alias aliases[SHELL_MAX_ALIASES];
+  int alias_count;
+  char history[SHELL_HISTORY_MAX][SHELL_HISTORY_TEXT_MAX];
+  int history_count;
+  int history_base;
   pid_t background_pids[SHELL_MAX_BG_PIDS];
   int background_count;
   struct shell_job jobs[SHELL_MAX_BG_PIDS];
@@ -173,6 +188,18 @@ void shell_state_set_script(struct shell_state *state, const char *name,
 int shell_var_set(struct shell_state *state, const char *name,
                   const char *value, int exported);
 const char *shell_var_get(const struct shell_state *state, const char *name);
+int shell_alias_set(struct shell_state *state, const char *name,
+                    const char *value);
+const char *shell_alias_get(const struct shell_state *state, const char *name);
+int shell_alias_unset(struct shell_state *state, const char *name);
+void shell_alias_clear(struct shell_state *state);
+int shell_history_add(struct shell_state *state, const char *text);
+int shell_history_expand_line(const struct shell_state *state,
+                              const char *input,
+                              char *out, int cap);
+int shell_history_count(const struct shell_state *state);
+const char *shell_history_get(const struct shell_state *state, int index);
+int shell_history_entry_number(const struct shell_state *state, int index);
 
 int shell_parse_program(const char *text, int len, struct shell_program *program);
 int shell_execute_program(struct shell_state *state,

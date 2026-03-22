@@ -9,6 +9,8 @@
 - 2026-03-17: 追加調査で、`waitpid(-1)` の busy-loop、daemon detach の不足、`rcS` failure path、`sshd` service の前提チェック不足を後続 hardening 項目として洗い出した
 - 2026-03-17: M6 を実装し、`waitpid(-1)` の sleep/wakeup 化、`start-stop-daemon` の graceful stop / `force-reload` / prerequisite check、`rcS` failure rescue、failure-path smoke を追加した
 - 2026-03-19: `bin/start.sh --ssh` / `bin/restart.sh --ssh` が、そのモード向け overlay を自動で再生成してから起動するようにし、plain build 後に rescue shell へ落ちる導線を塞いだ
+- 2026-03-22: Plan 07 / M7 として、programmable shell 向けの制御構文、`test`、継続 prompt の計画を追加した
+- 2026-03-22: M7 を実装し、compound AST、`if` / loop / `break` / `continue`、最小 `test` / `[`, `eshell` 継続 prompt、host test、boot-time `sh` / redirected `eshell` の QEMU smoke を追加した
 - default rootfs は `user` runlevel の `term` を維持し、server overlay は `server-headless` で `sshd` を起動する
 - `init` は `/etc/init.d/rcS` を起動し、`sshd` は service script 経由で起動する
 - `sh` / `eshell` は共通 shell core を使い、service helper と smoke で回帰を固定した
@@ -74,3 +76,16 @@
 | [x] | SIS-25 | service action / exit status 契約を補完する | SIS-10, SIS-11, SIS-24 | `force-reload` と stale pidfile / `status=3|4` の境界が文書・実装でそろう |
 | [x] | SIS-26 | `rcS` 失敗時ポリシーと `sshd` 前提チェックを固定する | SIS-13, SIS-15 | boot failure の挙動と `/etc/sodex-admin.conf` 前提が script / smoke で一致する |
 | [x] | SIS-27 | failure-path の host/QEMU test を追加する | SIS-23, SIS-24, SIS-25, SIS-26 | `stop`, not running, stale pidfile, `rcS` failure が回帰で固定される |
+
+## M7: programmable shell 制御構文
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SIS-28 | shell AST を compound command 対応へ拡張し、incomplete input を parse error と分離する | SIS-03, SIS-04, SIS-05 | `if` / loop 用 node と継続入力判定を共通 core で持てる |
+| [x] | SIS-29 | tokenizer / parser を更新し、予約語と `if` / `elif` / `else` / `fi`, `for ... in`, `while` / `until`, `do` / `done` を解釈できるようにする | SIS-28 | file 実行で compound command を parse できる |
+| [x] | SIS-30 | executor に条件評価、loop 反復、`break` / `continue` を追加し、current shell 状態を保ったまま compound command を実行できるようにする | SIS-28, SIS-29, SIS-05 | 条件分岐と繰り返しが exit status と shell 変数を保って動く |
+| [x] | SIS-31 | 最小 `test` / `[` 実装を追加し、文字列比較、空判定、代表 file 判定で条件を書けるようにする | SIS-03, SIS-05 | `if test -n \"$x\"; then ...` と `if [ -f foo ]; then ...` が成立する |
+| [x] | SIS-32 | `eshell` に continuation prompt と multi-line buffer を追加し、対話でも compound command を入力できるようにする | SIS-28, SIS-29 | `if` と loop を対話 shell で完結入力できる |
+| [x] | SIS-33 | host unit test を拡張し、AST、実行、`test` helper、継続入力判定の回帰を固定する | SIS-29, SIS-30, SIS-31 | 制御構文の主要分岐と loop を host 側で回帰検知できる |
+| [x] | SIS-34 | QEMU smoke を追加し、`sh` script と `eshell` の両方で条件分岐、繰り返し、変数利用、`break` / `continue` を固定する | SIS-30, SIS-31, SIS-32, SIS-33 | guest 上の代表 script workflow を回帰検知できる |
+| [x] | SIS-35 | README / spec / guest 内サンプル script を更新し、使い方と非対応範囲を明文化する | SIS-34 | 使用例と制約が docs と smoke で一致する |

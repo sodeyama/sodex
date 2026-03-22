@@ -5,6 +5,38 @@
 #include <fs.h>
 #include <debug.h>
 
+#ifndef TEST_BUILD
+extern int chdir(char *path);
+#endif
+
+#ifdef TEST_BUILD
+#include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+
+int debug_write(const char *buf, size_t len)
+{
+  (void)buf;
+  (void)len;
+  return 0;
+}
+
+int set_foreground_pid(int fd, pid_t pid)
+{
+  (void)fd;
+  (void)pid;
+  return 0;
+}
+
+pid_t get_foreground_pid(int fd)
+{
+  (void)fd;
+  return 0;
+}
+#endif
+
 struct shell_expanded_command {
   char *argv[SHELL_MAX_ARGS];
   char argv_storage[SHELL_MAX_ARGS][SHELL_WORD_SIZE];
@@ -20,6 +52,12 @@ struct shell_expanded_command {
 static int shell_write_fd_text(int fd, const char *text);
 static int shell_write_text(const char *text);
 static int shell_write_error_text(const char *text);
+static int shell_execute_list(struct shell_state *state,
+                              const struct shell_program *program,
+                              int list_index);
+static int shell_execute_node(struct shell_state *state,
+                              const struct shell_program *program,
+                              int node_index, int async);
 
 static void shell_copy_text(char *dst, int cap, const char *src)
 {
@@ -805,9 +843,47 @@ static int shell_builtin_exit(struct shell_state *state,
   return status;
 }
 
-/* ---- builtin [ / test ---- */
+#ifndef TEST_BUILD
+static int shell_build_dentry_path(ext3_dentry *dentry, char *buf, int cap)
+{
+  int pos;
+  int name_len;
 
-static int test_file_exists(const char *path)
+  if (dentry == 0 || buf == 0 || cap <= 1)
+    return -1;
+  if (dentry->d_parent == 0 ||
+      (dentry->d_namelen == 1 && dentry->d_name[0] == '/')) {
+    buf[0] = '/';
+    buf[1] = '\0';
+    return 1;
+  }
+
+  pos = shell_build_dentry_path(dentry->d_parent, buf, cap);
+  if (pos < 0)
+    return -1;
+  if (pos > 1) {
+    if (pos >= cap - 1)
+      return -1;
+    buf[pos++] = '/';
+    buf[pos] = '\0';
+  }
+
+  name_len = dentry->d_namelen;
+  if (name_len <= 0)
+    return pos;
+  if (pos + name_len >= cap)
+    name_len = cap - pos - 1;
+  if (name_len <= 0)
+    return -1;
+
+  memcpy(buf + pos, dentry->d_name, (size_t)name_len);
+  pos += name_len;
+  buf[pos] = '\0';
+  return pos;
+}
+#endif
+
+static int shell_test_path_exists(const char *path)
 {
   int fd = open(path, O_RDONLY, 0);
 
@@ -822,10 +898,36 @@ static int test_is_nonempty_string(const char *s)
   return s != 0 && s[0] != '\0';
 }
 
-/*
- * Evaluate a single test primary.  Returns 1 for true, 0 for false.
- * *pos is advanced past the consumed tokens.
- */
+#ifdef TEST_BUILD
+static int shell_test_dir_exists(const char *path)
+{
+  struct stat st;
+
+  if (stat(path, &st) < 0)
+    return 0;
+  return S_ISDIR(st.st_mode);
+}
+#else
+static int shell_test_dir_exists(const char *path)
+{
+  char cwd[SHELL_WORD_SIZE];
+  ext3_dentry *dentry;
+
+  if (path == 0 || path[0] == '\0')
+    return 0;
+  if (strcmp(path, "/") == 0)
+    return 1;
+
+  dentry = getdentry();
+  if (dentry == 0 || shell_build_dentry_path(dentry, cwd, sizeof(cwd)) < 0)
+    return 0;
+  if (chdir((char *)path) != 0)
+    return 0;
+  chdir(cwd);
+  return 1;
+}
+#endif
+
 static int test_eval_primary(int argc, char **argv, int *pos)
 {
   const char *tok;
@@ -847,19 +949,17 @@ static int test_eval_primary(int argc, char **argv, int *pos)
     if (*pos >= argc)
       return 0;
     (*pos)++;
-    return test_file_exists(argv[*pos - 1]);
+    return shell_test_path_exists(argv[*pos - 1]);
   }
 
-  /* -d DIR (use open; good enough for this OS) */
   if (strcmp(tok, "-d") == 0) {
     (*pos)++;
     if (*pos >= argc)
       return 0;
     (*pos)++;
-    return test_file_exists(argv[*pos - 1]);
+    return shell_test_dir_exists(argv[*pos - 1]);
   }
 
-  /* -n STRING */
   if (strcmp(tok, "-n") == 0) {
     (*pos)++;
     if (*pos >= argc)
@@ -877,7 +977,6 @@ static int test_eval_primary(int argc, char **argv, int *pos)
     return !test_is_nonempty_string(argv[*pos - 1]);
   }
 
-  /* binary: STRING = STRING  /  STRING != STRING */
   if (*pos + 2 < argc) {
     const char *op = argv[*pos + 1];
 
@@ -893,7 +992,6 @@ static int test_eval_primary(int argc, char **argv, int *pos)
     }
   }
 
-  /* bare string — true if non-empty */
   (*pos)++;
   return test_is_nonempty_string(tok);
 }
@@ -906,19 +1004,51 @@ static int shell_builtin_test(struct shell_expanded_command *command)
   int result;
 
   is_bracket = (strcmp(command->argv[0], "[") == 0);
-
   argc = command->argc;
-  /* strip trailing ] for [ ... ] syntax */
   if (is_bracket) {
     if (argc < 2 || strcmp(command->argv[argc - 1], "]") != 0)
-      return 2; /* syntax error */
+      return 2;
     argc--;
   }
 
-  pos = 1; /* skip argv[0] which is "[" or "test" */
-  result = test_eval_primary(argc, command->argv, &pos);
+  if (argc <= 1)
+    return 1;
 
+  pos = 1;
+  result = test_eval_primary(argc, command->argv, &pos);
+  if (pos != argc)
+    return 2;
   return result ? 0 : 1;
+}
+
+static int shell_builtin_break(struct shell_state *state,
+                               struct shell_expanded_command *command)
+{
+  if (command->argc > 1) {
+    shell_write_error_text("sh: break: too many arguments\n");
+    return 1;
+  }
+  if (state == 0 || state->loop_depth <= 0) {
+    shell_write_error_text("sh: break: not in loop\n");
+    return 1;
+  }
+  state->loop_control = SHELL_LOOP_BREAK;
+  return 0;
+}
+
+static int shell_builtin_continue(struct shell_state *state,
+                                  struct shell_expanded_command *command)
+{
+  if (command->argc > 1) {
+    shell_write_error_text("sh: continue: too many arguments\n");
+    return 1;
+  }
+  if (state == 0 || state->loop_depth <= 0) {
+    shell_write_error_text("sh: continue: not in loop\n");
+    return 1;
+  }
+  state->loop_control = SHELL_LOOP_CONTINUE;
+  return 0;
 }
 
 static int shell_apply_assignments(struct shell_state *state,
@@ -966,6 +1096,10 @@ static int shell_builtin_run(struct shell_state *state,
     return shell_builtin_bg(state, command);
   if (strcmp(name, "trap") == 0)
     return 0;
+  if (strcmp(name, "break") == 0)
+    return shell_builtin_break(state, command);
+  if (strcmp(name, "continue") == 0)
+    return shell_builtin_continue(state, command);
   if (strcmp(name, "echo") == 0)
     return shell_builtin_echo(command);
   if (strcmp(name, "true") == 0)
@@ -1035,11 +1169,19 @@ static int shell_command_needs_builtin_parent(struct shell_expanded_command *com
     return 1;
   if (strcmp(command->argv[0], "trap") == 0)
     return 1;
+  if (strcmp(command->argv[0], "break") == 0)
+    return 1;
+  if (strcmp(command->argv[0], "continue") == 0)
+    return 1;
   if (strcmp(command->argv[0], "echo") == 0)
     return 1;
   if (strcmp(command->argv[0], "true") == 0)
     return 1;
   if (strcmp(command->argv[0], "false") == 0)
+    return 1;
+  if (strcmp(command->argv[0], "[") == 0)
+    return 1;
+  if (strcmp(command->argv[0], "test") == 0)
     return 1;
   return 0;
 }
@@ -1139,6 +1281,7 @@ static int shell_wait_pipeline(struct shell_state *state,
   int i;
   int status = 0;
 
+  (void)state;
   if (pid_count <= 0)
     return 0;
 
@@ -1152,7 +1295,8 @@ static int shell_wait_pipeline(struct shell_state *state,
 }
 
 static int shell_execute_pipeline(struct shell_state *state,
-                                  const struct shell_pipeline *pipeline)
+                                  const struct shell_pipeline *pipeline,
+                                  int async)
 {
   pid_t pids[SHELL_MAX_COMMANDS];
   int pid_count = 0;
@@ -1160,7 +1304,6 @@ static int shell_execute_pipeline(struct shell_state *state,
   char job_text[SHELL_JOB_TEXT_MAX];
   int job_text_len = 0;
   int i;
-  int async = (pipeline->next_type == SHELL_NEXT_BACKGROUND);
 
   memset(job_text, 0, sizeof(job_text));
 
@@ -1274,17 +1417,178 @@ static int shell_execute_pipeline(struct shell_state *state,
   return shell_wait_pipeline(state, pids, pid_count);
 }
 
-int shell_execute_program(struct shell_state *state,
-                          const struct shell_program *program)
+static int shell_execute_if_node(struct shell_state *state,
+                                 const struct shell_program *program,
+                                 const struct shell_if_node *if_node)
 {
-  enum shell_next_type prev_next = SHELL_NEXT_SEQ;
-  int status = state->last_status;
+  int status;
   int i;
 
-  if (state == 0 || program == 0)
-    return 1;
+  status = shell_execute_list(state, program, if_node->cond_list_index);
+  if (state->exit_requested != 0 || state->loop_control != SHELL_LOOP_NONE)
+    return status;
+  if (status == 0)
+    return shell_execute_list(state, program, if_node->then_list_index);
 
-  for (i = 0; i < program->pipeline_count; i++) {
+  for (i = 0; i < if_node->elif_count; i++) {
+    status = shell_execute_list(state, program, if_node->elifs[i].cond_list_index);
+    if (state->exit_requested != 0 || state->loop_control != SHELL_LOOP_NONE)
+      return status;
+    if (status == 0)
+      return shell_execute_list(state, program, if_node->elifs[i].body_list_index);
+  }
+
+  if (if_node->has_else != 0)
+    return shell_execute_list(state, program, if_node->else_list_index);
+  return 0;
+}
+
+static int shell_execute_for_node(struct shell_state *state,
+                                  const struct shell_program *program,
+                                  const struct shell_for_node *for_node)
+{
+  int status = 0;
+  int i;
+
+  state->loop_depth++;
+  if (for_node->implicit_params != 0) {
+    for (i = 0; i < state->param_count; i++) {
+      if (shell_var_set(state, for_node->name, state->param_storage[i], -1) < 0) {
+        status = 1;
+        break;
+      }
+      status = shell_execute_list(state, program, for_node->body_list_index);
+      if (state->exit_requested != 0)
+        break;
+      if (state->loop_control == SHELL_LOOP_BREAK) {
+        state->loop_control = SHELL_LOOP_NONE;
+        break;
+      }
+      if (state->loop_control == SHELL_LOOP_CONTINUE) {
+        state->loop_control = SHELL_LOOP_NONE;
+        continue;
+      }
+    }
+  } else {
+    for (i = 0; i < for_node->word_count; i++) {
+      char value[SHELL_WORD_SIZE];
+
+      if (shell_expand_word(state, for_node->words[i], value, sizeof(value)) < 0) {
+        status = 1;
+        break;
+      }
+      if (shell_var_set(state, for_node->name, value, -1) < 0) {
+        status = 1;
+        break;
+      }
+      status = shell_execute_list(state, program, for_node->body_list_index);
+      if (state->exit_requested != 0)
+        break;
+      if (state->loop_control == SHELL_LOOP_BREAK) {
+        state->loop_control = SHELL_LOOP_NONE;
+        break;
+      }
+      if (state->loop_control == SHELL_LOOP_CONTINUE) {
+        state->loop_control = SHELL_LOOP_NONE;
+        continue;
+      }
+    }
+  }
+  state->loop_depth--;
+  return status;
+}
+
+static int shell_execute_loop_node(struct shell_state *state,
+                                   const struct shell_program *program,
+                                   const struct shell_loop_node *loop_node,
+                                   int is_until)
+{
+  int status = 0;
+
+  state->loop_depth++;
+  while (1) {
+    status = shell_execute_list(state, program, loop_node->cond_list_index);
+    if (state->exit_requested != 0)
+      break;
+    if (state->loop_control == SHELL_LOOP_BREAK) {
+      state->loop_control = SHELL_LOOP_NONE;
+      break;
+    }
+    if (state->loop_control == SHELL_LOOP_CONTINUE) {
+      state->loop_control = SHELL_LOOP_NONE;
+      continue;
+    }
+    if (is_until != 0) {
+      if (status == 0)
+        break;
+    } else if (status != 0) {
+      break;
+    }
+
+    status = shell_execute_list(state, program, loop_node->body_list_index);
+    if (state->exit_requested != 0)
+      break;
+    if (state->loop_control == SHELL_LOOP_BREAK) {
+      state->loop_control = SHELL_LOOP_NONE;
+      break;
+    }
+    if (state->loop_control == SHELL_LOOP_CONTINUE) {
+      state->loop_control = SHELL_LOOP_NONE;
+      continue;
+    }
+  }
+  state->loop_depth--;
+  return status;
+}
+
+static int shell_execute_node(struct shell_state *state,
+                              const struct shell_program *program,
+                              int node_index, int async)
+{
+  const struct shell_node *node;
+
+  if (program == 0 || node_index < 0 || node_index >= program->node_count)
+    return 1;
+  node = &program->nodes[node_index];
+
+  if (node->type != SHELL_NODE_PIPELINE && async != 0) {
+    shell_write_error_text("sh: background compound is unsupported\n");
+    return 1;
+  }
+
+  if (node->type == SHELL_NODE_PIPELINE)
+    return shell_execute_pipeline(state,
+                                  &program->pipelines[node->data.pipeline_index],
+                                  async);
+  if (node->type == SHELL_NODE_IF)
+    return shell_execute_if_node(state, program, &node->data.if_node);
+  if (node->type == SHELL_NODE_FOR)
+    return shell_execute_for_node(state, program, &node->data.for_node);
+  if (node->type == SHELL_NODE_WHILE)
+    return shell_execute_loop_node(state, program,
+                                   &node->data.loop_node,
+                                   0);
+  if (node->type == SHELL_NODE_UNTIL)
+    return shell_execute_loop_node(state, program,
+                                   &node->data.loop_node,
+                                   1);
+  return 1;
+}
+
+static int shell_execute_list(struct shell_state *state,
+                              const struct shell_program *program,
+                              int list_index)
+{
+  const struct shell_list *list;
+  enum shell_next_type prev_next = SHELL_NEXT_SEQ;
+  int status = 0;
+  int i;
+
+  if (program == 0 || list_index < 0 || list_index >= program->list_count)
+    return 1;
+  list = &program->lists[list_index];
+
+  for (i = 0; i < list->item_count; i++) {
     int should_run = 1;
 
     if (prev_next == SHELL_NEXT_AND && status != 0)
@@ -1293,16 +1597,27 @@ int shell_execute_program(struct shell_state *state,
       should_run = 0;
 
     shell_reap_background(state);
-    if (should_run != 0)
-      status = shell_execute_pipeline(state, &program->pipelines[i]);
-    prev_next = program->pipelines[i].next_type;
+    if (should_run != 0) {
+      status = shell_execute_node(state, program,
+                                  list->items[i].node_index,
+                                  list->items[i].next_type == SHELL_NEXT_BACKGROUND);
+    }
+    prev_next = list->items[i].next_type;
     state->last_status = status;
-    if (state->exit_requested != 0)
+    if (state->exit_requested != 0 || state->loop_control != SHELL_LOOP_NONE)
       break;
   }
 
   shell_reap_background(state);
   return status;
+}
+
+int shell_execute_program(struct shell_state *state,
+                          const struct shell_program *program)
+{
+  if (state == 0 || program == 0)
+    return 1;
+  return shell_execute_list(state, program, program->root_list_index);
 }
 
 int shell_execute_string(struct shell_state *state, const char *text)

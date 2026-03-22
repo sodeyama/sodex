@@ -232,7 +232,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-term-scrollback test-qemu-fs test-qemu-shell-io test-qemu-shell-programmable test-qemu-shell-usability test-qemu-cat-multifile test-qemu-shell-redirection-pager test-qemu-shell-completion test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-qemu-unix-text-tools test-qemu-sxi test-agent-bringup test-claude-smoke test-agent-full ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-term-scrollback test-qemu-fs test-qemu-shell-io test-qemu-shell-programmable test-qemu-shell-long-list test-qemu-shell-usability test-qemu-cat-multifile test-qemu-shell-redirection-pager test-qemu-shell-completion test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-qemu-unix-text-tools test-qemu-sxi test-agent-bringup test-claude-smoke test-agent-full ktest-build
 TERM_ROOTFS_OVERLAY = $(LOGDIR)/term-rootfs-overlay
 TERM_FSBOOT = $(LOGDIR)/term-fsboot.bin
 TERM_FSBOOT_PROFILE = $(LOGDIR)/term-fsboot.profile
@@ -281,6 +281,10 @@ test-qemu-shell-io: all
 test-qemu-shell-programmable: all
 	@echo "=== Running programmable shell smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_shell_programmable_smoke.py $(FSBOOT) $(LOGDIR)
+
+test-qemu-shell-long-list: all
+	@echo "=== Running shell long-list smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_shell_long_list_smoke.py $(FSBOOT) $(LOGDIR)
 
 test-qemu-shell-usability: all
 	@echo "=== Running shell usability smoke in QEMU ==="

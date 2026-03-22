@@ -12,6 +12,60 @@ agent は `/etc/CLAUDE.md` を前提として扱ってください。
 - フルスクリーン編集は `vi`
 - 実行ファイルは主に `/usr/bin` に配置
 
+## Sodex shell の書き方
+
+- script は `sh file.sh` または `sh -c '...'` で実行する
+- 変数代入は `name=value` の形で書き、`name = value` のように空白を入れない
+- 変数参照は `$name`, `$1`, `$2`, `$?`, `$!` を使う
+- `if` は `fi` で閉じる。`end` は使わない
+- `for`, `while`, `until` は `do ... done` で書く
+- `then` と `do` の前には `;` か改行が必要
+- 条件式は `test` または `[` を使う。`[` のときは最後に `]` が必要
+- 文字列比較は `=` を優先して使う
+
+### 使える主な構文
+
+```sh
+name=value
+echo "$name"
+
+if [ "$name" = "value" ]; then
+  echo ok
+elif [ -z "$name" ]; then
+  echo empty
+else
+  echo other
+fi
+
+for item in a b c; do
+  echo "$item"
+done
+
+while [ -f /tmp/flag ]; do
+  break
+done
+
+until [ -f /tmp/ready ]; do
+  sleep 1
+done
+```
+
+### `test` / `[` の最小対応
+
+- file 存在: `[ -f path ]`, `[ -e path ]`
+- directory 存在: `[ -d path ]`
+- 空文字判定: `[ -n "$x" ]`, `[ -z "$x" ]`
+- 文字列比較: `[ "$a" = "$b" ]`, `[ "$a" != "$b" ]`
+
+### いま非対応として考えるもの
+
+- shell function
+- command substitution: `` `...` ``, `$(...)`
+- arithmetic expansion: `$((...))`
+- brace expansion
+- here document
+- `end` で閉じる独自構文
+
 ## 主なコマンド
 
 - ファイル操作: `ls`, `cat`, `touch`, `mkdir`, `rm`, `rmdir`, `mv`, `cd`, `pwd`

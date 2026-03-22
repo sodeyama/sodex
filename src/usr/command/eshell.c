@@ -257,6 +257,13 @@ static int shell_read_input_line(char **buf, int *buf_size,
   while (1) {
     int i;
 
+    while (*data_pos < *data_len && (*buf)[*data_pos] == '\0')
+      (*data_pos)++;
+    if (*data_pos >= *data_len) {
+      *data_pos = 0;
+      *data_len = 0;
+    }
+
     for (i = *data_pos; i < *data_len; i++) {
       if ((*buf)[i] == '\r' || (*buf)[i] == '\n') {
         int consume = 1;

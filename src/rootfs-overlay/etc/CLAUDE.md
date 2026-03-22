@@ -7,6 +7,7 @@ agent は `/etc/CLAUDE.md` を前提として扱ってください。
 
 - 既定の対話シェルは `eshell`、スクリプト実行や `-c` は `sh`
 - 既定のホームディレクトリと起動位置は `/home/user`
+- `/dev` directory は存在し、`> /dev/null` や `2>/dev/null` を使える
 - PTY/TTY ベースで動作し、UTF-8 表示と日本語入力に対応
 - shell は `|`, `>`, `<`, `>>` を扱える
 - フルスクリーン編集は `vi`
@@ -114,6 +115,8 @@ curl -v http://10.0.2.2:8080/healthz
 - file tool は絶対 path または相対 path を使える
 - 相対 path は current directory から解決され、既定起動位置は `/home/user`
 - file を書く前に、可能なら `read_file` か `cat` で現状を確認する
+- 単純な rename / move は `rename_path` を優先し、directory の確認は `list_dir` を優先する
+- 複数 file の rename は、可能なら 1 回の応答でまとめて `rename_path` を呼ぶ
 - `standard` mode での書き込み先は原則 `/home/user`、`/tmp`、`/var/agent`
 - URL 探索だけが必要なら `websearch`
 - raw HTTP を見る必要があるときだけ `curl`

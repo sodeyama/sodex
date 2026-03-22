@@ -119,7 +119,11 @@ int perm_check_tool(const struct permission_policy *policy,
 {
     int i;
     char path[AGENT_PATH_MAX];
+    char from_path[AGENT_PATH_MAX];
+    char to_path[AGENT_PATH_MAX];
     int path_len = -1;
+    int from_len = -1;
+    int to_len = -1;
 
     if (!policy || !tool_name)
         return 0; /* deny on invalid input */
@@ -148,6 +152,16 @@ int perm_check_tool(const struct permission_policy *policy,
         path_len = agent_json_get_normalized_path(input_json, input_len,
                                                   "path", path, sizeof(path));
     }
+    if (strcmp(tool_name, "rename_path") == 0 && input_json) {
+        from_len = agent_json_get_normalized_path(input_json, input_len,
+                                                  "from",
+                                                  from_path,
+                                                  sizeof(from_path));
+        to_len = agent_json_get_normalized_path(input_json, input_len,
+                                                "to",
+                                                to_path,
+                                                sizeof(to_path));
+    }
 
     /* Standard mode: allow all tools but enforce path and command policy */
     if (strcmp(tool_name, "read_file") == 0 ||
@@ -170,6 +184,26 @@ int perm_check_tool(const struct permission_policy *policy,
                           policy->write_deny_paths, policy->write_deny_count)) {
 #ifndef TEST_BUILD
             debug_printf("[PERM] denied write to %s\n", path);
+#endif
+            return 0;
+        }
+    }
+    if (strcmp(tool_name, "rename_path") == 0) {
+        if (from_len > 0 &&
+            !path_allowed(from_path,
+                          policy->write_allow_paths, policy->write_allow_count,
+                          policy->write_deny_paths, policy->write_deny_count)) {
+#ifndef TEST_BUILD
+            debug_printf("[PERM] denied rename source %s\n", from_path);
+#endif
+            return 0;
+        }
+        if (to_len > 0 &&
+            !path_allowed(to_path,
+                          policy->write_allow_paths, policy->write_allow_count,
+                          policy->write_deny_paths, policy->write_deny_count)) {
+#ifndef TEST_BUILD
+            debug_printf("[PERM] denied rename target %s\n", to_path);
 #endif
             return 0;
         }

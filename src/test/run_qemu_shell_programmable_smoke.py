@@ -118,6 +118,19 @@ def read_dir_entries(image: bytes, ino: int) -> dict[str, tuple[int, int]]:
     return result
 
 
+def lookup_path(image: bytes, path: str) -> tuple[int, int] | None:
+    current = SODEX_ROOT_INO
+
+    if path == "/":
+        return current, 2
+    for part in [p for p in path.split("/") if p]:
+        entries = read_dir_entries(image, current)
+        if part not in entries:
+            return None
+        current, file_type = entries[part]
+    return current, file_type
+
+
 def read_user_entries(image: bytes) -> dict[str, tuple[int, int]]:
     root_entries = read_dir_entries(image, SODEX_ROOT_INO)
     home_entry = root_entries.get("home")
@@ -130,6 +143,22 @@ def read_user_entries(image: bytes) -> dict[str, tuple[int, int]]:
         raise AssertionError("/home/user was not found")
 
     return read_dir_entries(image, user_entry[0])
+
+
+def read_path_text(fsboot: pathlib.Path, path: str) -> str:
+    image = fsboot.read_bytes()
+    entry = lookup_path(image, path)
+
+    if entry is None or entry[1] != 1:
+        raise AssertionError(f"{path} was not created")
+    return read_file(image, entry[0]).decode("ascii", errors="replace")
+
+
+def assert_path_missing(fsboot: pathlib.Path, path: str) -> None:
+    image = fsboot.read_bytes()
+
+    if lookup_path(image, path) is not None:
+        raise AssertionError(f"{path} should not exist")
 
 
 def read_user_file(fsboot: pathlib.Path, name: str) -> str:
@@ -155,6 +184,11 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
     until_text = read_user_file(fsboot, "until.txt")
     eshell_if_text = read_user_file(fsboot, "eshell_if.txt")
     eshell_for_text = read_user_file(fsboot, "eshell_for.txt")
+    sorted_paths = read_path_text(fsboot, "/home/user/rename_case/sorted_paths.txt")
+    prefixed_doc = read_path_text(fsboot, "/home/user/rename_case/01_document.md")
+    prefixed_a = read_path_text(fsboot, "/home/user/rename_case/02_file_a.txt")
+    prefixed_b = read_path_text(fsboot, "/home/user/rename_case/03_file_b.txt")
+    prefixed_c = read_path_text(fsboot, "/home/user/rename_case/04_file_c.txt")
 
     if if_text != "ok\n":
         raise AssertionError(f"if.txt mismatch: {if_text!r}")
@@ -169,6 +203,25 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
         raise AssertionError(f"eshell_if.txt mismatch: {eshell_if_text!r}")
     if eshell_for_text != "y\ny\n":
         raise AssertionError(f"eshell_for.txt mismatch: {eshell_for_text!r}")
+    if sorted_paths != (
+        "/home/user/rename_case/document.md\n"
+        "/home/user/rename_case/file_a.txt\n"
+        "/home/user/rename_case/file_b.txt\n"
+        "/home/user/rename_case/file_c.txt\n"
+    ):
+        raise AssertionError(f"sorted_paths.txt mismatch: {sorted_paths!r}")
+    if prefixed_doc != "doc\n":
+        raise AssertionError(f"01_document.md mismatch: {prefixed_doc!r}")
+    if prefixed_a != "aaa\n":
+        raise AssertionError(f"02_file_a.txt mismatch: {prefixed_a!r}")
+    if prefixed_b != "bbb\n":
+        raise AssertionError(f"03_file_b.txt mismatch: {prefixed_b!r}")
+    if prefixed_c != "ccc\n":
+        raise AssertionError(f"04_file_c.txt mismatch: {prefixed_c!r}")
+    assert_path_missing(fsboot, "/home/user/rename_case/document.md")
+    assert_path_missing(fsboot, "/home/user/rename_case/file_a.txt")
+    assert_path_missing(fsboot, "/home/user/rename_case/file_b.txt")
+    assert_path_missing(fsboot, "/home/user/rename_case/file_c.txt")
 
 
 def write_text(path: pathlib.Path, text: str) -> None:
@@ -222,6 +275,17 @@ echo AUDIT programmable_eshell_status=$eshell_status
 if [ "$eshell_status" != "0" ]; then
   exit $eshell_status
 fi
+mkdir /home/user/rename_case
+echo ccc > /home/user/rename_case/file_c.txt
+echo aaa > /home/user/rename_case/file_a.txt
+echo bbb > /home/user/rename_case/file_b.txt
+echo doc > /home/user/rename_case/document.md
+ls -1 /home/user/rename_case/*.txt /home/user/rename_case/*.md 2>/dev/null | sort > /home/user/rename_case/sorted_paths.txt
+mv /home/user/rename_case/document.md /home/user/rename_case/01_document.md
+mv /home/user/rename_case/file_a.txt /home/user/rename_case/02_file_a.txt
+mv /home/user/rename_case/file_b.txt /home/user/rename_case/03_file_b.txt
+mv /home/user/rename_case/file_c.txt /home/user/rename_case/04_file_c.txt
+echo AUDIT programmable_sort_rename_done
 echo AUDIT programmable_smoke_script_done
 """,
     )

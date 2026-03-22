@@ -624,13 +624,16 @@ test_tool_run_command: test_tool_run_command.c $(SRC)/usr/lib/libagent/tool_run_
 	$(CC) $(CFLAGS) -DTEST_BUILD -Itool_run_command_mocks -o $@ test_tool_run_command.c
 
 # File tool access tests
-test_tool_file_access: test_tool_file_access.c test_tool_file_access_read.o test_tool_file_access_write.o test_tool_file_access_list.o test_tool_file_access_path_utils.o test_tool_file_access_bounded_output.o test_tool_file_access_json.o
-	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_tool_file_access.c test_tool_file_access_read.o test_tool_file_access_write.o test_tool_file_access_list.o test_tool_file_access_path_utils.o test_tool_file_access_bounded_output.o test_tool_file_access_json.o
+test_tool_file_access: test_tool_file_access.c test_tool_file_access_read.o test_tool_file_access_write.o test_tool_file_access_rename.o test_tool_file_access_list.o test_tool_file_access_path_utils.o test_tool_file_access_bounded_output.o test_tool_file_access_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_tool_file_access.c test_tool_file_access_read.o test_tool_file_access_write.o test_tool_file_access_rename.o test_tool_file_access_list.o test_tool_file_access_path_utils.o test_tool_file_access_bounded_output.o test_tool_file_access_json.o
 
 test_tool_file_access_read.o: $(SRC)/usr/lib/libagent/tool_read_file.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_tool_file_access_write.o: $(SRC)/usr/lib/libagent/tool_write_file.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_tool_file_access_rename.o: $(SRC)/usr/lib/libagent/tool_rename_path.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 test_tool_file_access_list.o: $(SRC)/usr/lib/libagent/tool_list_dir.c

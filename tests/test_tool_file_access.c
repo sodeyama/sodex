@@ -114,6 +114,35 @@ static void test_write_create_rejects_existing_file(void)
     TEST_PASS("write_create_rejects_existing_file");
 }
 
+static void test_rename_moves_file_and_preserves_content(void)
+{
+    const char *rename_input =
+        "{\"from\":\"/tmp/agent_file_tool_tests/from.txt\","
+        "\"to\":\"/tmp/agent_file_tool_tests/to.txt\"}";
+    const char *read_input =
+        "{\"path\":\"/tmp/agent_file_tool_tests/to.txt\"}";
+    char result[4096];
+    int len;
+
+    TEST_START("rename_moves_file_and_preserves_content");
+    reset_test_root();
+    write_host_file(TEST_ROOT "/from.txt", "rename-me");
+
+    len = tool_rename_path(rename_input, (int)strlen(rename_input),
+                           result, sizeof(result));
+    ASSERT(len > 0, "rename should succeed");
+    ASSERT(strstr(result, "\"status\":\"ok\"") != NULL, "rename status ok");
+    ASSERT(access(TEST_ROOT "/from.txt", F_OK) != 0, "source removed");
+    ASSERT(access(TEST_ROOT "/to.txt", F_OK) == 0, "target exists");
+
+    len = tool_read_file(read_input, (int)strlen(read_input),
+                         result, sizeof(result));
+    ASSERT(len > 0, "read renamed file");
+    ASSERT(strstr(result, "\"content\":\"rename-me\"") != NULL,
+           "renamed content preserved");
+    TEST_PASS("rename_moves_file_and_preserves_content");
+}
+
 static void test_read_offset_limit(void)
 {
     const char *read_input =
@@ -236,6 +265,7 @@ int main(void)
     test_write_overwrite_and_readback();
     test_write_append_mode();
     test_write_create_rejects_existing_file();
+    test_rename_moves_file_and_preserves_content();
     test_read_offset_limit();
     test_relative_paths_resolve_from_cwd();
     test_read_large_file_uses_bounded_output();

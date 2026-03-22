@@ -16,6 +16,7 @@ Agent Integration Scenarios (Plan 18):
   - "test_one_tool": one read_file tool call, then text completion
   - "test_two_tools": list_dir -> read_file -> text completion
   - "test_max_steps": always returns tool_use (get_system_info)
+  - "test_sorted_prefix_rename": list_dir -> batched rename_path -> verify
 
 Usage:
   python3 tests/mock_claude_server.py [port] [--tls]
@@ -165,6 +166,73 @@ def tool_use_response_stream(tool_name="read_file", tool_id="toolu_mock_01",
     return events
 
 
+def multi_tool_use_response_stream(tool_uses,
+                                   text_before="Let me use those tools.",
+                                   msg_id="msg_mock_multi_tool"):
+    """Generate SSE events for multiple tool_use blocks."""
+    events = []
+
+    events.append(sse_event("message_start", {
+        "type": "message_start",
+        "message": {
+            "id": msg_id,
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "model": "mock-claude",
+            "stop_reason": None,
+            "usage": {"input_tokens": 20, "output_tokens": 1}
+        }
+    }))
+
+    events.append(sse_event("content_block_start", {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "text", "text": ""}
+    }))
+    events.append(sse_event("content_block_delta", {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "text_delta", "text": text_before}
+    }))
+    events.append(sse_event("content_block_stop", {
+        "type": "content_block_stop",
+        "index": 0
+    }))
+
+    for index, tool_use in enumerate(tool_uses, start=1):
+        events.append(sse_event("content_block_start", {
+            "type": "content_block_start",
+            "index": index,
+            "content_block": {
+                "type": "tool_use",
+                "id": tool_use["id"],
+                "name": tool_use["name"],
+                "input": {}
+            }
+        }))
+        events.append(sse_event("content_block_delta", {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": tool_use["input_json"]
+            }
+        }))
+        events.append(sse_event("content_block_stop", {
+            "type": "content_block_stop",
+            "index": index
+        }))
+
+    events.append(sse_event("message_delta", {
+        "type": "message_delta",
+        "delta": {"stop_reason": "tool_use", "stop_sequence": None},
+        "usage": {"output_tokens": 30 + (len(tool_uses) * 10)}
+    }))
+    events.append(sse_event("message_stop", {"type": "message_stop"}))
+    return events
+
+
 def error_response_stream():
     """Generate SSE events for an error response."""
     events = []
@@ -217,6 +285,7 @@ def _find_scenario_keyword(messages):
     keywords = ("test_immediate", "test_one_tool", "test_two_tools",
                 "test_max_steps", "test_perm_blocked", "test_fetch_url_weather",
                 "test_write_readback",
+                "test_sorted_prefix_rename",
                 "test_current_weather_requires_tool",
                 "test_current_weather_retry_after_text_only",
                 "test_session_resume_b", "test_session_resume_a",
@@ -382,6 +451,73 @@ def _agent_scenario_events(scenario, tool_results_count, messages):
         return text_response_stream(
             text="write/readback result missing expected content",
             msg_id="msg_integ_write_readback_missing")
+
+    if scenario == "test_sorted_prefix_rename":
+        if tool_results_count == 0:
+            return tool_use_response_stream(
+                tool_name="list_dir",
+                tool_id="toolu_integ_sort_rename_list_1",
+                tool_input_json='{"path":"."}',
+                text_before="Listing files to rename.",
+                msg_id="msg_integ_sort_rename_a")
+        if tool_results_count == 1:
+            if (_messages_contain_text(messages, "document.md") and
+                    _messages_contain_text(messages, "file_a.txt") and
+                    _messages_contain_text(messages, "file_b.txt") and
+                    _messages_contain_text(messages, "file_c.txt")):
+                return multi_tool_use_response_stream(
+                    [
+                        {
+                            "id": "toolu_integ_sort_rename_mv_1",
+                            "name": "rename_path",
+                            "input_json": (
+                                '{"from":"document.md","to":"01_document.md"}'
+                            ),
+                        },
+                        {
+                            "id": "toolu_integ_sort_rename_mv_2",
+                            "name": "rename_path",
+                            "input_json": (
+                                '{"from":"file_a.txt","to":"02_file_a.txt"}'
+                            ),
+                        },
+                        {
+                            "id": "toolu_integ_sort_rename_mv_3",
+                            "name": "rename_path",
+                            "input_json": (
+                                '{"from":"file_b.txt","to":"03_file_b.txt"}'
+                            ),
+                        },
+                        {
+                            "id": "toolu_integ_sort_rename_mv_4",
+                            "name": "rename_path",
+                            "input_json": (
+                                '{"from":"file_c.txt","to":"04_file_c.txt"}'
+                            ),
+                        },
+                    ],
+                    text_before="Renaming files in sorted order.",
+                    msg_id="msg_integ_sort_rename_b")
+            return text_response_stream(
+                text="list_dir result missing expected filenames",
+                msg_id="msg_integ_sort_rename_missing_list")
+        if tool_results_count == 5:
+            return tool_use_response_stream(
+                tool_name="list_dir",
+                tool_id="toolu_integ_sort_rename_list_2",
+                tool_input_json='{"path":"."}',
+                text_before="Verifying renamed files.",
+                msg_id="msg_integ_sort_rename_c")
+        if (_messages_contain_text(messages, "01_document.md") and
+                _messages_contain_text(messages, "02_file_a.txt") and
+                _messages_contain_text(messages, "03_file_b.txt") and
+                _messages_contain_text(messages, "04_file_c.txt")):
+            return text_response_stream(
+                text="Sorted prefix rename succeeded.",
+                msg_id="msg_integ_sort_rename_done")
+        return text_response_stream(
+            text="sorted prefix rename verification missing renamed files",
+            msg_id="msg_integ_sort_rename_missing_verify")
 
     if scenario == "test_current_weather_requires_tool":
         if tool_results_count == 0:

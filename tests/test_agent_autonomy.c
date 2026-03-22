@@ -448,6 +448,10 @@ static void test_system_prompt_mentions_text_commands(void)
            "system prompt should mention grep");
     ASSERT(strstr(config.system_prompt, "tee") != 0,
            "system prompt should mention tee");
+    ASSERT(strstr(config.system_prompt, "rename_path") != 0,
+           "system prompt should mention rename_path");
+    ASSERT(strstr(config.system_prompt, "list_dir") != 0,
+           "system prompt should mention list_dir");
     TEST_PASS("system_prompt_mentions_text_commands");
 }
 

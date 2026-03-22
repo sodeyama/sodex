@@ -29,6 +29,11 @@ void tool_init(void)
                   TOOL_SCHEMA_WRITE_FILE,
                   tool_write_file);
 
+    tool_register("rename_path",
+                  "Rename or move a guest file or directory. Relative paths use the current directory",
+                  TOOL_SCHEMA_RENAME_PATH,
+                  tool_rename_path);
+
     tool_register("list_dir",
                   "List entries in a guest directory. Relative paths use the current directory",
                   TOOL_SCHEMA_LIST_DIR,

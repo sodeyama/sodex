@@ -116,6 +116,37 @@ static int write_text_file(const char *path, const char *text)
     return 0;
 }
 
+static int read_text_file(const char *path, char *buf, int cap)
+{
+    int fd;
+    int nread;
+
+    if (!path || !buf || cap <= 1)
+        return -1;
+    fd = open(path, O_RDONLY, 0);
+    if (fd < 0)
+        return -1;
+    nread = read(fd, buf, (size_t)(cap - 1));
+    close(fd);
+    if (nread < 0)
+        return -1;
+    buf[nread] = '\0';
+    return nread;
+}
+
+static int path_exists(const char *path)
+{
+    int fd;
+
+    if (!path)
+        return 0;
+    fd = open(path, O_RDONLY, 0);
+    if (fd < 0)
+        return 0;
+    close(fd);
+    return 1;
+}
+
 static int persist_turns(const char *session_id,
                          const struct agent_state *state,
                          int start_turn)
@@ -574,7 +605,69 @@ static void test_scenario_fetch_url_weather(void)
     }
 }
 
-/* ----- Scenario 12: current-info prompt is forced through tools ----- */
+/* ----- Scenario 12: sorted rename completes with narrow tools ----- */
+static void test_scenario_sorted_prefix_rename(void)
+{
+    static char buf[64];
+    int ret;
+
+    mkdir("/tmp", 0755);
+    mkdir("/tmp/agent_rename_case", 0755);
+    if (chdir("/tmp/agent_rename_case") < 0) {
+        TEST_FAIL("scenario_12_sorted_prefix_rename", "chdir failed");
+        return;
+    }
+    if (write_text_file("file_c.txt", "ccc\n") < 0 ||
+        write_text_file("file_a.txt", "aaa\n") < 0 ||
+        write_text_file("file_b.txt", "bbb\n") < 0 ||
+        write_text_file("document.md", "doc\n") < 0) {
+        TEST_FAIL("scenario_12_sorted_prefix_rename", "fixture write failed");
+        restore_default_home();
+        return;
+    }
+
+    agent_config_init(&s_config);
+    s_config.max_steps = 5;
+    s_config.api_key = "test-key-mock";
+    s_config.provider = &mock_prov;
+
+    debug_printf("[AGENT-INTEG] scenario 12: sorted prefix rename\n");
+    printf("[AGENT-INTEG] scenario 12: sorted prefix rename\n");
+
+    ret = agent_run(&s_config, "test_sorted_prefix_rename", &s_result);
+
+    if (ret == 0 && s_result.stop_reason == AGENT_STOP_END_TURN) {
+        if (s_result.steps_executed == 4 &&
+            s_result.total_tool_calls == 6 &&
+            strstr(s_result.final_text, "Sorted prefix rename succeeded.") != 0 &&
+            path_exists("01_document.md") &&
+            path_exists("02_file_a.txt") &&
+            path_exists("03_file_b.txt") &&
+            path_exists("04_file_c.txt") &&
+            !path_exists("document.md") &&
+            !path_exists("file_a.txt") &&
+            !path_exists("file_b.txt") &&
+            !path_exists("file_c.txt") &&
+            read_text_file("02_file_a.txt", buf, sizeof(buf)) > 0 &&
+            strcmp(buf, "aaa\n") == 0) {
+            TEST_PASS("scenario_12_sorted_prefix_rename");
+        } else {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "steps=%d tools=%d text=%s",
+                     s_result.steps_executed, s_result.total_tool_calls,
+                     s_result.final_text);
+            TEST_FAIL("scenario_12_sorted_prefix_rename", msg);
+        }
+    } else {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "ret=%d, stop=%d", ret, s_result.stop_reason);
+        TEST_FAIL("scenario_12_sorted_prefix_rename", msg);
+    }
+
+    restore_default_home();
+}
+
+/* ----- Scenario 13: current-info prompt is forced through tools ----- */
 static void test_scenario_current_weather_requires_tool(void)
 {
     int ret;
@@ -610,7 +703,7 @@ static void test_scenario_current_weather_requires_tool(void)
     }
 }
 
-/* ----- Scenario 13: text-only planning must retry through tools ----- */
+/* ----- Scenario 14: text-only planning must retry through tools ----- */
 static void test_scenario_current_weather_retry_after_text_only(void)
 {
     int ret;
@@ -682,6 +775,7 @@ int main(int argc, char *argv[])
     test_scenario_perm_blocked();
     test_scenario_write_readback();
     test_scenario_fetch_url_weather();
+    test_scenario_sorted_prefix_rename();
     test_scenario_current_weather_requires_tool();
     test_scenario_current_weather_retry_after_text_only();
 

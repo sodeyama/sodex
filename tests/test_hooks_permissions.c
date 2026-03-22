@@ -204,6 +204,14 @@ static void test_perm_standard_denies_protected_write(void)
     ASSERT(perm_check_json(&policy, "write_file",
                             "{\"path\":\"/home/out.txt\"}") == 0,
            "/home write denied by default");
+    ASSERT(perm_check_json(&policy, "rename_path",
+                            "{\"from\":\"/home/user/a.txt\","
+                            "\"to\":\"/home/user/b.txt\"}") == 1,
+           "rename /home/user allowed");
+    ASSERT(perm_check_json(&policy, "rename_path",
+                            "{\"from\":\"/home/user/a.txt\","
+                            "\"to\":\"/boot/b.txt\"}") == 0,
+           "rename into /boot denied");
     TEST_PASS("perm_standard_denies_protected_write");
 }
 
@@ -264,6 +272,8 @@ static void test_perm_strict_only_reads(void)
            "system_info allowed in strict");
     ASSERT(perm_check_json(&policy, "write_file", "{}") == 0,
            "write denied in strict");
+    ASSERT(perm_check_json(&policy, "rename_path", "{}") == 0,
+           "rename denied in strict");
     ASSERT(perm_check_json(&policy, "run_command", "{}") == 0,
            "run_command denied in strict");
     TEST_PASS("perm_strict_only_reads");

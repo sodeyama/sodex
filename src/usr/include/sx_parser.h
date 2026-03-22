@@ -35,7 +35,7 @@ struct sx_call_expr {
   enum sx_call_target_kind target_kind;
   char target_name[SX_NAME_MAX];
   char member_name[SX_NAME_MAX];
-  struct sx_atom args[SX_CALL_MAX_ARGS];
+  int args[SX_CALL_MAX_ARGS];
   int arg_count;
 };
 
@@ -117,6 +117,8 @@ struct sx_function {
 struct sx_program {
   struct sx_function functions[SX_MAX_FUNCTIONS];
   int function_count;
+  struct sx_expr exprs[SX_MAX_EXPRS];
+  int expr_count;
   struct sx_block blocks[SX_MAX_BLOCKS];
   int block_count;
   struct sx_stmt statements[SX_MAX_STATEMENTS];

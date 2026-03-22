@@ -675,6 +675,21 @@ static int sx_eval_expr(struct sx_runtime *runtime,
                         int execute_side_effects,
                         struct sx_diagnostic *diag);
 
+static int sx_eval_expr_from_index(struct sx_runtime *runtime,
+                                   const struct sx_program *program,
+                                   int expr_index,
+                                   struct sx_value *value,
+                                   int execute_side_effects,
+                                   struct sx_diagnostic *diag)
+{
+  if (expr_index < 0 || expr_index >= program->expr_count) {
+    sx_set_diagnostic(diag, 0, 0, 0, 0, "invalid expression");
+    return -1;
+  }
+  return sx_eval_expr(runtime, program, &program->exprs[expr_index],
+                      value, execute_side_effects, diag);
+}
+
 static int sx_run_block(struct sx_runtime *runtime,
                         const struct sx_program *program,
                         int block_index,
@@ -723,7 +738,8 @@ static int sx_call_user_function(struct sx_runtime *runtime,
     return -1;
   }
   for (i = 0; i < call->arg_count; i++) {
-    if (sx_eval_atom(runtime, &call->args[i], &args[i], diag) < 0)
+    if (sx_eval_expr_from_index(runtime, program, call->args[i],
+                                &args[i], execute_side_effects, diag) < 0)
       return -1;
   }
 
@@ -765,6 +781,7 @@ fail:
 }
 
 static int sx_eval_namespace_call(struct sx_runtime *runtime,
+                                  const struct sx_program *program,
                                   const struct sx_call_expr *call,
                                   const struct sx_source_span *span,
                                   int execute_side_effects,
@@ -778,7 +795,8 @@ static int sx_eval_namespace_call(struct sx_runtime *runtime,
   memset(args, 0, sizeof(args));
   memset(tokens, 0, sizeof(tokens));
   for (i = 0; i < call->arg_count; i++) {
-    if (sx_eval_atom(runtime, &call->args[i], &args[i], diag) < 0)
+    if (sx_eval_expr_from_index(runtime, program, call->args[i],
+                                &args[i], execute_side_effects, diag) < 0)
       return -1;
   }
 
@@ -1072,7 +1090,7 @@ static int sx_eval_call_expr(struct sx_runtime *runtime,
     return sx_call_user_function(runtime, program, call, span,
                                  execute_side_effects, value, diag);
   }
-  return sx_eval_namespace_call(runtime, call, span,
+  return sx_eval_namespace_call(runtime, program, call, span,
                                 execute_side_effects, value, diag);
 }
 

@@ -4,6 +4,7 @@
 #include <sys/types.h>
 
 #define SX_MAX_TOKENS 256
+#define SX_MAX_EXPRS 128
 #define SX_MAX_STATEMENTS 64
 #define SX_MAX_BLOCKS 32
 #define SX_MAX_FUNCTIONS 8

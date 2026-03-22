@@ -10,6 +10,7 @@
 - 2026-03-22: tree-walk interpreter を v0 とし、bytecode / native compiler は後段へ回す方針を固定した
 - 2026-03-22: initial bring-up として、`/usr/bin/sxi`、`--check`、`-e`、簡易 REPL、host test、QEMU smoke `test-qemu-sxi` を追加した
 - 2026-03-22: `libsx` 共有 frontend、relative `import` loader、`io` / `fs` / `proc` / `json` / `text` builtin、runtime stack trace、host / QEMU smoke を追加した
+- 2026-03-22: nested builtin / function call 引数の実行を追加し、host runtime test を `/tmp` 作業ディレクトリへ寄せて workspace 汚染を減らした
 
 ## 優先順
 

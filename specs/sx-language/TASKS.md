@@ -10,6 +10,7 @@
 - 2026-03-22: 調査結果をもとに、interpreter first だが compiler を閉ざさない language plan として再整理した
 - 2026-03-22: initial bring-up として、`let` と `io.print` / `io.println` を持つ最小 frontend を `libsx` と host test / QEMU smoke に載せた
 - 2026-03-22: `fn` / `let` / block / `if` / `while` / `return`、`str` / `bool` / `i32`、namespace call、relative `import` を `libsx` + `sxi` で通し、host test と QEMU smoke を更新した
+- 2026-03-22: call 引数を expression 化し、nested call を AST / runtime / host test / QEMU smoke で扱えるようにした
 
 ## 優先順
 

@@ -227,7 +227,7 @@ exit 0
 }
 let ok = true;
 let name = pick(ok);
-io.println(name);
+io.println(text.trim(text.concat(name, "  ")));
 """,
     )
     write_text(
@@ -263,7 +263,7 @@ io.println(ok);
 }
 let ok = true;
 let result = loop_once(ok);
-io.println(result);
+io.println(text.trim(text.concat(result, "  ")));
 """,
     )
     write_text(
@@ -284,8 +284,7 @@ io.println(result);
         overlay_dir / "home" / "user" / "import_main.sx",
         """import "import_lib.sx";
 let ok = true;
-let result = import_pick(ok);
-io.println(result);
+io.println(import_pick(ok));
 """,
     )
 

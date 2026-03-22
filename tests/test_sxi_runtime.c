@@ -2,6 +2,7 @@
 #include <sx_parser.h>
 #include <sx_runtime.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -212,11 +213,10 @@ TEST(runtime_executes_json_text_and_i32_builtins) {
         "let name = json.get_str(raw, \"name\");\n"
         "let ok = json.get_bool(raw, \"ok\");\n"
         "let code = json.get_i32(raw, \"code\");\n"
-        "let trimmed = text.trim(\"  hi  \");\n"
-        "let joined = text.concat(name, trimmed);\n"
-        "let has_sx = text.contains(joined, \"sx\");\n"
+        "let joined = text.concat(name, text.trim(\"  hi  \"));\n"
+        "let has_sx = text.contains(text.concat(name, \"hi\"), \"sx\");\n"
         "let raw_ok = json.valid(raw);\n"
-        "io.println(joined);\n"
+        "io.println(text.trim(text.concat(joined, \"  \")));\n"
         "io.println(ok);\n"
         "io.println(code);\n"
         "io.println(has_sx);\n"
@@ -239,15 +239,16 @@ TEST(runtime_executes_json_text_and_i32_builtins) {
 }
 
 TEST(runtime_executes_proc_and_list_dir_builtins) {
-    const char *dir_path = "sxi_runtime_dir";
-    const char *file_a = "sxi_runtime_dir/a.txt";
-    const char *file_b = "sxi_runtime_dir/b.txt";
-    const char *script =
-        "let listing = fs.list_dir(\"sxi_runtime_dir\");\n"
-        "let has_a = text.contains(listing, \"a.txt\");\n"
+    char dir_template[] = "/tmp/sxi_runtime_dirXXXXXX";
+    char file_a[256];
+    char file_b[256];
+    char script[768];
+    char *dir_path;
+    const char *script_template =
+        "let has_a = text.contains(fs.list_dir(\"%s\"), \"a.txt\");\n"
         "let captured = proc.capture(\"/bin/sh\", \"-c\", \"printf capture\");\n"
+        "let ok = proc.status_ok(proc.run(\"/bin/sh\", \"-c\", \"exit 7\"));\n"
         "let status = proc.run(\"/bin/sh\", \"-c\", \"exit 7\");\n"
-        "let ok = proc.status_ok(status);\n"
         "io.println(has_a);\n"
         "io.println(captured);\n"
         "io.println(ok);\n"
@@ -257,9 +258,13 @@ TEST(runtime_executes_proc_and_list_dir_builtins) {
     struct sx_runtime runtime;
     struct output_buffer out;
 
-    mkdir(dir_path, 0755);
+    dir_path = mkdtemp(dir_template);
+    ASSERT_EQ(dir_path != NULL, 1);
+    snprintf(file_a, sizeof(file_a), "%s/a.txt", dir_path);
+    snprintf(file_b, sizeof(file_b), "%s/b.txt", dir_path);
     ASSERT_EQ(write_text_file(file_a, "A"), 0);
     ASSERT_EQ(write_text_file(file_b, "B"), 0);
+    snprintf(script, sizeof(script), script_template, dir_path);
 
     memset(&out, 0, sizeof(out));
     sx_runtime_init(&runtime);

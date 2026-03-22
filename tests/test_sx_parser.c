@@ -18,6 +18,20 @@ static const struct sx_stmt *block_stmt_at(const struct sx_program *program,
     return &program->statements[stmt_index];
 }
 
+static const struct sx_expr *call_arg_expr_at(const struct sx_program *program,
+                                              const struct sx_call_expr *call_expr,
+                                              int ordinal)
+{
+    int expr_index;
+
+    if (ordinal < 0 || ordinal >= call_expr->arg_count)
+        return NULL;
+    expr_index = call_expr->args[ordinal];
+    if (expr_index < 0 || expr_index >= program->expr_count)
+        return NULL;
+    return &program->exprs[expr_index];
+}
+
 TEST(parse_function_blocks_and_control_flow) {
     const char *text =
         "fn choose(flag) -> str {\n"
@@ -47,6 +61,7 @@ TEST(parse_function_blocks_and_control_flow) {
     const struct sx_stmt *if_stmt;
     const struct sx_stmt *else_stmt0;
     const struct sx_stmt *else_stmt1;
+    const struct sx_expr *arg0;
 
     ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
     ASSERT_EQ(program.function_count, 1);
@@ -95,7 +110,11 @@ TEST(parse_function_blocks_and_control_flow) {
         ASSERT_EQ(stmt4->data.call_stmt.call_expr.target_kind, SX_CALL_TARGET_NAMESPACE);
         ASSERT_STR_EQ(stmt4->data.call_stmt.call_expr.target_name, "io");
         ASSERT_STR_EQ(stmt4->data.call_stmt.call_expr.member_name, "println");
-        ASSERT_STR_EQ(stmt4->data.call_stmt.call_expr.args[0].text, "name");
+        arg0 = call_arg_expr_at(&program, &stmt4->data.call_stmt.call_expr, 0);
+        ASSERT_EQ(arg0 != NULL, 1);
+        ASSERT_EQ(arg0->kind, SX_EXPR_ATOM);
+        ASSERT_EQ(arg0->data.atom.kind, SX_ATOM_NAME);
+        ASSERT_STR_EQ(arg0->data.atom.text, "name");
     }
 
     ASSERT_EQ(stmt0->kind, SX_STMT_LET);
@@ -109,8 +128,61 @@ TEST(parse_function_blocks_and_control_flow) {
     ASSERT_EQ(stmt1->data.let_stmt.value.data.call_expr.target_kind, SX_CALL_TARGET_FUNCTION);
     ASSERT_STR_EQ(stmt1->data.let_stmt.value.data.call_expr.target_name, "choose");
     ASSERT_EQ(stmt1->data.let_stmt.value.data.call_expr.arg_count, 1);
-    ASSERT_EQ(stmt1->data.let_stmt.value.data.call_expr.args[0].kind, SX_ATOM_NAME);
-    ASSERT_STR_EQ(stmt1->data.let_stmt.value.data.call_expr.args[0].text, "flag");
+    arg0 = call_arg_expr_at(&program, &stmt1->data.let_stmt.value.data.call_expr, 0);
+    ASSERT_EQ(arg0 != NULL, 1);
+    ASSERT_EQ(arg0->kind, SX_EXPR_ATOM);
+    ASSERT_EQ(arg0->data.atom.kind, SX_ATOM_NAME);
+    ASSERT_STR_EQ(arg0->data.atom.text, "flag");
+}
+
+TEST(parse_nested_call_arguments) {
+    const char *text =
+        "let name = text.trim(text.concat(\"  sx\", \"  \"));\n"
+        "io.println(text.trim(name));\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    const struct sx_stmt *stmt0;
+    const struct sx_stmt *stmt1;
+    const struct sx_expr *trim_arg;
+    const struct sx_expr *concat_arg0;
+    const struct sx_expr *concat_arg1;
+    const struct sx_expr *print_arg;
+
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+
+    stmt0 = block_stmt_at(&program, program.top_level_block_index, 0);
+    stmt1 = block_stmt_at(&program, program.top_level_block_index, 1);
+    ASSERT_EQ(stmt0 != NULL, 1);
+    ASSERT_EQ(stmt1 != NULL, 1);
+
+    ASSERT_EQ(stmt0->kind, SX_STMT_LET);
+    ASSERT_EQ(stmt0->data.let_stmt.value.kind, SX_EXPR_CALL);
+    ASSERT_STR_EQ(stmt0->data.let_stmt.value.data.call_expr.target_name, "text");
+    ASSERT_STR_EQ(stmt0->data.let_stmt.value.data.call_expr.member_name, "trim");
+
+    trim_arg = call_arg_expr_at(&program, &stmt0->data.let_stmt.value.data.call_expr, 0);
+    ASSERT_EQ(trim_arg != NULL, 1);
+    ASSERT_EQ(trim_arg->kind, SX_EXPR_CALL);
+    ASSERT_STR_EQ(trim_arg->data.call_expr.target_name, "text");
+    ASSERT_STR_EQ(trim_arg->data.call_expr.member_name, "concat");
+
+    concat_arg0 = call_arg_expr_at(&program, &trim_arg->data.call_expr, 0);
+    concat_arg1 = call_arg_expr_at(&program, &trim_arg->data.call_expr, 1);
+    ASSERT_EQ(concat_arg0 != NULL, 1);
+    ASSERT_EQ(concat_arg1 != NULL, 1);
+    ASSERT_EQ(concat_arg0->kind, SX_EXPR_ATOM);
+    ASSERT_EQ(concat_arg0->data.atom.kind, SX_ATOM_STRING);
+    ASSERT_STR_EQ(concat_arg0->data.atom.text, "  sx");
+    ASSERT_EQ(concat_arg1->kind, SX_EXPR_ATOM);
+    ASSERT_EQ(concat_arg1->data.atom.kind, SX_ATOM_STRING);
+    ASSERT_STR_EQ(concat_arg1->data.atom.text, "  ");
+
+    ASSERT_EQ(stmt1->kind, SX_STMT_CALL);
+    print_arg = call_arg_expr_at(&program, &stmt1->data.call_stmt.call_expr, 0);
+    ASSERT_EQ(print_arg != NULL, 1);
+    ASSERT_EQ(print_arg->kind, SX_EXPR_CALL);
+    ASSERT_STR_EQ(print_arg->data.call_expr.target_name, "text");
+    ASSERT_STR_EQ(print_arg->data.call_expr.member_name, "trim");
 }
 
 TEST(parse_requires_semicolon) {
@@ -127,6 +199,7 @@ int main(void)
     printf("=== sx parser tests ===\n");
 
     RUN_TEST(parse_function_blocks_and_control_flow);
+    RUN_TEST(parse_nested_call_arguments);
     RUN_TEST(parse_requires_semicolon);
 
     TEST_REPORT();

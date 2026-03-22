@@ -113,6 +113,22 @@ static int sx_alloc_block(struct sx_program *program,
   return 0;
 }
 
+static int sx_alloc_expr(struct sx_program *program,
+                         struct sx_expr **expr,
+                         struct sx_diagnostic *diag,
+                         const struct sx_token *token)
+{
+  if (program->expr_count >= SX_MAX_EXPRS) {
+    sx_set_diagnostic(diag, token->span.offset, token->span.length,
+                      token->span.line, token->span.column,
+                      "expression buffer is full");
+    return -1;
+  }
+  *expr = &program->exprs[program->expr_count++];
+  memset(*expr, 0, sizeof(**expr));
+  return 0;
+}
+
 static int sx_parse_atom(struct sx_parser_state *state,
                          struct sx_atom *atom,
                          struct sx_diagnostic *diag)
@@ -162,7 +178,13 @@ static int sx_parse_atom(struct sx_parser_state *state,
   return -1;
 }
 
+static int sx_parse_expr(struct sx_parser_state *state,
+                         struct sx_program *program,
+                         struct sx_expr *expr,
+                         struct sx_diagnostic *diag);
+
 static int sx_parse_call_args(struct sx_parser_state *state,
+                              struct sx_program *program,
                               struct sx_call_expr *call_expr,
                               struct sx_diagnostic *diag)
 {
@@ -179,10 +201,17 @@ static int sx_parse_call_args(struct sx_parser_state *state,
                         "too many call arguments");
       return -1;
     }
-    if (sx_parse_atom(state,
-                      &call_expr->args[call_expr->arg_count],
-                      diag) < 0)
-      return -1;
+    {
+      struct sx_expr *arg_expr;
+      int arg_expr_index;
+
+      if (sx_alloc_expr(program, &arg_expr, diag, sx_current_token(state)) < 0)
+        return -1;
+      arg_expr_index = program->expr_count - 1;
+      if (sx_parse_expr(state, program, arg_expr, diag) < 0)
+        return -1;
+      call_expr->args[call_expr->arg_count] = arg_expr_index;
+    }
     call_expr->arg_count++;
     if (sx_current_token(state)->kind != SX_TOKEN_COMMA)
       break;
@@ -192,6 +221,7 @@ static int sx_parse_call_args(struct sx_parser_state *state,
 }
 
 static int sx_parse_expr(struct sx_parser_state *state,
+                         struct sx_program *program,
                          struct sx_expr *expr,
                          struct sx_diagnostic *diag)
 {
@@ -220,7 +250,7 @@ static int sx_parse_expr(struct sx_parser_state *state,
     if (sx_expect_token(state, SX_TOKEN_LPAREN, diag,
                         "expected '(' after call target") < 0)
       return -1;
-    if (sx_parse_call_args(state, &expr->data.call_expr, diag) < 0)
+    if (sx_parse_call_args(state, program, &expr->data.call_expr, diag) < 0)
       return -1;
     if (sx_expect_token(state, SX_TOKEN_RPAREN, diag,
                         "expected ')' after call argument list") < 0)
@@ -237,7 +267,7 @@ static int sx_parse_expr(struct sx_parser_state *state,
     expr->data.call_expr.member_name[0] = '\0';
     sx_advance_token(state);
     sx_advance_token(state);
-    if (sx_parse_call_args(state, &expr->data.call_expr, diag) < 0)
+    if (sx_parse_call_args(state, program, &expr->data.call_expr, diag) < 0)
       return -1;
     if (sx_expect_token(state, SX_TOKEN_RPAREN, diag,
                         "expected ')' after call argument list") < 0)
@@ -252,6 +282,7 @@ static int sx_parse_expr(struct sx_parser_state *state,
 }
 
 static int sx_parse_let_stmt(struct sx_parser_state *state,
+                             struct sx_program *program,
                              struct sx_stmt *stmt,
                              struct sx_diagnostic *diag)
 {
@@ -270,7 +301,7 @@ static int sx_parse_let_stmt(struct sx_parser_state *state,
   sx_copy_text(stmt->data.let_stmt.name,
                sizeof(stmt->data.let_stmt.name),
                name_token->text);
-  if (sx_parse_expr(state, &stmt->data.let_stmt.value, diag) < 0)
+  if (sx_parse_expr(state, program, &stmt->data.let_stmt.value, diag) < 0)
     return -1;
   if (sx_expect_token(state, SX_TOKEN_SEMICOLON, diag,
                       "expected ';' after let statement") < 0)
@@ -279,12 +310,13 @@ static int sx_parse_let_stmt(struct sx_parser_state *state,
 }
 
 static int sx_parse_call_stmt(struct sx_parser_state *state,
+                              struct sx_program *program,
                               struct sx_stmt *stmt,
                               struct sx_diagnostic *diag)
 {
   struct sx_expr expr;
 
-  if (sx_parse_expr(state, &expr, diag) < 0)
+  if (sx_parse_expr(state, program, &expr, diag) < 0)
     return -1;
   if (expr.kind != SX_EXPR_CALL) {
     sx_set_diagnostic(diag, expr.span.offset, expr.span.length,
@@ -377,7 +409,7 @@ static int sx_parse_if_stmt(struct sx_parser_state *state,
   if (sx_expect_token(state, SX_TOKEN_LPAREN, diag,
                       "expected '(' after if") < 0)
     return -1;
-  if (sx_parse_expr(state, &stmt->data.if_stmt.condition, diag) < 0)
+  if (sx_parse_expr(state, program, &stmt->data.if_stmt.condition, diag) < 0)
     return -1;
   if (sx_expect_token(state, SX_TOKEN_RPAREN, diag,
                       "expected ')' after if condition") < 0)
@@ -406,7 +438,7 @@ static int sx_parse_while_stmt(struct sx_parser_state *state,
   if (sx_expect_token(state, SX_TOKEN_LPAREN, diag,
                       "expected '(' after while") < 0)
     return -1;
-  if (sx_parse_expr(state, &stmt->data.while_stmt.condition, diag) < 0)
+  if (sx_parse_expr(state, program, &stmt->data.while_stmt.condition, diag) < 0)
     return -1;
   if (sx_expect_token(state, SX_TOKEN_RPAREN, diag,
                       "expected ')' after while condition") < 0)
@@ -416,6 +448,7 @@ static int sx_parse_while_stmt(struct sx_parser_state *state,
 }
 
 static int sx_parse_return_stmt(struct sx_parser_state *state,
+                                struct sx_program *program,
                                 struct sx_stmt *stmt,
                                 struct sx_diagnostic *diag)
 {
@@ -425,7 +458,7 @@ static int sx_parse_return_stmt(struct sx_parser_state *state,
   stmt->span = start->span;
   stmt->data.return_stmt.has_value = 0;
   if (sx_current_token(state)->kind != SX_TOKEN_SEMICOLON) {
-    if (sx_parse_expr(state, &stmt->data.return_stmt.value, diag) < 0)
+    if (sx_parse_expr(state, program, &stmt->data.return_stmt.value, diag) < 0)
       return -1;
     stmt->data.return_stmt.has_value = 1;
   }
@@ -443,16 +476,16 @@ static int sx_parse_statement(struct sx_parser_state *state,
   const struct sx_token *token = sx_current_token(state);
 
   if (token->kind == SX_TOKEN_KEYWORD_LET)
-    return sx_parse_let_stmt(state, stmt, diag);
+    return sx_parse_let_stmt(state, program, stmt, diag);
   if (token->kind == SX_TOKEN_KEYWORD_IF)
     return sx_parse_if_stmt(state, program, stmt, diag);
   if (token->kind == SX_TOKEN_KEYWORD_WHILE)
     return sx_parse_while_stmt(state, program, stmt, diag);
   if (token->kind == SX_TOKEN_KEYWORD_RETURN)
-    return sx_parse_return_stmt(state, stmt, diag);
+    return sx_parse_return_stmt(state, program, stmt, diag);
   if (token->kind == SX_TOKEN_LBRACE)
     return sx_parse_block_stmt(state, program, stmt, diag);
-  return sx_parse_call_stmt(state, stmt, diag);
+  return sx_parse_call_stmt(state, program, stmt, diag);
 }
 
 static int sx_parse_function(struct sx_parser_state *state,

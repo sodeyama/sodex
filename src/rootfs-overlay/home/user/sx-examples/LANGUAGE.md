@@ -17,6 +17,7 @@ sxi
 - `-e`: その場の短い code を実行します
 - 引数は script 側で `proc.argv_count()` と `proc.argv(i)` から読めます
 - REPL では `:load path`、`:reset`、`:quit` が使えます
+- `sxi --version` は `sx` language version と frontend/runtime ABI version を表示します
 
 ## source rule
 
@@ -213,8 +214,23 @@ proc.spawn("/usr/bin/cat", "/tmp/a.txt");
 
 - block ごとに scope を持ちます
 - 内側の `let` は outer binding を shadow できます
-- imported file の top-level function / statement は source tree に取り込まれてから評価されます
+- v0 には `export` / `private` がなく、import 済み file の top-level function はすべて見えます
+- imported file の top-level function / statement は source tree に取り込まれてから 1 回だけ評価されます
+- duplicate function 名や同一 scope の duplicate `let` は診断で止まります
+- plain import path は current file の directory を先に探し、見つからなければ `/usr/lib/sx` を探します
 - stdlib import は `import "std/strings";` のように書けます
+
+## builtin の注意
+
+- `io.read_line()` は改行を除いた 1 行を返します
+- v0 では EOF と空行の両方で `""` を返すため、空行を含む stream を厳密に扱う helper はまだありません
+
+## version
+
+- 現在の language version は `0.1.0` です
+- source file に version pragma はまだありません
+- breaking な grammar / semantic 変更は language version を上げ、sample / fixture / smoke を更新します
+- `sxi --version` は `sx` version と frontend/runtime ABI version を表示します
 
 ## まだ無いもの
 
@@ -231,7 +247,8 @@ proc.spawn("/usr/bin/cat", "/tmp/a.txt");
 3. `/home/user/sx-examples/operators.sx`
 4. `/home/user/sx-examples/argv_fs_time.sx`
 5. `/home/user/sx-examples/env_bytes_result.sx`
-6. `/home/user/sx-examples/list_map.sx`
-7. `/home/user/sx-examples/literal_branching.sx`
-8. `/home/user/sx-examples/net_client.sx`
-9. `/home/user/sx-examples/net_server.sx`
+6. `/home/user/sx-examples/grep_lite.sx`
+7. `/home/user/sx-examples/list_map.sx`
+8. `/home/user/sx-examples/literal_branching.sx`
+9. `/home/user/sx-examples/net_client.sx`
+10. `/home/user/sx-examples/net_server.sx`

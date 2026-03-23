@@ -16,6 +16,7 @@ Agent Integration Scenarios (Plan 18):
   - "test_one_tool": one read_file tool call, then text completion
   - "test_two_tools": list_dir -> read_file -> text completion
   - "test_max_steps": always returns tool_use (get_system_info)
+  - "test_sxi_workflow": write_file -> sxi --check -> write_file -> sxi
   - "test_sorted_prefix_rename": list_dir -> batched rename_path -> verify
 
 Usage:
@@ -284,7 +285,7 @@ def _find_scenario_keyword(messages):
     """
     keywords = ("test_immediate", "test_one_tool", "test_two_tools",
                 "test_max_steps", "test_perm_blocked", "test_fetch_url_weather",
-                "test_write_readback",
+                "test_write_readback", "test_sxi_workflow",
                 "test_sorted_prefix_rename",
                 "test_current_weather_requires_tool",
                 "test_current_weather_retry_after_text_only",
@@ -451,6 +452,57 @@ def _agent_scenario_events(scenario, tool_results_count, messages):
         return text_response_stream(
             text="write/readback result missing expected content",
             msg_id="msg_integ_write_readback_missing")
+
+    if scenario == "test_sxi_workflow":
+        if tool_results_count == 0:
+            return tool_use_response_stream(
+                tool_name="write_file",
+                tool_id="toolu_integ_sxi_1",
+                tool_input_json=(
+                    '{"path":"agent_sxi_workflow.sx",'
+                    '"content":"let broken = ;\\n",'
+                    '"mode":"overwrite"}'
+                ),
+                text_before="Writing initial sx script.",
+                msg_id="msg_integ_sxi_a")
+        if tool_results_count == 1:
+            return tool_use_response_stream(
+                tool_name="run_command",
+                tool_id="toolu_integ_sxi_2",
+                tool_input_json='{"command":"sxi --check agent_sxi_workflow.sx"}',
+                text_before="Checking initial script.",
+                msg_id="msg_integ_sxi_b")
+        if tool_results_count == 2:
+            return tool_use_response_stream(
+                tool_name="write_file",
+                tool_id="toolu_integ_sxi_3",
+                tool_input_json=(
+                    '{"path":"agent_sxi_workflow.sx",'
+                    '"content":"let items = [\\"agent\\", \\"sx\\"];\\n'
+                    'if (list.len(items) == 2) {\\n'
+                    '  io.println(\\"SXI_AGENT_OK\\");\\n'
+                    '} else {\\n'
+                    '  io.println(\\"SXI_AGENT_BAD\\");\\n'
+                    '}\\n",'
+                    '"mode":"overwrite"}'
+                ),
+                text_before="Fixing sx script.",
+                msg_id="msg_integ_sxi_c")
+        if tool_results_count == 3:
+            return tool_use_response_stream(
+                tool_name="run_command",
+                tool_id="toolu_integ_sxi_4",
+                tool_input_json='{"command":"sxi agent_sxi_workflow.sx"}',
+                text_before="Running fixed sx script.",
+                msg_id="msg_integ_sxi_d")
+        if (_messages_contain_text(messages, "SXI_AGENT_OK") and
+                _messages_contain_text(messages, '"exit_code":0')):
+            return text_response_stream(
+                text="sxi workflow succeeded.",
+                msg_id="msg_integ_sxi_done")
+        return text_response_stream(
+            text="sxi workflow missing success marker",
+            msg_id="msg_integ_sxi_missing")
 
     if scenario == "test_sorted_prefix_rename":
         if tool_results_count == 0:

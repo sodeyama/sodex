@@ -18,6 +18,7 @@
 - 2026-03-22: `argv`、fd I/O、path、time、`spawn` / `wait` / `pipe` / `fork` を language surface / host test / QEMU smoke / guest sample まで通した
 - 2026-03-23: `proc.has_env`、`bytes`、`list`、`map`、`result`、`try_*` を sample / fixture / QEMU smoke まで広げ、guest 同梱 corpus を拡充した
 - 2026-03-23: 次段として `list` / `map` literal、`else if`、`net` namespace を `Plan 07` で整理した
+- 2026-03-23: stdin 対応 fixture runner と grep-lite corpus を追加し、module / visibility / versioning / literal / network の仕様と task 状態を更新した
 
 ## 優先順
 
@@ -32,7 +33,7 @@
 |---|---|---|---|---|
 | [x] | SX-01 | `.sx` file、encoding、comment、line ending、entrypoint の source 契約を固定する | なし | script と module の source 単位が仕様で説明できる |
 | [x] | SX-02 | keyword / identifier / literal / operator の lexical rule を定義する | SX-01 | tokenizer が ambiguity なしに切れる |
-| [~] | SX-03 | representative corpus と negative corpus を用意し、仕様例と parser fixture を共有する | SX-01, SX-02 | host / QEMU smoke に hello, file copy, control flow, import, invalid source を追加済み。fixture runner の整理は残る |
+| [x] | SX-03 | representative corpus と negative corpus を用意し、仕様例と parser fixture を共有する | SX-01, SX-02 | host fixture runner と guest/QEMU corpus が hello, file copy, grep-lite, import, invalid source を共有できる |
 
 ## M1: grammar / AST
 
@@ -48,15 +49,15 @@
 |---|---|---|---|---|
 | [x] | SX-07 | primitive type、mutability、scope、name resolution の規則を定義する | SX-05 | `sxi` と `sxc` で同じ束縛規則を使える |
 | [x] | SX-08 | builtin namespace と fail-fast / predicate ベースの初期エラー方針を固定する | SX-07 | stdlib surface の入口が language spec 側で説明できる |
-| [~] | SX-09 | import / module / visibility / cycle policy を v0 で固定する | SX-04, SX-07, SX-08 | relative `import` と cycle 拒否は実装済み。visibility / export の明文化は残る |
+| [x] | SX-09 | import / module / visibility / cycle policy を v0 で固定する | SX-04, SX-07, SX-08 | import path 解決、stdlib 配置、visible top-level rule、cycle / duplicate 診断を仕様で説明できる |
 
 ## M3: diagnostics / fixtures / compatibility
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
 | [x] | SX-10 | human-readable diagnostic と future JSON diagnostic の共通 source span 契約を定義する | SX-05, SX-06 | `path:line:column` と machine-readable span がそろう |
-| [~] | SX-11 | host fixture runner と examples を整理し、hello / file copy / grep-lite / JSON parse を language corpus に追加する | SX-03, SX-08, SX-09 | host / QEMU で hello, file copy, JSON, import は共有済み。fixture runner と grep-lite 例は残る |
-| [ ] | SX-12 | `sxi` / `sxc` 共通の versioning と compatibility policy を定義する | SX-07, SX-08, SX-09, SX-10 | language version と runtime / compiler version の関係を説明できる |
+| [x] | SX-11 | host fixture runner と examples を整理し、hello / file copy / grep-lite / JSON parse を language corpus に追加する | SX-03, SX-08, SX-09 | host fixture、guest sample、QEMU smoke が representative corpus を共有している |
+| [x] | SX-12 | `sxi` / `sxc` 共通の versioning と compatibility policy を定義する | SX-07, SX-08, SX-09, SX-10 | language version、frontend/runtime ABI、tool version の関係を仕様で説明できる |
 
 ## M4: expression / control flow expansion
 
@@ -78,9 +79,9 @@
 
 | 状態 | ID | タスク | 主な依存 | 完了条件 |
 |---|---|---|---|---|
-| [ ] | SX-19 | `list` / `map` literal と `else if` sugar の grammar / AST / semantic contract を固定する | SX-04, SX-05, SX-07, SX-13 | `[]` / `{}` / `else if` が host / QEMU で一貫して parse / eval できる |
-| [ ] | SX-20 | `net` namespace の client / server surface と check mode 契約を固定する | SX-08, SX-10, SX-16, SX-17 | `connect` / `listen` / `accept` / `read` / `write` / `poll_read` / `close` が言語 surface として説明できる |
-| [ ] | SX-21 | literal / network 系 example / fixture / smoke を追加し、guest sample を拡充する | SX-11, SX-18, SX-19, SX-20 | collection literal、`else if`、guest client / server の sample と回帰がそろう |
+| [x] | SX-19 | `list` / `map` literal と `else if` sugar の grammar / AST / semantic contract を固定する | SX-04, SX-05, SX-07, SX-13 | `[]` / `{}` / `else if` が host / QEMU で一貫して parse / eval できる |
+| [x] | SX-20 | `net` namespace の client / server surface と check mode 契約を固定する | SX-08, SX-10, SX-16, SX-17 | `connect` / `listen` / `accept` / `read` / `write` / `poll_read` / `close` が言語 surface として説明できる |
+| [x] | SX-21 | literal / network 系 example / fixture / smoke を追加し、guest sample を拡充する | SX-11, SX-18, SX-19, SX-20 | collection literal、`else if`、guest client / server の sample と回帰がそろう |
 
 ## 先送りする項目
 

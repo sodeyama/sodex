@@ -136,16 +136,42 @@ AST / symbol / diagnostics
 - process / fd API は shell 文字列ではなく argv / fd / pid を中心に広げる
 - network API は `io` に混ぜず、socket を明示する `net` namespace に分ける
 
+## v0 module / visibility policy
+
+- module 境界は file 単位とし、`import "path";` は loader directive として扱う
+- import path は absolute path、relative path、plain path を受け付ける
+- plain path は current file の directory を先に探し、見つからなければ `/usr/lib/sx` を探す
+- stdlib module は `/usr/lib/sx/<path>.sx` に置き、`import "std/strings";` のように参照する
+- v0 には `export` / `private` を入れず、import 済み file の top-level function はすべて visible とする
+- imported file の top-level statement は merged source tree の順で 1 回だけ評価する
+- import cycle は reject し、duplicate function 名や同一 scope の duplicate `let` も診断で止める
+
+## corpus / regression set
+
+- host fixture runner は `tests/test_sx_fixtures.c` を基準にし、stdin 付き sample まで同じ経路で回す
+- valid runtime corpus は recursive sum、relative import、stdlib import、spawn / wait、bytes / result、list / map、literal / branching、grep-lite を含む
+- negative corpus は undefined name と import cycle を持ち、`--check` 診断の基準にする
+- guest 同梱 corpus は `/home/user/sx-examples/` に置き、README と LANGUAGE.md と QEMU smoke で共有する
+
+## versioning / compatibility
+
+- source language version は `SX_LANGUAGE_VERSION` で管理し、現行は `0.1.0` とする
+- lexer / parser / AST 契約は `SX_FRONTEND_ABI_VERSION`、runtime bridge 契約は `SX_RUNTIME_ABI_VERSION` で追跡する
+- `sxi --version` は language version と frontend/runtime ABI version を表示する
+- v0 source file に version pragma は持たず、repo 単位で 1 つの language version を運用する
+- breaking な grammar / semantic 変更は language version を上げ、sample / fixture / smoke / spec を同時更新する
+- `sxc` / `sxb` は source language version を中心に互換性を宣言し、個別の tool version だけでは互換を表さない
+
 ## 未解決論点
 
-- script file と importable module の exact な差分
-- top-level statement をどこまで許すか
+- v1 以降で `export` / `private` を syntax として持つか
+- top-level statement を v1 でどこまで絞るか
 - `list` / `map` の element typing を v0 で持つか
 - recoverable error を generic な `Result` 型で持つか、fail-fast + predicate に寄せるか
 - 将来 `sxc` が要求する ABI 情報を AST / semantic layer にどこまで持たせるか
 - `fork` を fail-fast language surface として expose するか、より高水準の `spawn` を主 API に置くか
 - `map` literal の key を v0 で string 限定にするか、identifier shorthand まで許すか
-- `net` namespace を raw fd で expose するか、socket handle として隠蔽するか
+- source file 自身に version pragma を持たせるか
 
 ## 関連 spec
 

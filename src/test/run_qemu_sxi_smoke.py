@@ -31,6 +31,7 @@ READY_MARKERS = (
     "AUDIT sxi_import_check_status=0",
     "AUDIT sxi_stdlib_check_status=0",
     "AUDIT sxi_stdin_check_status=0",
+    "AUDIT sxi_grep_check_status=0",
     "AUDIT sxi_interop_check_status=0",
     "AUDIT sxi_spawn_check_status=0",
     "AUDIT sxi_pipe_check_status=0",
@@ -54,6 +55,7 @@ READY_MARKERS = (
     "AUDIT sxi_copy_run_status=0",
     "AUDIT sxi_proc_run_status=0",
     "AUDIT sxi_stdin_run_status=0",
+    "AUDIT sxi_grep_run_status=0",
     "AUDIT sxi_interop_run_status=0",
     "AUDIT sxi_spawn_run_status=0",
     "AUDIT sxi_pipe_run_status=0",
@@ -219,6 +221,7 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
         "/home/user/sxi_copy_out.txt": "true\nsample-from-rootfs\n\nCOPIED_BY_SX\n",
         "/home/user/sxi_proc_out.txt": "sample-from-rootfs\ntrue\n",
         "/home/user/sxi_stdin_out.txt": "stdin-head|stdin-tail\n",
+        "/home/user/sxi_grep_out.txt": "alpha-one\nalpha-three\n",
         "/home/user/sxi_interop_out.txt":
             "3\n/home/user/sx-examples/argv_fs_time.sx\nbeta\ntrue\ntrue\ntrue\nalpha\ntrue\n",
         "/home/user/sxi_spawn_out.txt": "5\nfalse\nsample-from-rootfs\n",
@@ -326,6 +329,8 @@ echo AUDIT sxi_import_check_status=$?
 echo AUDIT sxi_stdlib_check_status=$?
 /usr/bin/sxi --check /home/user/sx-examples/stdin_echo.sx
 echo AUDIT sxi_stdin_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/grep_lite.sx alpha
+echo AUDIT sxi_grep_check_status=$?
 /usr/bin/sxi --check /home/user/sx-examples/argv_fs_time.sx alpha beta
 echo AUDIT sxi_interop_check_status=$?
 /usr/bin/sxi --check /home/user/sx-examples/spawn_wait.sx
@@ -375,6 +380,8 @@ echo AUDIT sxi_copy_run_status=$?
 echo AUDIT sxi_proc_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/stdin_echo.sx < /home/user/sx-examples/stdin_source.txt > /home/user/sxi_stdin_out.txt
 echo AUDIT sxi_stdin_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/grep_lite.sx alpha < /home/user/sx-examples/grep_source.txt > /home/user/sxi_grep_out.txt
+echo AUDIT sxi_grep_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/argv_fs_time.sx alpha beta > /home/user/sxi_interop_out.txt
 echo AUDIT sxi_interop_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/spawn_wait.sx > /home/user/sxi_spawn_out.txt

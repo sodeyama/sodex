@@ -56,6 +56,8 @@ static int build_sxi_smoke_script(char *buf, size_t cap)
         "echo AUDIT sxi_proc_run_status=$?\n",
         "/usr/bin/sxi /home/user/sx-examples/stdin_echo.sx < /home/user/sx-examples/stdin_source.txt > /home/user/sxi_stdin_out.txt\n",
         "echo AUDIT sxi_stdin_run_status=$?\n",
+        "/usr/bin/sxi /home/user/sx-examples/grep_lite.sx alpha < /home/user/sx-examples/grep_source.txt > /home/user/sxi_grep_out.txt\n",
+        "echo AUDIT sxi_grep_run_status=$?\n",
         "/usr/bin/sxi /home/user/sx-examples/argv_fs_time.sx alpha beta > /home/user/sxi_interop_out.txt\n",
         "echo AUDIT sxi_interop_run_status=$?\n",
         "/usr/bin/sxi /home/user/sx-examples/spawn_wait.sx > /home/user/sxi_spawn_out.txt\n",

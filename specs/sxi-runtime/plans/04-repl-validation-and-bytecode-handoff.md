@@ -110,7 +110,7 @@ v0 では bytecode をまだ作らないが、
   - `sxi --check`
   - representative sample
 - agent smoke
-  - write / check / run / fix loop
+  - `write_file` -> `sxi --check` -> `sxi run` -> fix loop
 
 ## 完了条件
 

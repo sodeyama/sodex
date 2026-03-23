@@ -1,0 +1,11 @@
+let needle = proc.argv(1);
+
+while (true) {
+  let line = io.read_line();
+  if (line == "") {
+    break;
+  }
+  if (text.contains(line, needle)) {
+    io.println(line);
+  }
+}

@@ -605,7 +605,53 @@ static void test_scenario_fetch_url_weather(void)
     }
 }
 
-/* ----- Scenario 12: sorted rename completes with narrow tools ----- */
+static void test_scenario_sxi_workflow(void)
+{
+    static char buf[256];
+    int ret;
+
+    mkdir("/tmp", 0755);
+    mkdir("/tmp/agent_sxi_case", 0755);
+    if (chdir("/tmp/agent_sxi_case") < 0) {
+        TEST_FAIL("scenario_12_sxi_workflow", "chdir failed");
+        return;
+    }
+
+    agent_config_init(&s_config);
+    s_config.max_steps = 8;
+    s_config.api_key = "test-key-mock";
+    s_config.provider = &mock_prov;
+
+    debug_printf("[AGENT-INTEG] scenario 12: sxi workflow\n");
+    printf("[AGENT-INTEG] scenario 12: sxi workflow\n");
+
+    ret = agent_run(&s_config, "test_sxi_workflow", &s_result);
+
+    if (ret == 0 && s_result.stop_reason == AGENT_STOP_END_TURN) {
+        if (s_result.steps_executed == 5 &&
+            s_result.total_tool_calls == 4 &&
+            strstr(s_result.final_text, "sxi workflow succeeded.") != 0 &&
+            path_exists("agent_sxi_workflow.sx") &&
+            read_text_file("agent_sxi_workflow.sx", buf, sizeof(buf)) > 0 &&
+            strstr(buf, "SXI_AGENT_OK") != 0) {
+            TEST_PASS("scenario_12_sxi_workflow");
+        } else {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "steps=%d tools=%d text=%s",
+                     s_result.steps_executed, s_result.total_tool_calls,
+                     s_result.final_text);
+            TEST_FAIL("scenario_12_sxi_workflow", msg);
+        }
+    } else {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "ret=%d, stop=%d", ret, s_result.stop_reason);
+        TEST_FAIL("scenario_12_sxi_workflow", msg);
+    }
+
+    restore_default_home();
+}
+
+/* ----- Scenario 13: sorted rename completes with narrow tools ----- */
 static void test_scenario_sorted_prefix_rename(void)
 {
     static char buf[64];
@@ -631,8 +677,8 @@ static void test_scenario_sorted_prefix_rename(void)
     s_config.api_key = "test-key-mock";
     s_config.provider = &mock_prov;
 
-    debug_printf("[AGENT-INTEG] scenario 12: sorted prefix rename\n");
-    printf("[AGENT-INTEG] scenario 12: sorted prefix rename\n");
+    debug_printf("[AGENT-INTEG] scenario 13: sorted prefix rename\n");
+    printf("[AGENT-INTEG] scenario 13: sorted prefix rename\n");
 
     ret = agent_run(&s_config, "test_sorted_prefix_rename", &s_result);
 
@@ -650,24 +696,24 @@ static void test_scenario_sorted_prefix_rename(void)
             !path_exists("file_c.txt") &&
             read_text_file("02_file_a.txt", buf, sizeof(buf)) > 0 &&
             strcmp(buf, "aaa\n") == 0) {
-            TEST_PASS("scenario_12_sorted_prefix_rename");
+            TEST_PASS("scenario_13_sorted_prefix_rename");
         } else {
             char msg[256];
             snprintf(msg, sizeof(msg), "steps=%d tools=%d text=%s",
                      s_result.steps_executed, s_result.total_tool_calls,
                      s_result.final_text);
-            TEST_FAIL("scenario_12_sorted_prefix_rename", msg);
+            TEST_FAIL("scenario_13_sorted_prefix_rename", msg);
         }
     } else {
         char msg[128];
         snprintf(msg, sizeof(msg), "ret=%d, stop=%d", ret, s_result.stop_reason);
-        TEST_FAIL("scenario_12_sorted_prefix_rename", msg);
+        TEST_FAIL("scenario_13_sorted_prefix_rename", msg);
     }
 
     restore_default_home();
 }
 
-/* ----- Scenario 13: current-info prompt is forced through tools ----- */
+/* ----- Scenario 14: current-info prompt is forced through tools ----- */
 static void test_scenario_current_weather_requires_tool(void)
 {
     int ret;
@@ -677,8 +723,8 @@ static void test_scenario_current_weather_requires_tool(void)
     s_config.api_key = "test-key-mock";
     s_config.provider = &mock_prov;
 
-    debug_printf("[AGENT-INTEG] scenario 12: current weather requires tool\n");
-    printf("[AGENT-INTEG] scenario 12: current weather requires tool\n");
+    debug_printf("[AGENT-INTEG] scenario 14: current weather requires tool\n");
+    printf("[AGENT-INTEG] scenario 14: current weather requires tool\n");
 
     ret = agent_run(&s_config,
                     "今日の天気を教えて test_current_weather_requires_tool",
@@ -688,22 +734,22 @@ static void test_scenario_current_weather_requires_tool(void)
         if (s_result.steps_executed == 2 &&
             s_result.total_tool_calls == 1 &&
             strstr(s_result.final_text, "http://127.0.0.1:18081/weather/tokyo") != 0) {
-            TEST_PASS("scenario_12_current_weather_requires_tool");
+            TEST_PASS("scenario_14_current_weather_requires_tool");
         } else {
             char msg[192];
             snprintf(msg, sizeof(msg), "steps=%d tools=%d text=%s",
                      s_result.steps_executed, s_result.total_tool_calls,
                      s_result.final_text);
-            TEST_FAIL("scenario_12_current_weather_requires_tool", msg);
+            TEST_FAIL("scenario_14_current_weather_requires_tool", msg);
         }
     } else {
         char msg[128];
         snprintf(msg, sizeof(msg), "ret=%d, stop=%d", ret, s_result.stop_reason);
-        TEST_FAIL("scenario_12_current_weather_requires_tool", msg);
+        TEST_FAIL("scenario_14_current_weather_requires_tool", msg);
     }
 }
 
-/* ----- Scenario 14: text-only planning must retry through tools ----- */
+/* ----- Scenario 15: text-only planning must retry through tools ----- */
 static void test_scenario_current_weather_retry_after_text_only(void)
 {
     int ret;
@@ -713,8 +759,8 @@ static void test_scenario_current_weather_retry_after_text_only(void)
     s_config.api_key = "test-key-mock";
     s_config.provider = &mock_prov;
 
-    debug_printf("[AGENT-INTEG] scenario 13: retry after text-only plan\n");
-    printf("[AGENT-INTEG] scenario 13: retry after text-only plan\n");
+    debug_printf("[AGENT-INTEG] scenario 15: retry after text-only plan\n");
+    printf("[AGENT-INTEG] scenario 15: retry after text-only plan\n");
 
     ret = agent_run(&s_config,
                     "東京の天気しらべて test_current_weather_retry_after_text_only",
@@ -724,27 +770,24 @@ static void test_scenario_current_weather_retry_after_text_only(void)
         if (s_result.steps_executed == 3 &&
             s_result.total_tool_calls == 1 &&
             strstr(s_result.final_text, "http://127.0.0.1:18081/weather/tokyo") != 0) {
-            TEST_PASS("scenario_13_current_weather_retry_after_text_only");
+            TEST_PASS("scenario_15_current_weather_retry_after_text_only");
         } else {
             char msg[192];
             snprintf(msg, sizeof(msg), "steps=%d tools=%d text=%s",
                      s_result.steps_executed, s_result.total_tool_calls,
                      s_result.final_text);
-            TEST_FAIL("scenario_13_current_weather_retry_after_text_only", msg);
+            TEST_FAIL("scenario_15_current_weather_retry_after_text_only", msg);
         }
     } else {
         char msg[128];
         snprintf(msg, sizeof(msg), "ret=%d, stop=%d", ret, s_result.stop_reason);
-        TEST_FAIL("scenario_13_current_weather_retry_after_text_only", msg);
+        TEST_FAIL("scenario_15_current_weather_retry_after_text_only", msg);
     }
 }
 
 /* ---- Main ---- */
 int main(int argc, char *argv[])
 {
-    (void)argc;
-    (void)argv;
-
     debug_printf("[AGENT-INTEG] === Agent Integration Test Start ===\n");
     printf("[AGENT-INTEG] === Agent Integration Test Start ===\n");
 
@@ -763,6 +806,11 @@ int main(int argc, char *argv[])
     init_mock_provider();
     restore_default_home();
 
+    if (argc >= 2 && strcmp(argv[1], "sxi-workflow") == 0) {
+        test_scenario_sxi_workflow();
+        goto summary;
+    }
+
     /* Run scenarios */
     test_scenario_immediate();
     test_scenario_one_tool();
@@ -775,10 +823,12 @@ int main(int argc, char *argv[])
     test_scenario_perm_blocked();
     test_scenario_write_readback();
     test_scenario_fetch_url_weather();
+    test_scenario_sxi_workflow();
     test_scenario_sorted_prefix_rename();
     test_scenario_current_weather_requires_tool();
     test_scenario_current_weather_retry_after_text_only();
 
+summary:
     /* Summary */
     debug_printf("[AGENT-INTEG] === RESULT: %d/%d passed ===\n",
                 passed, passed + failed);

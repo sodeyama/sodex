@@ -1,7 +1,7 @@
 # sx examples
 
 `/home/user/sx-examples/` は、`sxi` を guest 内で試すためのサンプル集です。
-構文の基本だけでなく、literal、`stdin`、file I/O、`argv`、`spawn`、pipe、`fork`、network client/server までまとめて置いています。
+構文の基本だけでなく、literal、`stdin`、grep-lite、file I/O、`argv`、`spawn`、pipe、`fork`、network client/server までまとめて置いています。
 文法と構文規則は `LANGUAGE.md` を先に見てください。
 
 ## 最初の実行
@@ -121,7 +121,16 @@ sxi stdin_echo.sx < stdin_source.txt
 
 `io.read_line` と `io.read_all` を使います。
 
-### 14. `argv` / path / time
+### 14. grep-lite
+
+```sh
+sxi grep_lite.sx alpha < grep_source.txt
+```
+
+`io.read_line`、`text.contains`、`while` を組み合わせた最小の filter 例です。
+v0 では `io.read_line()` が EOF と空行の両方で `""` を返すので、この sample は空行を含まない入力を前提にしています。
+
+### 15. `argv` / path / time
 
 ```sh
 sxi argv_fs_time.sx alpha beta
@@ -129,7 +138,7 @@ sxi argv_fs_time.sx alpha beta
 
 `proc.argv_count`、`proc.argv`、`fs.mkdir`、`fs.list_dir`、`fs.chdir`、`fs.cwd`、`fs.rename`、`fs.remove`、`time.now_ticks`、`time.sleep_ticks` をまとめて確認できます。
 
-### 15. `spawn` / `wait`
+### 16. `spawn` / `wait`
 
 ```sh
 sxi spawn_wait.sx
@@ -138,7 +147,7 @@ sxi spawn_wait.sx
 `proc.spawn` と `proc.wait` で child process を待ち、exit code を読む例です。
 副作用として一時ファイルも作り、終了コードとファイル内容の両方を確認します。
 
-### 16. pipe / fd I/O
+### 17. pipe / fd I/O
 
 ```sh
 sxi pipe_roundtrip.sx
@@ -146,7 +155,7 @@ sxi pipe_roundtrip.sx
 
 `proc.pipe`、`proc.spawn_io`、`proc.pipe_read_fd`、`proc.pipe_write_fd`、`proc.pipe_close`、`io.read_fd`、`io.write_fd`、`io.close` を使います。
 
-### 17. `fork`
+### 18. `fork`
 
 ```sh
 sxi fork_wait.sx
@@ -154,7 +163,7 @@ sxi fork_wait.sx
 
 `proc.fork`、`proc.wait`、`proc.exit` を最小構成で試せます。
 
-### 18. env / bytes / result
+### 19. env / bytes / result
 
 ```sh
 sxi env_bytes_result.sx
@@ -165,7 +174,7 @@ sxi env_bytes_result.sx
 `result.err`、`result.is_ok`、`result.value`、`result.error`、
 `proc.try_capture` をまとめて確認できます。
 
-### 19. list / map
+### 20. list / map
 
 ```sh
 sxi list_map.sx
@@ -174,7 +183,7 @@ sxi list_map.sx
 `[]`、`{}`、`list.push`、`list.get`、`list.set`、`list.len`、
 `map.get`、`map.remove`、`map.len`、`map.has` を使います。
 
-### 20. literal / `else if`
+### 21. literal / `else if`
 
 ```sh
 sxi literal_branching.sx
@@ -182,7 +191,7 @@ sxi literal_branching.sx
 
 list / map literal と `else if` の最小例です。
 
-### 21. network client
+### 22. network client
 
 ```sh
 sxi net_client.sx
@@ -191,7 +200,7 @@ sxi net_client.sx
 `net.connect`、`net.write`、`net.poll_read`、`net.read`、`net.close` の例です。
 QEMU smoke では host 側 server へ接続します。
 
-### 22. network server
+### 23. network server
 
 ```sh
 sxi net_server.sx
@@ -216,6 +225,7 @@ QEMU smoke では host 側 client が接続します。
 - `copy_file.sx`
 - `proc_capture.sx`
 - `stdin_echo.sx`
+- `grep_lite.sx`
 - `argv_fs_time.sx`
 - `spawn_wait.sx`
 - `pipe_roundtrip.sx`
@@ -228,6 +238,7 @@ QEMU smoke では host 側 client が接続します。
 - `LANGUAGE.md`
 - `copy_source.txt`
 - `stdin_source.txt`
+- `grep_source.txt`
 
 ## メモ
 

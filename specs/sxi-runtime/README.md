@@ -144,15 +144,45 @@
 - process API は `execve()` の現行契約に合わせつつ、`spawn` を主 API に据え、`fork` は明示的な低水準操作として扱う
 - socket API は raw fd を返しつつ、runtime 側で追跡して cleanup を担保する
 
+## source loader / stdlib placement
+
+- relative import は current file 基準で解決する
+- plain import path は current file の directory を先に探し、見つからなければ `/usr/lib/sx` を探す
+- stdlib module は `/usr/lib/sx/<path>.sx` に置き、guest sample と host fixture から同じ path で import できる
+- loader は cycle を拒否し、同じ file は source tree に 1 回だけ取り込む
+
+## session lifetime / limits / cleanup
+
+- `sxi file.sx` と `sxi -e` は毎回 fresh runtime を作り、終了時に dispose する
+- REPL は session を持続し、`:reset` で binding / scope / call stack を初期化する
+- `sx_runtime_reset_session()` は argv、output callback、limit 設定を保持したまま runtime state を消す
+- reset / dispose 時には tracked pipe と socket を閉じ、GC なしでも fd leak を残さない
+- default limit は `SX_MAX_BINDINGS`、`SX_MAX_SCOPE_DEPTH`、`SX_MAX_CALL_DEPTH`、`max_loop_iterations=1024` とする
+- host runtime test で custom binding / loop / call limit と reset 後の resource cleanup を継続確認する
+
+## validation matrix
+
+- host unit test は lexer / parser / runtime / CLI / fixture corpus をカバーする
+- representative fixture corpus は `tests/test_sx_fixtures.c` で回し、stdin 付き grep-lite まで同じ経路で検証する
+- guest/QEMU smoke は `make -C src test-qemu-sxi` で representative sample を実行する
+- agent workflow smoke は `make -C src test-qemu-sxi-agent` で回し、`write_file` -> `sxi --check` -> `sxi run` -> fix loop を mock Claude 経由で検証する
+
+## shared boundary for `sxb` / `sxc`
+
+- `sx_common.h` は language version、frontend ABI、runtime ABI、固定長 limit を定義する
+- `sx_parser.h` は token / AST / diagnostic span を共有し、`libsx` frontend の唯一の入口とする
+- `sx_runtime.h` は tagged value、runtime limit、check / execute / reset の boundary を定義する
+- `sxb` / `sxc` はこの source contract と builtin namespace surface を保ったまま backend だけ差し替える前提にする
+
 ## 未解決論点
 
-- REPL session arena と loaded module cache の寿命をどう切るか
+- REPL session arena と loaded module cache を分離 cache にするか
 - `proc` namespace の API を `argv` 指定中心にするか、shell convenience を許すか
 - runtime stack trace をどこまで詳細に出すか
 - file / JSON API の戻り値を fail-fast に寄せるか、structured error を早めに持つか
 - `sxb` 用の bytecode IR を AST 直後に作るか、evaluator 専用の lowering を別に持つか
 - `fork()` を raw に expose しつつ、`spawn` / `pipe` 主体の script style をどう推奨するか
-- socket を `io.*` と共有するか、`net.*` を主入口として維持するか
+- socket handle を raw fd のままにするか、v1 で抽象化するか
 
 ## 関連 spec
 

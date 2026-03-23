@@ -1,0 +1,59 @@
+fn arg_or_default(index, fallback) -> i32 {
+  if (proc.argv_count() > index) {
+    return text.to_i32(proc.argv(index));
+  }
+  return fallback;
+}
+
+fn write_response(sock, status_line, content_type, body) -> i32 {
+  let response = text.concat(status_line,
+                             "\r\nConnection: close\r\nContent-Type: ");
+
+  response = text.concat(response, content_type);
+  response = text.concat(response, "\r\n\r\n");
+  response = text.concat(response, body);
+  return net.write(sock, response);
+}
+
+fn handle_client(sock) -> bool {
+  let ready = net.poll_read(sock, 5000);
+  let request = "";
+
+  if (!ready) {
+    net.close(sock);
+    return false;
+  }
+
+  request = net.read(sock);
+
+  if (text.index_of(request, "GET /healthz ") == 0) {
+    write_response(sock, "HTTP/1.1 200 OK", "text/plain", "ok\n");
+  } else if (text.index_of(request, "GET / ") == 0 ||
+             text.index_of(request, "GET /index.html ") == 0) {
+    write_response(sock, "HTTP/1.1 200 OK",
+                   "text/html; charset=utf-8",
+                   fs.read_text("/home/user/www/index.html"));
+  } else {
+    write_response(sock, "HTTP/1.1 404 Not Found",
+                   "text/plain",
+                   "not found\n");
+  }
+
+  net.close(sock);
+  return true;
+}
+
+let port = arg_or_default(1, 18085);
+let max_requests = arg_or_default(2, 0);
+let handled = 0;
+let listener = net.listen(port);
+
+while (max_requests == 0 || handled < max_requests) {
+  let sock = net.accept(listener);
+
+  handle_client(sock);
+  handled = handled + 1;
+}
+
+net.close(listener);
+io.println(handled);

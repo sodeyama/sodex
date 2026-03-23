@@ -94,10 +94,13 @@ struct task_struct {
   u_int32_t         stime;
   u_int32_t         state;
   int               auto_reap;
+  int               vm_is_fork_clone;
   int               exit_status;
   u_int32_t         signal;
   sighandler_t      sigactions[MAX_SIGNALS];
   struct wait_queue *child_wait;
+  char            **argv_data;
+  char            **envp_data;
   u_int32_t        *pg_dir;
   void             *pg_dir_raw;
   void             *esp0_raw;
@@ -151,6 +154,12 @@ PUBLIC void save_process(int is_usermode, u_int32_t iret_eip,
                          u_int32_t iret_cs, u_int32_t iret_eflags,
                          u_int32_t iret_esp, u_int32_t iret_ss,
                          u_int32_t ebp);
+PUBLIC void process_capture_current_context(int is_usermode, u_int32_t iret_eip,
+                                            u_int32_t iret_cs,
+                                            u_int32_t iret_eflags,
+                                            u_int32_t iret_esp,
+                                            u_int32_t iret_ss,
+                                            u_int32_t ebp);
 PUBLIC void set_context(struct task_struct* task, u_int32_t eip, u_int32_t esp,
                         u_int32_t eflags);
 PUBLIC void to_usermode();
@@ -164,6 +173,8 @@ PUBLIC void wakeup(struct wait_queue **wq);
 PUBLIC struct task_struct *process_find_pid(pid_t pid);
 PUBLIC int process_has_pid(pid_t pid);
 PUBLIC struct task_struct *process_init_task(void);
+PUBLIC void process_debug_unexpected_timer_cs(u_int32_t cs);
+PUBLIC void process_debug_null_memset(u_int32_t return_eip, u_int32_t len);
 
 PUBLIC volatile u_int32_t kernel_tick;
 PUBLIC volatile int process_in_timer_interrupt;

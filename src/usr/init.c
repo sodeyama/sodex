@@ -70,16 +70,24 @@ static void init_load_policy(struct init_inittab *inittab)
   char *text;
 
   init_inittab_init(inittab);
+  init_debug_log("AUDIT init_policy_open_begin\n");
   fd = open("/etc/inittab", O_RDONLY, 0);
-  if (fd < 0)
+  if (fd < 0) {
+    init_debug_log("AUDIT init_policy_open_failed\n");
     return;
+  }
+  init_debug_log("AUDIT init_policy_open_ok\n");
 
   text = init_read_fd_all(fd);
   close(fd);
-  if (text == 0)
+  if (text == 0) {
+    init_debug_log("AUDIT init_policy_read_failed\n");
     return;
+  }
+  init_debug_log("AUDIT init_policy_read_ok\n");
   init_policy_parse_inittab(text, inittab);
   free(text);
+  init_debug_log("AUDIT init_policy_parse_ok\n");
 }
 
 static int init_split_command(char *buf, char **argv, int max_args)
@@ -197,7 +205,9 @@ int main(int argc, char **argv)
   (void)argc;
   (void)argv;
 
+  init_debug_log("AUDIT init_main_enter\n");
   init_load_policy(&inittab);
+  init_debug_log("AUDIT init_policy_loaded\n");
   boot_status = init_run_boot_script(&inittab);
   respawn = init_select_respawn(&inittab, boot_status);
   foreground_pid = init_spawn_command(respawn);

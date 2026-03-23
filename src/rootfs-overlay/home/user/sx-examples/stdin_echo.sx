@@ -1,0 +1,4 @@
+let head = io.read_line();
+let tail = text.trim(io.read_all());
+
+io.println(text.concat(head, text.concat("|", tail)));

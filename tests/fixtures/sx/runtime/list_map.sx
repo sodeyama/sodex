@@ -1,0 +1,14 @@
+let items = list.new();
+list.push(items, 3);
+list.push(items, 5);
+list.set(items, 0, 7);
+
+let meta = map.new();
+map.set(meta, "head", list.get(items, 0));
+map.set(meta, "size", list.len(items));
+
+io.println(list.get(items, 0));
+io.println(map.get(meta, "size"));
+map.remove(meta, "head");
+io.println(map.len(meta));
+io.println(map.has(meta, "head"));

@@ -26,9 +26,12 @@
 #include <execve.h>
 #include <admin_server.h>
 #include <debug_shell_server.h>
+#include <rs232c.h>
 
 EXTERN void network_poll(void);
 PUBLIC int32_t kfree(void* ptr);
+PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit);
+PUBLIC int32_t afree(void* ptr);
 EXTERN volatile u_int32_t kernel_tick;
 PUBLIC volatile int process_in_timer_interrupt = FALSE;
 
@@ -41,15 +44,36 @@ PRIVATE void set_prev_context(struct task_struct* prev, u_int16_t cs,
                               u_int32_t edx, u_int32_t ebp, u_int32_t esp,
                               u_int32_t esi, u_int32_t edi, u_int32_t eflags,
                               int is_usermode);
+PRIVATE void set_task_context(struct task_struct* task, u_int16_t cs,
+                              u_int16_t ds, u_int32_t eip,
+                              u_int32_t eax, u_int32_t ebx, u_int32_t ecx,
+                              u_int32_t edx, u_int32_t ebp, u_int32_t esp,
+                              u_int32_t esi, u_int32_t edi, u_int32_t eflags,
+                              int is_usermode);
 PRIVATE void _exit();
 PRIVATE int maxsignal(u_int32_t signal);
 PRIVATE void reparent_children(struct task_struct *task);
 PRIVATE pid_t reap_child(struct task_struct *task, int *status);
 PRIVATE int child_is_live(const struct task_struct *task);
 PRIVATE void wakeup_parent_waiters(struct task_struct *task);
+PRIVATE void destroy_task(struct task_struct *task);
+PRIVATE void free_process_argv_copy(char **argv);
+
+PUBLIC void process_debug_unexpected_timer_cs(u_int32_t cs)
+{
+  com1_printf("AUDIT timer_unexpected_cs=%x\r\n", cs);
+}
+
+PUBLIC void process_debug_null_memset(u_int32_t return_eip, u_int32_t len)
+{
+  com1_printf("AUDIT memset_null caller=%x len=%x current=%x pid=%x\r\n",
+              return_eip, len, current,
+              current != 0 ? current->pid : 0);
+}
 
 PUBLIC void init_process()
 {
+  com1_printf("AUDIT init_process_enter\r\n");
   current = (struct task_struct *)0;
   g_init_task = (struct task_struct *)0;
 
@@ -57,13 +81,19 @@ PUBLIC void init_process()
   u_int16_t type_tss = 0x89;
   memset(&tss, 0, sizeof(TSS));
   tss.ss0 = __KERNEL_DS;
-  u_int32_t* pg_dir = kalloc(BLOCK_SIZE*2);
-  pg_dir = ((u_int32_t)pg_dir & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+  u_int32_t* pg_dir = aalloc(BLOCK_SIZE, BLOCK_BITS);
+  if (pg_dir == NULL) {
+    _kputs(" PROCESS: init pg_dir alloc failed\n");
+    return;
+  }
   memset(pg_dir, 0, BLOCK_SIZE);
   create_kernel_page(pg_dir);
   makeGdt((u_int32_t)&tss, sizeof(TSS), type_tss, sel);
+  com1_printf("AUDIT init_process_before_ltr\r\n");
   ltr(sel);
+  com1_printf("AUDIT init_process_exec_begin\r\n");
   kernel_execve("/usr/bin/init", NULL, NULL);
+  com1_printf("AUDIT init_process_exec_done current=%x\r\n", current);
   if (current == NULL) {
     _kputs(" PROCESS: execve failed\n");
     return;
@@ -86,6 +116,28 @@ PUBLIC void set_context(struct task_struct* prev, u_int32_t eip, u_int32_t esp,
   prev->count++;
 }
 
+PRIVATE void set_task_context(struct task_struct* task, u_int16_t cs,
+                              u_int16_t ds, u_int32_t eip,
+                              u_int32_t eax, u_int32_t ebx, u_int32_t ecx,
+                              u_int32_t edx, u_int32_t ebp, u_int32_t esp,
+                              u_int32_t esi, u_int32_t edi, u_int32_t eflags,
+                              int is_usermode)
+{
+  task->context->cs = cs;
+  task->context->ds = ds;
+  task->context->eip = eip;
+  task->context->eax = eax;
+  task->context->ebx = ebx;
+  task->context->ecx = ecx;
+  task->context->edx = edx;
+  task->context->ebp = ebp;
+  task->context->esp = esp;
+  task->context->esi = esi;
+  task->context->edi = edi;
+  task->context->eflags = (eflags | 0x200);
+  task->is_usermode = is_usermode;
+}
+
 PRIVATE void set_prev_context(struct task_struct* prev, u_int16_t cs,
                               u_int16_t ds, u_int32_t eip,
                               u_int32_t eax, u_int32_t ebx, u_int32_t ecx,
@@ -93,25 +145,51 @@ PRIVATE void set_prev_context(struct task_struct* prev, u_int16_t cs,
                               u_int32_t esi, u_int32_t edi, u_int32_t eflags,
                               int is_usermode)
 {
-  prev->context->cs = cs;
-  prev->context->ds = ds;
-  prev->context->eip = eip;
-  prev->context->eax = eax;
-  prev->context->ebx = ebx;
-  prev->context->ecx = ecx;
-  prev->context->edx = edx;
-  prev->context->ebp = ebp;
-  prev->context->esp = esp;
-  prev->context->esi = esi;
-  prev->context->edi = edi;
-  prev->context->eflags = (eflags | 0x200);
-  prev->is_usermode = is_usermode;
+  set_task_context(prev, cs, ds, eip, eax, ebx, ecx, edx,
+                   ebp, esp, esi, edi, eflags, is_usermode);
 
   //if (prev->firstexec != 0 && is_usermode == SAME_PRIVILEGE)
   //  prev->esp0 = esp;
-
-
   prev->count++;
+}
+
+PUBLIC void process_capture_current_context(int is_usermode, u_int32_t iret_eip,
+                                            u_int32_t iret_cs,
+                                            u_int32_t iret_eflags,
+                                            u_int32_t iret_esp,
+                                            u_int32_t iret_ss,
+                                            u_int32_t ebp)
+{
+  u_int32_t *p_eax;
+  u_int32_t *p_ecx;
+  u_int32_t *p_edx;
+  u_int32_t *p_ebx;
+  u_int32_t *p_esi;
+  u_int32_t *p_edi;
+  u_int32_t *prev_ebp;
+
+  (void)iret_cs;
+  (void)iret_ss;
+  if (current == NULL || current->context == NULL)
+    return;
+
+  p_eax = (u_int32_t *)(ebp - 4);
+  p_ecx = (u_int32_t *)(ebp - 8);
+  p_edx = (u_int32_t *)(ebp - 12);
+  p_ebx = (u_int32_t *)(ebp - 16);
+  p_esi = (u_int32_t *)(ebp - 28);
+  p_edi = (u_int32_t *)(ebp - 32);
+  prev_ebp = (u_int32_t *)(ebp);
+
+  if (is_usermode == SAME_PRIVILEGE) {
+    set_task_context(current, __KERNEL_CS, __KERNEL_DS, iret_eip, *p_eax,
+                     *p_ebx, *p_ecx, *p_edx, *prev_ebp, ebp + 16,
+                     *p_esi, *p_edi, iret_eflags, is_usermode);
+  } else {
+    set_task_context(current, __USER_CS, __USER_DS, iret_eip, *p_eax,
+                     *p_ebx, *p_ecx, *p_edx, *prev_ebp, iret_esp,
+                     *p_esi, *p_edi, iret_eflags, is_usermode);
+  }
 }
 
 PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
@@ -119,8 +197,14 @@ PUBLIC void i20h_do_timer(int is_usermode, u_int32_t iret_eip,
                           u_int32_t iret_esp, u_int32_t iret_ss,
                           u_int32_t ebp)
 {
+  static int timer_audit_logged = 0;
   pic_eoi(IRQ_TIMER);
   kernel_tick++;
+  if (timer_audit_logged == 0) {
+    com1_printf("AUDIT timer_enter mode=%x eip=%x cs=%x esp=%x ss=%x\r\n",
+                is_usermode, iret_eip, iret_cs, iret_esp, iret_ss);
+    timer_audit_logged = 1;
+  }
   process_in_timer_interrupt = TRUE;
   save_process(is_usermode, iret_eip, iret_cs, iret_eflags,
                iret_esp, iret_ss, ebp);
@@ -224,6 +308,7 @@ PUBLIC void save_process(int is_usermode, u_int32_t iret_eip,
 
 PUBLIC void schedule()
 {
+  static int schedule_firstexec_logged = 0;
   struct task_struct* next = dlist_entry(current->run_list.next,
                                          struct task_struct, run_list);
 
@@ -247,6 +332,11 @@ PUBLIC void schedule()
   tss.esp0 = next->esp0;
   if (next->firstexec == 0 || next_is_usermode == OUTER_PRIVILEGE) {
     if (next->firstexec == 0) {
+      if (schedule_firstexec_logged == 0) {
+        com1_printf("AUDIT schedule_firstexec pid=%x eip=%x esp=%x eax=%x ebx=%x ecx=%x\r\n",
+                    next->pid, next_eip, next_esp, next_eax, next_ebx, next_ecx);
+        schedule_firstexec_logged = 1;
+      }
       next_eflags = DEFAULT_EFLAGS;
       next->firstexec++;
     }
@@ -270,6 +360,10 @@ PUBLIC void schedule()
 
 PUBLIC void sys_exit(int status)
 {
+  com1_printf("AUDIT sys_exit pid=%x status=%x parent=%x\r\n",
+              current != 0 ? current->pid : 0,
+              status,
+              current != 0 && current->parent != 0 ? current->parent->pid : 0);
   current->exit_status = status;
   current->state = TASK_ZOMBIE;
   for(;;);
@@ -286,18 +380,14 @@ PRIVATE void _exit()
   dlist_remove(&(exiting->sibling));
   dlist_remove(&(exiting->run_list));
 
-  /* Free process memory: pages → page directory → kernel allocations → task */
-  if (exiting->pg_dir != NULL)
-    free_process_pages(exiting->pg_dir);
-  if (exiting->pg_dir_raw != NULL)
-    kfree(exiting->pg_dir_raw);
-  if (exiting->context != NULL)
-    kfree(exiting->context);
-  if (exiting->esp0_raw != NULL)
-    kfree(exiting->esp0_raw);
-  if (exiting->files != NULL)
-    kfree(exiting->files);
-  kfree(exiting);
+  /*
+   * 現在の CR3 が指している page directory 自体を解放する前に、
+   * 次タスクの CR3 へ切り替えておく。
+   */
+  if (next != NULL && next->pg_dir != NULL && next != exiting)
+    pg_load_cr3(next->pg_dir);
+
+  destroy_task(exiting);
 
   current = next;
   schedule();
@@ -341,12 +431,19 @@ PUBLIC int sys_waitpid(pid_t pid, int *status, int options)
     if (matched == NULL)
       return ERROR_WAITPID;
 
-    if (zombie != NULL)
+    if (zombie != NULL) {
+      com1_printf("AUDIT waitpid_reap self=%x pid=%x status=%x\r\n",
+                  current != 0 ? current->pid : 0,
+                  zombie->pid, zombie->exit_status);
       return reap_child(zombie, status);
+    }
 
     if ((options & WNOHANG) != 0)
       return 0;
 
+    com1_printf("AUDIT waitpid_sleep self=%x pid=%x child=%x state=%x\r\n",
+                current != 0 ? current->pid : 0,
+                pid, matched->pid, matched->state);
     sleep_on(&(current->child_wait));
   }
 }
@@ -523,14 +620,80 @@ PRIVATE pid_t reap_child(struct task_struct *task, int *status)
   if (task == NULL)
     return ERROR_WAITPID;
 
+  com1_printf("AUDIT reap_child_begin pid=%x\r\n", task->pid);
   pid = task->pid;
   if (status != NULL)
     *status = task->exit_status;
   files_close_all(task->files);
+  com1_printf("AUDIT reap_child_after_close pid=%x\r\n", task->pid);
   dlist_remove(&(task->sibling));
   dlist_remove(&(task->run_list));
   task->state = TASK_STOPPED;
+  destroy_task(task);
+  com1_printf("AUDIT reap_child_done pid=%x\r\n", pid);
   return pid;
+}
+
+PRIVATE void destroy_task(struct task_struct *task)
+{
+  if (task == NULL)
+    return;
+  com1_printf("AUDIT destroy_task_begin pid=%x\r\n", task->pid);
+  if (task->argv_data != NULL) {
+    free_process_argv_copy(task->argv_data);
+    task->argv_data = NULL;
+  }
+  if (task->envp_data != NULL) {
+    free_process_argv_copy(task->envp_data);
+    task->envp_data = NULL;
+  }
+  if (task->pg_dir != NULL) {
+    com1_printf("AUDIT destroy_task_pages pid=%x pg=%x fork_clone=%x\r\n",
+                task->pid, task->pg_dir, task->vm_is_fork_clone);
+    free_process_pages(task->pg_dir);
+    task->pg_dir = NULL;
+  }
+  if (task->pg_dir_raw != NULL) {
+    com1_printf("AUDIT destroy_task_pgdir_raw pid=%x raw=%x\r\n",
+                task->pid, task->pg_dir_raw);
+    afree(task->pg_dir_raw);
+    task->pg_dir_raw = NULL;
+  }
+  if (task->context != NULL) {
+    com1_printf("AUDIT destroy_task_context pid=%x ctx=%x\r\n",
+                task->pid, task->context);
+    kfree(task->context);
+    task->context = NULL;
+  }
+  if (task->esp0_raw != NULL) {
+    com1_printf("AUDIT destroy_task_esp0 pid=%x esp0=%x\r\n",
+                task->pid, task->esp0_raw);
+    kfree(task->esp0_raw);
+    task->esp0_raw = NULL;
+  }
+  if (task->files != NULL) {
+    com1_printf("AUDIT destroy_task_files pid=%x files=%x\r\n",
+                task->pid, task->files);
+    kfree(task->files);
+    task->files = NULL;
+  }
+  com1_printf("AUDIT destroy_task_struct pid=%x task=%x\r\n",
+              task->pid, task);
+  kfree(task);
+}
+
+PRIVATE void free_process_argv_copy(char **argv)
+{
+  int i;
+
+  if (argv == NULL)
+    return;
+  for (i = 0; i < ARGV_MAX_NUMS; i++) {
+    if (argv[i] == NULL)
+      break;
+    kfree(argv[i]);
+  }
+  kfree(argv);
 }
 
 PRIVATE int child_is_live(const struct task_struct *task)
@@ -544,5 +707,7 @@ PRIVATE void wakeup_parent_waiters(struct task_struct *task)
 {
   if (task == NULL || task->parent == NULL || task->parent == task)
     return;
+  com1_printf("AUDIT wake_parent child=%x parent=%x status=%x\r\n",
+              task->pid, task->parent->pid, task->exit_status);
   wakeup(&(task->parent->child_wait));
 }

@@ -110,6 +110,8 @@ curl -v http://10.0.2.2:8080/healthz
 ## agent への指示
 
 - まず既存コマンドか tool で確認してから推測する
+- `sx` / `sxi` を読む、書く、修正するときは、最初に `/home/user/sx-examples/LANGUAGE.md` を確認する
+- 実例は `/home/user/sx-examples/README.md` と `/home/user/sx-examples/*.sx` を優先して参照する
 - 長い出力は分割して取得する
 - URL が確定していれば `fetch_url` / `webfetch` を優先する
 - file tool は絶対 path または相対 path を使える

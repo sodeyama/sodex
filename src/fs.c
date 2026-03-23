@@ -94,6 +94,22 @@ PUBLIC int files_clone(struct files_struct *dst, struct files_struct *src)
   return TRUE;
 }
 
+PUBLIC int files_clone_stdio(struct files_struct *dst, struct files_struct *src)
+{
+  int fd;
+
+  if (dst == NULL || src == NULL)
+    return FALSE;
+
+  memset(dst, 0, sizeof(struct files_struct));
+  for (fd = STDIN_FILENO; fd <= STDERR_FILENO; fd++) {
+    if (src->fs_fd[fd] != NULL)
+      dst->fs_fd[fd] = file_get(src->fs_fd[fd]);
+  }
+  dst->fs_freefd = STDERR_FILENO + 1;
+  return TRUE;
+}
+
 PUBLIC int files_close_all(struct files_struct *files)
 {
   int fd;

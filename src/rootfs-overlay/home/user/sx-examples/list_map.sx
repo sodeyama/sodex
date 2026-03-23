@@ -1,0 +1,20 @@
+let items = ["alpha", "beta"];
+list.push(items, "tail");
+list.set(items, 1, "gamma");
+
+let meta = {
+  "first": list.get(items, 0),
+  "count": list.len(items),
+  "tail": list.get(items, 1)
+};
+
+let first = result.ok(map.get(meta, "first"));
+
+io.println(list.len(items));
+io.println(list.get(items, 1));
+io.println(map.get(meta, "count"));
+io.println(result.value(first));
+
+map.remove(meta, "tail");
+io.println(map.len(meta));
+io.println(map.has(meta, "tail"));

@@ -1,0 +1,10 @@
+import "import_lib.sx";
+
+fn choose(flag) -> str {
+  if (flag) {
+    return imported_name();
+  }
+  return "IMPORT_BAD";
+}
+
+io.println(choose(true));

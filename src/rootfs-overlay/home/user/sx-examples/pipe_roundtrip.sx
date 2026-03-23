@@ -1,0 +1,24 @@
+let input = proc.pipe();
+let output = proc.pipe();
+
+let in_r = proc.pipe_read_fd(input);
+let in_w = proc.pipe_write_fd(input);
+let out_r = proc.pipe_read_fd(output);
+let out_w = proc.pipe_write_fd(output);
+
+let pid = proc.spawn_io("/usr/bin/cat", in_r, out_w, -1);
+
+io.close(in_r);
+io.close(out_w);
+io.write_fd(in_w, "PIPE_OK");
+io.close(in_w);
+
+let status = proc.wait(pid);
+let body = io.read_fd(out_r);
+io.close(out_r);
+
+proc.pipe_close(input);
+proc.pipe_close(output);
+
+io.println(body);
+io.println(proc.status_ok(status));

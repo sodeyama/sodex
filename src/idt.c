@@ -19,6 +19,7 @@
 #include <floppy.h>
 #include <ne2000.h>
 #include <tty.h>
+#include <page.h>
 
 /* IDT gate types */
 #define TYPE_INTR_GATE 0xEE  /* DPL=3, 32-bit interrupt gate */
@@ -254,8 +255,9 @@ PUBLIC void i0Dh(u_int32_t ebp)
 
 PUBLIC void i0Eh()
 {
-  u_int32_t cr2, ebp_val;
+  u_int32_t cr2, cr3, ebp_val;
   asm volatile("movl %%cr2, %0" : "=r"(cr2));
+  asm volatile("movl %%cr3, %0" : "=r"(cr3));
   asm volatile("movl %%ebp, %0" : "=r"(ebp_val));
   /* stack: ebp -> old_ebp -> ret_addr -> pusha(32) -> error_code -> eip -> cs */
   u_int32_t error = *(u_int32_t*)(ebp_val + 40);
@@ -265,7 +267,17 @@ PUBLIC void i0Eh()
   /* Dump pusha registers from stack */
   {
     u_int32_t *regs = (u_int32_t*)(ebp_val + 8); /* after old_ebp and ret_addr */
+    u_int32_t *pg_dir = (u_int32_t *)(cr3 + __PAGE_OFFSET);
+    u_int32_t pde = pg_dir[(cr2 >> 22) & 0x3ff];
+    u_int32_t pte = 0;
+
+    if (pde & PAGE_PRESENT) {
+      u_int32_t *pg_tbl =
+          (u_int32_t *)((pde & ~(BLOCK_SIZE - 1)) + __PAGE_OFFSET);
+      pte = pg_tbl[(cr2 >> BLOCK_BITS) & 0x3ff];
+    }
     com1_printf("PF: CR2=%x err=%x eip=%x cs=%x\r\n", cr2, error, eip, cs);
+    com1_printf("PF: CR3=%x PDE=%x PTE=%x\r\n", cr3, pde, pte);
     com1_printf("PF: EDI=%x ESI=%x EBP=%x ESP=%x\r\n", regs[0], regs[1], regs[2], regs[3]);
     com1_printf("PF: EBX=%x EDX=%x ECX=%x EAX=%x\r\n", regs[4], regs[5], regs[6], regs[7]);
   }

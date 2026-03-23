@@ -201,6 +201,8 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
     break;
 
   case SYS_CALL_FORK:
+    process_capture_current_context(is_usermode, iret_eip, iret_cs,
+                                    iret_eflags, iret_esp, iret_ss, ebp);
     ret = sys_fork();
     break;
 
@@ -229,7 +231,7 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
     break;
 
   case SYS_CALL_EXECVE:
-    ret = sys_execve(p1, p2, NULL);
+    ret = sys_execve(p1, p2, p3);
     break;
 
   case SYS_CALL_CHDIR:

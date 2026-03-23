@@ -37,6 +37,8 @@ extern int get_admin_ssh_config(struct admin_ssh_config *out);
 extern int get_server_ssh_config(struct admin_ssh_config *out);
 extern sighandler_t signal(int signum, sighandler_t sighandler);
 extern int kill(pid_t pid, int sig);
+extern char **environ;
+char *getenv(const char *name);
 
 int atoi(const char* nptr);
 int is_number(const char* nptr);

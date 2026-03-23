@@ -1,8 +1,10 @@
 SYS_CALL_EXIT = 1
         	
 .text	
+.extern environ
 .global _start	
 _start:
+        movl    %ecx, environ
         pushl   %ebx
         pushl   %eax
         call    main
@@ -11,4 +13,3 @@ _start:
         int     $0x80
 
                 
-

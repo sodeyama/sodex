@@ -1,0 +1,30 @@
+let work = "/tmp/sx-interop";
+let base = fs.cwd();
+let before = time.now_ticks();
+
+fs.mkdir(work);
+let listed = text.contains(fs.list_dir("/tmp"), "sx-interop");
+fs.chdir(work);
+
+let cwd = fs.cwd();
+let dir_ok = fs.is_dir(cwd);
+
+fs.write_text("note.txt", proc.argv(1));
+fs.rename("note.txt", "renamed.txt");
+let content = fs.read_text("renamed.txt");
+
+time.sleep_ticks(1);
+let after = time.now_ticks();
+
+fs.remove("renamed.txt");
+fs.chdir(base);
+fs.remove(work);
+
+io.println(proc.argv_count());
+io.println(proc.argv(0));
+io.println(proc.argv(2));
+io.println(listed);
+io.println(text.contains(cwd, "/tmp/sx-interop"));
+io.println(dir_ok);
+io.println(content);
+io.println(after >= before);

@@ -1,0 +1,83 @@
+# SXI Runtime Tasks
+
+`specs/sxi-runtime/README.md` を、着手単位へ落としたタスクリスト。
+`sx` language spec を前提に、guest 内 source interpreter を
+最短で成立させる順に進める。
+
+## 進捗メモ
+
+- 2026-03-22: `sxi` 用の独立 spec を新設し、`sx` language spec と責務を分離した
+- 2026-03-22: tree-walk interpreter を v0 とし、bytecode / native compiler は後段へ回す方針を固定した
+- 2026-03-22: initial bring-up として、`/usr/bin/sxi`、`--check`、`-e`、簡易 REPL、host test、QEMU smoke `test-qemu-sxi` を追加した
+- 2026-03-22: `libsx` 共有 frontend、relative `import` loader、`io` / `fs` / `proc` / `json` / `text` builtin、runtime stack trace、host / QEMU smoke を追加した
+- 2026-03-22: nested builtin / function call 引数の実行を追加し、host runtime test を `/tmp` 作業ディレクトリへ寄せて workspace 汚染を減らした
+- 2026-03-22: 次段の runtime 拡張として、operator / assignment / `break` / `continue` / `for` を host/QEMU 回帰込みで追加する方針を整理した
+- 2026-03-22: operator / assignment / `for` / `break` / `continue` と再帰 sample を host test / QEMU smoke / guest sample まで通した
+- 2026-03-22: 次段の interop 拡張として、`argv`、fd I/O、path、time、`spawn` / `wait` / `pipe` / `fork` を `Plan 05` として整理した
+- 2026-03-22: `argv`、fd I/O、path、time、`spawn` / `wait` / `pipe` / `fork` を runtime / host test / QEMU smoke / guest sample まで通した
+- 2026-03-23: `proc.has_env`、`bytes`、`list`、`map`、`result` と `try_*` の sample / fixture / QEMU smoke を追加し、guest / host 回帰の粒度を上げた
+- 2026-03-23: 次段として `net` namespace と socket cleanup を `Plan 06` として整理した
+- 2026-03-23: grep-lite corpus、runtime limit/cleanup policy、agent の `sxi` write/check/run/fix smoke、shared boundary 文書を追加し、残 task を更新した
+
+## 優先順
+
+1. command surface と shared frontend 組み込み
+2. evaluator / memory / runtime error
+3. builtin host bridge
+4. REPL / validation / bytecode handoff
+
+## M0: command surface
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SXI-01 | `/usr/bin/sxi` の CLI 契約を固定し、`file`, `-e`, `--check`, REPL の入口を定義する | `specs/sx-language/plans/01-source-contract-and-language-goals.md` | 実行モードごとの引数と exit code が文書で説明できる |
+| [x] | SXI-02 | `libsx` の build / link 配置を決め、`sxi` と将来の `sxc` で共有できるようにする | SXI-01, `specs/sx-language/plans/02-grammar-and-ast.md` | frontend の重複実装を避けられる |
+| [x] | SXI-03 | source loader、module search path、stdlib module 配置を固定する | SXI-01, SXI-02, `specs/sx-language/plans/03-type-system-and-standard-surface.md` | relative / stdlib import、module search path、cycle 拒否を runtime spec で説明できる |
+
+## M1: evaluator / memory
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SXI-04 | tagged value、environment、call frame の runtime 表現を定義する | SXI-02, `specs/sx-language/plans/03-type-system-and-standard-surface.md` | evaluator core の in-memory model が固定される |
+| [x] | SXI-05 | script arena、session arena、recursion / frame limit、resource cleanup 方針を定義する | SXI-04 | GC なしでも reset / dispose、fd cleanup、runtime limit を説明できる |
+| [x] | SXI-06 | tree-walk evaluator と runtime error / stack trace 契約を固める | SXI-04, SXI-05, `specs/sx-language/plans/04-diagnostics-fixtures-and-compatibility.md` | parse 成功後の実行と failure path が host test で固定できる |
+
+## M2: builtin host bridge
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SXI-07 | `io` / `fs` namespace の最小 surface と current directory 契約を定義する | SXI-03, SXI-06 | file read/write と console 出力の入口が固まる |
+| [x] | SXI-08 | `proc` / `json` / `text` namespace を定義し、spawn 的 `execve()` と既存 JSON 実装に合わせる | SXI-03, SXI-06, SXI-07 | agent 用 script の実用 surface がそろう |
+| [x] | SXI-09 | builtin failure と runtime failure の境界、fail-fast policy、predicate helper を固定する | SXI-06, SXI-07, SXI-08 | script の失敗モードが一貫する |
+
+## M3: REPL / validation / handoff
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SXI-10 | REPL command、multi-line input、`:reset` / `:load` / `:quit` の UX を定義する | SXI-01, SXI-05, SXI-06 | 長時間 session と寿命管理を両立できる |
+| [x] | SXI-11 | host unit test、fixture runner、QEMU smoke、agent workflow smoke を追加する | SXI-06, SXI-07, SXI-08, SXI-10 | host fixture、QEMU smoke、agent の `sxi` write/check/run/fix smoke がそろっている |
+| [x] | SXI-12 | `sxb` / `sxc` へ渡す shared boundary を定義し、bytecode handoff の準備をする | SXI-02, SXI-06, SXI-11 | `sx_common.h` / `sx_parser.h` / `sx_runtime.h` を境界として後続 backend を説明できる |
+
+## M4: interop runtime expansion
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SXI-13 | runtime に `argv`、fd、pipe handle、cwd / time helper を追加する | SXI-04, SXI-06, SXI-07 | `sxi` session が pid / fd / argv を持つ runtime state を扱える |
+| [x] | SXI-14 | `spawn` / `wait` / `pipe` / `fork` / `exit` と fd I/O を guest / host 双方で動かす | SXI-08, SXI-09, SXI-13 | host test と guest 実装の両方で child process と pipe を扱える |
+| [x] | SXI-15 | interop sample、CLI argv、QEMU smoke、fork 回帰を追加する | SXI-10, SXI-11, SXI-13, SXI-14 | `/home/user/sx-examples/` と `test-qemu-sxi` で interop 系と env / bytes / result / list / map の回帰がそろう |
+
+## M5: network runtime expansion
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [x] | SXI-16 | runtime に socket tracking と `net` namespace を追加する | SXI-04, SXI-05, SXI-06, SXI-13, `specs/sx-language/plans/07-network-literals-and-branching-sugar.md` | `connect` / `listen` / `accept` / `read` / `write` / `poll_read` / `close` が host / guest 双方で動く |
+| [x] | SXI-17 | host unit test と QEMU smoke に client / server network 回帰を追加する | SXI-10, SXI-11, SXI-16 | host 側 peer と guest 側 peer の両方を使う network 回帰が安定して通る |
+| [x] | SXI-18 | sample / language reference / fixture corpus を更新し、network と literal の使い方を guest に同梱する | SXI-03, SXI-11, SXI-16, SXI-17 | `/home/user/sx-examples/` と `LANGUAGE.md` から network、literal、grep-lite の最短例が追える |
+
+## 先送りする項目
+
+- GC、JIT、debugger
+- network stdlib
+- external package manager
+- structured exception / generic `Result`
+- concurrency、fiber、async I/O

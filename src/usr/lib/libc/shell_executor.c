@@ -1926,7 +1926,8 @@ static int shell_builtin_run(struct shell_state *state,
 }
 
 static pid_t shell_spawn_script_fallback(struct shell_expanded_command *command,
-                                         const char *path)
+                                         const char *path,
+                                         char *const envp[])
 {
   char *argv[SHELL_MAX_ARGS + 2];
   int i;
@@ -1936,7 +1937,39 @@ static pid_t shell_spawn_script_fallback(struct shell_expanded_command *command,
   for (i = 1; i < command->argc && i < SHELL_MAX_ARGS; i++)
     argv[i + 1] = command->argv[i];
   argv[i + 1] = 0;
-  return execve("/usr/bin/sh", argv, 0);
+  return execve("/usr/bin/sh", argv, envp);
+}
+
+static int shell_build_envp(struct shell_state *state,
+                            char env_storage[SHELL_MAX_VARS][SHELL_VAR_NAME_MAX + SHELL_VAR_VALUE_MAX + 2],
+                            char *envp[SHELL_MAX_VARS + 1])
+{
+  int count = 0;
+  int i;
+
+  if (state == 0 || env_storage == 0 || envp == 0)
+    return -1;
+  for (i = 0; i < state->var_count && count < SHELL_MAX_VARS; i++) {
+    int name_len;
+    int value_len;
+
+    if (state->vars[i].exported == 0)
+      continue;
+    name_len = (int)strlen(state->vars[i].name);
+    value_len = (int)strlen(state->vars[i].value);
+    if (name_len + value_len + 2 >
+        SHELL_VAR_NAME_MAX + SHELL_VAR_VALUE_MAX + 2)
+      continue;
+    memcpy(env_storage[count], state->vars[i].name, (size_t)name_len);
+    env_storage[count][name_len] = '=';
+    memcpy(env_storage[count] + name_len + 1, state->vars[i].value,
+           (size_t)value_len);
+    env_storage[count][name_len + value_len + 1] = '\0';
+    envp[count] = env_storage[count];
+    count++;
+  }
+  envp[count] = 0;
+  return count;
 }
 
 static pid_t shell_spawn_external(struct shell_state *state,
@@ -1944,13 +1977,17 @@ static pid_t shell_spawn_external(struct shell_state *state,
 {
   pid_t pid;
   char path[SHELL_WORD_SIZE];
+  char env_storage[SHELL_MAX_VARS][SHELL_VAR_NAME_MAX + SHELL_VAR_VALUE_MAX + 2];
+  char *envp[SHELL_MAX_VARS + 1];
   int fd;
 
   if (shell_resolve_external_path(state, command->argv[0],
                                   path, sizeof(path)) == 0)
     return -1;
+  if (shell_build_envp(state, env_storage, envp) < 0)
+    return -1;
 
-  pid = execve(path, command->argv, 0);
+  pid = execve(path, command->argv, envp);
   if (pid >= 0)
     return pid;
 
@@ -1958,7 +1995,7 @@ static pid_t shell_spawn_external(struct shell_state *state,
   if (fd < 0)
     return -1;
   close(fd);
-  return shell_spawn_script_fallback(command, path);
+  return shell_spawn_script_fallback(command, path, envp);
 }
 
 static int shell_command_needs_builtin_parent(struct shell_expanded_command *command)

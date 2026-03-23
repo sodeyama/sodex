@@ -12,7 +12,7 @@
 #define BLOCK_MAX           4096    //4096個
 #define GROUP_MAX           128     // max number of group desc at 1 BLOCK
 #define INODE_SIZE          128     //128Byte
-#define INODE_MAX           128     //128個
+#define INODE_MAX           256     //256個
 #define INODE_PER_BLOCK     ((BLOCK_SIZE)/(INODE_SIZE)) //32
 #define IBLOCK_SIZE         512
 
@@ -39,7 +39,9 @@
 #define SODEX_LOST_FOUND_INO    11
 #define SODEX_BOOTM_INO         12
 #define SODEX_KERNEL_INO        13
-#define SODEX_FIRST_INO         (SODEX_KERNEL_INO+1)
+#define SODEX_INIT_INO          14
+#define SODEX_INIT2_INO         15
+#define SODEX_FIRST_INO         (SODEX_INIT2_INO+1)
 
 
 //sodex mode flags
@@ -71,14 +73,14 @@
 #define P_BLOCK_BITMAP      8192    // 4096*2
 #define P_INODE_BITMAP      12288   // 4096*3
 #define P_INODE_BLOCK       16384   // 4096*4
-#define P_DATA_BLOCK        (16384+(4096*(INODE_MAX/INODE_PER_BLOCK))) // 4096*8
+#define P_DATA_BLOCK        (16384+(4096*(INODE_MAX/INODE_PER_BLOCK))) // inode table の直後
 
 // size
 #define S_SUPER_BLOCK       1024
 #define S_GROUP_DESC        4096    // 1block
 #define S_BLOCK_BITMAP      4096    // 1block
 #define S_INODE_BITMAP      4096    // 1block
-#define S_INODE_BLOCK       (4096*(INODE_MAX/INODE_PER_BLOCK)) // 4block
+#define S_INODE_BLOCK       (4096*(INODE_MAX/INODE_PER_BLOCK)) // inode table の総サイズ
 
 // buf size
 #define BUF_BOOTA           512

@@ -1,0 +1,3 @@
+import "std/strings";
+
+io.println(join_words("LEFT", "RIGHT"));

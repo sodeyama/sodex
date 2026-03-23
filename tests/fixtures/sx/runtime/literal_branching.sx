@@ -1,0 +1,17 @@
+let items = [3, 5, 7];
+let meta = {
+  "head": list.get(items, 0),
+  "size": list.len(items)
+};
+let branch = "none";
+
+if (false) {
+  branch = "a";
+} else if (map.get(meta, "size") == 3) {
+  branch = "b";
+} else {
+  branch = "c";
+}
+
+io.println(map.get(meta, "head"));
+io.println(branch);

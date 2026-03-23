@@ -1,4 +1,5 @@
 #include <shell.h>
+#include <malloc.h>
 #include <string.h>
 
 enum shell_token_type {
@@ -24,7 +25,7 @@ struct shell_token {
 };
 
 struct shell_parser_state {
-  struct shell_token tokens[SHELL_MAX_TOKENS];
+  struct shell_token *tokens;
   int token_count;
   int pos;
   struct shell_program *program;
@@ -816,25 +817,40 @@ static int shell_parse_list(struct shell_parser_state *state,
 int shell_parse_program(const char *text, int len, struct shell_program *program)
 {
   struct shell_parser_state state;
+  struct shell_token *tokens;
   int rc;
+  int count;
 
   if (text == 0 || program == 0)
     return SHELL_PARSE_ERROR;
 
   memset(program, 0, sizeof(*program));
   memset(&state, 0, sizeof(state));
+  tokens = (struct shell_token *)malloc(sizeof(*tokens) * SHELL_MAX_TOKENS);
+  if (tokens == 0)
+    return SHELL_PARSE_ERROR;
+  memset(tokens, 0, sizeof(*tokens) * SHELL_MAX_TOKENS);
+  state.tokens = tokens;
   state.program = program;
 
   rc = shell_tokenize(text, len, program->storage, sizeof(program->storage),
                       state.tokens, &state.token_count);
-  if (rc < 0)
+  if (rc < 0) {
+    free(tokens);
     return rc;
+  }
 
   rc = shell_parse_list(&state, 0, 0, &program->root_list_index);
-  if (rc < 0)
+  if (rc < 0) {
+    free(tokens);
     return rc;
+  }
   shell_skip_separators(&state);
-  if (shell_parser_at_end(&state) == 0)
+  if (shell_parser_at_end(&state) == 0) {
+    free(tokens);
     return SHELL_PARSE_ERROR;
-  return program->lists[program->root_list_index].item_count;
+  }
+  count = program->lists[program->root_list_index].item_count;
+  free(tokens);
+  return count;
 }

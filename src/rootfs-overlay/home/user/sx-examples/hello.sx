@@ -1,0 +1,6 @@
+fn greet(name) -> str {
+  return text.concat("Hello, ", name);
+}
+
+let name = text.trim("  sodex sx  ");
+io.println(greet(name));

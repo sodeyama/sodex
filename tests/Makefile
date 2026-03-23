@@ -11,7 +11,7 @@ IME_HEADERS = $(SRC)/usr/include/ime.h $(SRC)/usr/include/ime_conversion.h \
 	$(SRC)/usr/include/ime_dict_blob.h $(SRC)/usr/include/ime_dictionary.h \
 	$(SRC)/usr/include/utf8.h
 
-TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_pager test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_shell_programmable test_shell_usability test_shell_completion test_usr_stdlib test_usr_string test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_agent_autonomy test_tool_get_system_info test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_tool_run_command test_tool_file_access test_conversation test_hooks_permissions test_chunked_decoder test_unix_text_tools
+TESTS = test_lib test_memb test_memory test_memory_layout test_vga test_key test_tty test_terminal_surface test_cell_renderer test_font_default test_vt_parser test_vt_fixtures test_ext3fs test_clock test_ne2000 test_ne2000_irq test_kernel_net test_netpoll test_socket test_admin_parser test_http_server_parser test_debug_shell_parser test_server_runtime_shared test_ssh_crypto test_ssh_packet test_ssh_auth test_ssh_channel test_ssh_runtime_policy test_vi_buffer test_vi_screen test_pager test_utf8 test_wcwidth test_ime_romaji test_ime_dict_blob test_ime_cache test_ime_dictionary test_ime_conversion test_eshell_parser test_shell_core test_shell_programmable test_shell_usability test_shell_completion test_sx_lexer test_sx_parser test_sxi_runtime test_sxi_cli test_sx_fixtures test_usr_stdlib test_usr_string test_init_policy test_libc_ext test_json test_http_client test_dns test_agent_repl_cli test_agent_autonomy test_tool_get_system_info test_session_restore_full test_memory_loader test_compaction test_bounded_output test_tool_dispatch test_tool_run_command test_tool_file_access test_conversation test_hooks_permissions test_chunked_decoder test_unix_text_tools
 
 IME_FIXTURE = ime_dictionary_fixture.blob
 IME_FIXTURE_SOURCE = ime_dictionary_fixture_source.tsv
@@ -467,6 +467,73 @@ test_shell_completion: test_shell_completion.c test_shell_completion_state.o
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_shell_completion.c test_shell_completion_state.o
 
 test_shell_completion_state.o: $(SRC)/usr/lib/libc/shell_completion.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+# sx lexer/parser/runtime tests
+test_sx_lexer: test_sx_lexer.c test_sx_lexer_lexer.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_sx_lexer.c test_sx_lexer_lexer.o
+
+test_sx_lexer_lexer.o: $(SRC)/usr/lib/libsx/lexer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sx_parser: test_sx_parser.c test_sx_parser_lexer.o test_sx_parser_parser.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_sx_parser.c test_sx_parser_lexer.o test_sx_parser_parser.o
+
+test_sx_parser_lexer.o: $(SRC)/usr/lib/libsx/lexer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sx_parser_parser.o: $(SRC)/usr/lib/libsx/parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_runtime: test_sxi_runtime.c test_sxi_runtime_lexer.o test_sxi_runtime_parser.o test_sxi_runtime_runtime.o test_sxi_runtime_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_sxi_runtime.c test_sxi_runtime_lexer.o test_sxi_runtime_parser.o test_sxi_runtime_runtime.o test_sxi_runtime_json.o
+
+test_sxi_runtime_lexer.o: $(SRC)/usr/lib/libsx/lexer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_runtime_parser.o: $(SRC)/usr/lib/libsx/parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_runtime_runtime.o: $(SRC)/usr/lib/libsx/runtime.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_runtime_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_cli: test_sxi_cli.c test_sxi_cli_sxi.o test_sxi_cli_lexer.o test_sxi_cli_parser.o test_sxi_cli_runtime.o test_sxi_cli_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_sxi_cli.c test_sxi_cli_sxi.o test_sxi_cli_lexer.o test_sxi_cli_parser.o test_sxi_cli_runtime.o test_sxi_cli_json.o
+
+test_sxi_cli_sxi.o: $(SRC)/usr/command/sxi.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_cli_lexer.o: $(SRC)/usr/lib/libsx/lexer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_cli_parser.o: $(SRC)/usr/lib/libsx/parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_cli_runtime.o: $(SRC)/usr/lib/libsx/runtime.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sxi_cli_json.o: $(SRC)/usr/lib/libagent/json.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sx_fixtures: test_sx_fixtures.c test_sx_fixtures_sxi.o test_sx_fixtures_lexer.o test_sx_fixtures_parser.o test_sx_fixtures_runtime.o test_sx_fixtures_json.o
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -o $@ test_sx_fixtures.c test_sx_fixtures_sxi.o test_sx_fixtures_lexer.o test_sx_fixtures_parser.o test_sx_fixtures_runtime.o test_sx_fixtures_json.o
+
+test_sx_fixtures_sxi.o: $(SRC)/usr/command/sxi.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sx_fixtures_lexer.o: $(SRC)/usr/lib/libsx/lexer.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sx_fixtures_parser.o: $(SRC)/usr/lib/libsx/parser.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sx_fixtures_runtime.o: $(SRC)/usr/lib/libsx/runtime.c
+	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
+
+test_sx_fixtures_json.o: $(SRC)/usr/lib/libagent/json.c
 	$(CC) $(CFLAGS) -DTEST_BUILD -idirafter $(SRC)/usr/include -c -o $@ $<
 
 # userland stdlib tests

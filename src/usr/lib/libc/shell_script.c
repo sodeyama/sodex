@@ -24,6 +24,13 @@ static int shell_copy_text(char *dst, int cap, const char *src)
   return 0;
 }
 
+static void shell_write_error_text(const char *text)
+{
+  if (text == 0)
+    return;
+  write(STDERR_FILENO, text, strlen(text));
+}
+
 static char *shell_read_fd_all(int fd, int *out_len)
 {
   char *buf;
@@ -82,8 +89,10 @@ int shell_execute_buffer(struct shell_state *state, const char *name,
     return 1;
 
   program = (struct shell_program *)malloc(sizeof(*program));
-  if (program == 0)
+  if (program == 0) {
+    shell_write_error_text("sh: out of memory\n");
     return 1;
+  }
 
   shell_copy_text(saved_name, sizeof(saved_name), state->script_name);
   saved_param_count = state->param_count;
@@ -98,6 +107,7 @@ int shell_execute_buffer(struct shell_state *state, const char *name,
     state->param_count = saved_param_count;
     memcpy(state->param_storage, saved_params, sizeof(saved_params));
     state->last_status = 2;
+    shell_write_error_text("sh: parse error\n");
     free(program);
     return 2;
   }
@@ -124,13 +134,17 @@ int shell_execute_file(struct shell_state *state, const char *path,
     return 1;
 
   fd = open(path, O_RDONLY, 0);
-  if (fd < 0)
+  if (fd < 0) {
+    shell_write_error_text("sh: cannot open script\n");
     return 1;
+  }
 
   text = shell_read_fd_all(fd, &len);
   close(fd);
-  if (text == 0)
+  if (text == 0) {
+    shell_write_error_text("sh: out of memory\n");
     return 1;
+  }
 
   status = shell_execute_buffer(state, path, text, argc, argv, sourced);
   free(text);

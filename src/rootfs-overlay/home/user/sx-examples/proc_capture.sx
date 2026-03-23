@@ -1,0 +1,5 @@
+let captured = proc.capture("/usr/bin/cat", "/home/user/sx-examples/copy_source.txt");
+let status = proc.run("/usr/bin/sh", "-c", "exit 0");
+
+io.println(text.trim(captured));
+io.println(proc.status_ok(status));

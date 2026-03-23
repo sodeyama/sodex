@@ -1,0 +1,8 @@
+let path = "/tmp/sx-fixture-spawn.txt";
+let pid = proc.spawn("/bin/sh", "-c", "printf fixture-spawn > /tmp/sx-fixture-spawn.txt; exit 2");
+let status = proc.wait(pid);
+
+io.println(status);
+io.println(proc.status_ok(status));
+io.println(fs.read_text(path));
+fs.remove(path);

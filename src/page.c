@@ -13,12 +13,16 @@
 #include <sys/types.h>
 #include <page.h>
 #include <memory_layout.h>
+#include <rs232c.h>
+#include <string.h>
 
 /* Forward declarations to avoid pulling in memory.h globals */
 PUBLIC void* palloc(u_int32_t size);
 PUBLIC int32_t pfree(void* ptr);
 PUBLIC void* kalloc(u_int32_t size);
 PUBLIC int32_t kfree(void* ptr);
+PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit);
+PUBLIC int32_t afree(void* ptr);
 
 PRIVATE void delete_first_page();
 PRIVATE u_int32_t get_need_blocks(size_t need_size, size_t size);
@@ -86,17 +90,24 @@ PUBLIC void* create_process_page(u_int32_t* pg_dir, size_t size)
   u_int32_t pte;
   int pos;
   for (pos = 0; pos < need_pgdir_blocks; pos++) {
-    u_int32_t* pg_tbl = kalloc(BLOCK_SIZE*2);
-    pg_tbl = ((u_int32_t)pg_tbl & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+    u_int32_t pg_tbl_phys = (u_int32_t)palloc(BLOCK_SIZE);
+    u_int32_t* pg_tbl;
+    if (pg_tbl_phys == 0)
+      return NULL;
+    pg_tbl = (u_int32_t *)(pg_tbl_phys + __PAGE_OFFSET);
     memset(pg_tbl, 0, BLOCK_SIZE);
     int i;
     for (i=0; i<1024; i++) {
       if (pos*1024+i >= need_blocks) break;
       pte = phy_proc_mem + (pos * 1024 + i)*BLOCK_SIZE;
       pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US);
+      if (pos == 0 && i == 0)
+        pte |= PAGE_ALLOC_HEAD;
+      else
+        pte |= PAGE_ALLOC_CONT;
       pg_tbl[i] = pte;
     }
-    pte = (u_int32_t)pg_tbl - __PAGE_OFFSET;
+    pte = pg_tbl_phys;
     pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US);
     pg_dir[pos] = pte;
   }
@@ -131,12 +142,12 @@ PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
     int pt_end_pos;
     int pt_pos;
     if (pg_dir[pd_pos] == 0) {
-      pg_tbl = kalloc(BLOCK_SIZE*2);
-      if (pg_tbl == NULL) {
+      u_int32_t pg_tbl_phys = (u_int32_t)palloc(BLOCK_SIZE);
+      if (pg_tbl_phys == 0) {
         _kprintf("%s: pg_tbl kalloc error\n", __func__);
         return NULL;
       }
-      pg_tbl = ((u_int32_t)pg_tbl & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+      pg_tbl = (u_int32_t *)(pg_tbl_phys + __PAGE_OFFSET);
       memset(pg_tbl, 0, BLOCK_SIZE);
     } else {
       pg_tbl = pg_dir[pd_pos]&~(BLOCK_SIZE-1);
@@ -151,6 +162,10 @@ PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
     for (pt_pos = pt_start_pos; pt_pos < pt_end_pos; pt_pos++) {
       pte = phy_proc_mem + mapped_blocks*BLOCK_SIZE;
       pte |= (PAGE_PRESENT|PAGE_RW|PAGE_US);
+      if (mapped_blocks == 0)
+        pte |= PAGE_ALLOC_HEAD;
+      else
+        pte |= PAGE_ALLOC_CONT;
       pg_tbl[pt_pos] = pte;
       mapped_blocks++;
     }
@@ -162,9 +177,90 @@ PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
   return (void*)new_start_vaddr;
 }
 
+PUBLIC int clone_process_pages(u_int32_t *dst_pg_dir, u_int32_t *src_pg_dir)
+{
+  int pd_pos;
+
+  if (dst_pg_dir == NULL || src_pg_dir == NULL)
+    return -1;
+
+  for (pd_pos = 0; pd_pos < PGDIR_KERNEL_START; pd_pos++) {
+    u_int32_t src_pde = src_pg_dir[pd_pos];
+    u_int32_t *src_pg_tbl;
+    u_int32_t *dst_pg_tbl;
+    u_int32_t dst_pde;
+    int pt_pos;
+
+    if (src_pde == 0)
+      continue;
+    if (src_pde & PAGE_PSE)
+      return -1;
+
+    src_pg_tbl = (u_int32_t *)((src_pde & ~(BLOCK_SIZE - 1)) + __PAGE_OFFSET);
+    {
+      u_int32_t dst_pg_tbl_phys = (u_int32_t)palloc(BLOCK_SIZE);
+      if (dst_pg_tbl_phys == 0)
+        goto fail;
+      dst_pg_tbl = (u_int32_t *)(dst_pg_tbl_phys + __PAGE_OFFSET);
+    }
+    memset(dst_pg_tbl, 0, BLOCK_SIZE);
+
+    for (pt_pos = 0; pt_pos < 1024; ) {
+      u_int32_t src_pte = src_pg_tbl[pt_pos];
+
+      if ((src_pte & PAGE_PRESENT) == 0) {
+        pt_pos++;
+        continue;
+      }
+
+      {
+        int run_len = 1;
+        u_int32_t dst_run_phys;
+        int run_pos;
+
+        while (pt_pos + run_len < 1024 &&
+               (src_pg_tbl[pt_pos + run_len] & PAGE_PRESENT) != 0) {
+          run_len++;
+        }
+
+        dst_run_phys = (u_int32_t)palloc((u_int32_t)(run_len * BLOCK_SIZE));
+        if (dst_run_phys == 0)
+          goto fail;
+
+        for (run_pos = 0; run_pos < run_len; run_pos++) {
+          u_int32_t run_src_pte = src_pg_tbl[pt_pos + run_pos];
+          u_int32_t dst_phys = dst_run_phys + (run_pos * BLOCK_SIZE);
+
+          memcpy((void *)(dst_phys + __PAGE_OFFSET),
+                 (void *)((run_src_pte & ~(BLOCK_SIZE - 1)) + __PAGE_OFFSET),
+                 BLOCK_SIZE);
+          dst_pg_tbl[pt_pos + run_pos] =
+              dst_phys |
+              ((run_src_pte & (BLOCK_SIZE - 1)) &
+               ~(PAGE_ALLOC_HEAD | PAGE_ALLOC_CONT)) |
+              (run_pos == 0 ? PAGE_ALLOC_HEAD : PAGE_ALLOC_CONT);
+        }
+
+        pt_pos += run_len;
+      }
+    }
+
+    dst_pde = ((u_int32_t)dst_pg_tbl - __PAGE_OFFSET);
+    dst_pde |= (src_pde & (BLOCK_SIZE - 1));
+    dst_pg_dir[pd_pos] = dst_pde;
+  }
+
+  return 0;
+
+fail:
+  free_process_pages(dst_pg_dir);
+  return -1;
+}
+
 PUBLIC void free_process_pages(u_int32_t *pg_dir)
 {
   int pd_pos;
+  com1_printf("AUDIT free_pages_begin pg=%x\r\n", pg_dir);
   for (pd_pos = 0; pd_pos < PGDIR_KERNEL_START; pd_pos++) {
     u_int32_t pde = pg_dir[pd_pos];
     u_int32_t *pg_tbl;
@@ -181,13 +277,16 @@ PUBLIC void free_process_pages(u_int32_t *pg_dir)
       u_int32_t pte = pg_tbl[pt_pos];
       if (pte & PAGE_PRESENT) {
         void *phys = (void *)(pte & ~(BLOCK_SIZE - 1));
-        pfree(phys);
+        if ((pte & PAGE_ALLOC_CONT) == 0)
+          pfree(phys);
       }
     }
 
-    kfree(pg_tbl);
+    com1_printf("AUDIT free_pages_pde pd=%x tbl=%x\r\n", pd_pos, pg_tbl);
+    pfree((void *)(pde & ~(BLOCK_SIZE - 1)));
     pg_dir[pd_pos] = 0;
   }
+  com1_printf("AUDIT free_pages_done pg=%x\r\n", pg_dir);
 }
 
 PUBLIC void pg_set_kernel_4m_page(u_int32_t virt_addr, u_int32_t phys_addr,

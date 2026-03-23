@@ -1,0 +1,12 @@
+let listener = net.listen(18082);
+let sock = net.accept(listener);
+
+let ready = net.poll_read(sock, 200);
+let body = net.read(sock);
+
+net.write(sock, "SX_SERVER");
+net.close(sock);
+net.close(listener);
+
+io.println(ready);
+io.println(body);

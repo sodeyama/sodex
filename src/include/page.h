@@ -22,6 +22,8 @@
 #define PAGE_DIRTY      64
 #define PAGE_PSE        128
 #define PAGE_GLOBAL     256
+#define PAGE_ALLOC_HEAD 512
+#define PAGE_ALLOC_CONT 1024
         
 
 PUBLIC u_int32_t first_pg_dir[PAGE_DIR_SIZE];

@@ -96,6 +96,7 @@ AST / symbol / diagnostics
 | 04 | [plans/04-diagnostics-fixtures-and-compatibility.md](plans/04-diagnostics-fixtures-and-compatibility.md) | 診断形式、fixture、examples、versioning を固定する | 01, 02, 03 | 実装前から回帰基準と互換ポリシーを持てる |
 | 05 | [plans/05-expression-and-control-flow-expansion.md](plans/05-expression-and-control-flow-expansion.md) | operator、assignment、`break` / `continue`、`for` を追加し、手続き表現を広げる | 02, 03, 04 | 実用的な loop / 条件 / 更新が host/QEMU で固定される |
 | 06 | [plans/06-system-interop-surface-expansion.md](plans/06-system-interop-surface-expansion.md) | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` を含む system interop surface を固定する | 03, 04, 05 | script から file / process / pipe / child process と回復可能な helper 値を一通り扱える契約が固まる |
+| 07 | [plans/07-network-literals-and-branching-sugar.md](plans/07-network-literals-and-branching-sugar.md) | `list` / `map` literal、`else if` sugar、`net` namespace を追加し、script の表現力を広げる | 02, 03, 04, 05, 06 | collection literal と client/server network script を言語契約として固定できる |
 
 ## マイルストーン
 
@@ -107,6 +108,7 @@ AST / symbol / diagnostics
 | M3: 回帰基準の固定 | 04 | diagnostics、fixtures、examples、互換ポリシーがそろう |
 | M4: 表現力拡張 | 05 | operator、assignment、`break` / `continue`、`for` が言語契約として固定される |
 | M5: system interop 拡張 | 06 | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` の surface が言語契約として固定される |
+| M6: literal / network 拡張 | 07 | `list` / `map` literal、`else if`、`net` namespace が host/QEMU 前提で説明できる |
 
 ## 現時点の判断
 
@@ -132,6 +134,7 @@ AST / symbol / diagnostics
 - 複雑な型機構より、読みやすい grammar と明快な runtime contract を先に固める
 - error handling は language 機能と stdlib 契約を分けて考える
 - process / fd API は shell 文字列ではなく argv / fd / pid を中心に広げる
+- network API は `io` に混ぜず、socket を明示する `net` namespace に分ける
 
 ## 未解決論点
 
@@ -141,6 +144,8 @@ AST / symbol / diagnostics
 - recoverable error を generic な `Result` 型で持つか、fail-fast + predicate に寄せるか
 - 将来 `sxc` が要求する ABI 情報を AST / semantic layer にどこまで持たせるか
 - `fork` を fail-fast language surface として expose するか、より高水準の `spawn` を主 API に置くか
+- `map` literal の key を v0 で string 限定にするか、identifier shorthand まで許すか
+- `net` namespace を raw fd で expose するか、socket handle として隠蔽するか
 
 ## 関連 spec
 

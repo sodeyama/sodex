@@ -1,12 +1,12 @@
-let items = list.new();
-list.push(items, "alpha");
-list.push(items, "beta");
+let items = ["alpha", "beta"];
+list.push(items, "tail");
 list.set(items, 1, "gamma");
 
-let meta = map.new();
-map.set(meta, "first", list.get(items, 0));
-map.set(meta, "count", list.len(items));
-map.set(meta, "tail", list.get(items, 1));
+let meta = {
+  "first": list.get(items, 0),
+  "count": list.len(items),
+  "tail": list.get(items, 1)
+};
 
 let first = result.ok(map.get(meta, "first"));
 

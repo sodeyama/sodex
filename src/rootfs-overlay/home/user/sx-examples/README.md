@@ -1,7 +1,8 @@
 # sx examples
 
 `/home/user/sx-examples/` は、`sxi` を guest 内で試すためのサンプル集です。
-構文の基本だけでなく、`stdin`、file I/O、`argv`、`spawn`、pipe、`fork` までまとめて置いています。
+構文の基本だけでなく、literal、`stdin`、file I/O、`argv`、`spawn`、pipe、`fork`、network client/server までまとめて置いています。
+文法と構文規則は `LANGUAGE.md` を先に見てください。
 
 ## 最初の実行
 
@@ -170,9 +171,34 @@ sxi env_bytes_result.sx
 sxi list_map.sx
 ```
 
-`list.new`、`list.push`、`list.get`、`list.set`、`list.len`、
-`map.new`、`map.set`、`map.get`、`map.remove`、`map.len`、
-`map.has` を使います。
+`[]`、`{}`、`list.push`、`list.get`、`list.set`、`list.len`、
+`map.get`、`map.remove`、`map.len`、`map.has` を使います。
+
+### 20. literal / `else if`
+
+```sh
+sxi literal_branching.sx
+```
+
+list / map literal と `else if` の最小例です。
+
+### 21. network client
+
+```sh
+sxi net_client.sx
+```
+
+`net.connect`、`net.write`、`net.poll_read`、`net.read`、`net.close` の例です。
+QEMU smoke では host 側 server へ接続します。
+
+### 22. network server
+
+```sh
+sxi net_server.sx
+```
+
+`net.listen`、`net.accept`、`net.read`、`net.write`、`net.close` の例です。
+QEMU smoke では host 側 client が接続します。
 
 ## ファイル一覧
 
@@ -196,6 +222,10 @@ sxi list_map.sx
 - `fork_wait.sx`
 - `env_bytes_result.sx`
 - `list_map.sx`
+- `literal_branching.sx`
+- `net_client.sx`
+- `net_server.sx`
+- `LANGUAGE.md`
 - `copy_source.txt`
 - `stdin_source.txt`
 

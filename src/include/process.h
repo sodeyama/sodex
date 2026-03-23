@@ -94,6 +94,7 @@ struct task_struct {
   u_int32_t         stime;
   u_int32_t         state;
   int               auto_reap;
+  int               vm_is_fork_clone;
   int               exit_status;
   u_int32_t         signal;
   sighandler_t      sigactions[MAX_SIGNALS];

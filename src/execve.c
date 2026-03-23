@@ -28,6 +28,9 @@
 #include <tty.h>
 #include <rs232c.h>
 
+PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit);
+PUBLIC int32_t afree(void* ptr);
+
 PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
                                      char *const envp[],
                                      struct tty *stdio_tty);
@@ -152,12 +155,12 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   /* timer IRQ の mask は caller 側で握り、run list 更新までまとめて保護する。 */
   /* set the memory translation using page feature for user process */
   // alloc 4096Byte from kernel memory manager
-  void *pg_dir_raw = kalloc(BLOCK_SIZE*2);
+  void *pg_dir_raw = aalloc(BLOCK_SIZE, BLOCK_BITS);
   if (pg_dir_raw == NULL) {
     _kprintf("%s: kern_task kalloc error\n", __func__);
     return NULL;
   }
-  u_int32_t* pg_dir = (u_int32_t *)(((u_int32_t)pg_dir_raw & ~(BLOCK_SIZE-1)) + BLOCK_SIZE);
+  u_int32_t* pg_dir = (u_int32_t *)pg_dir_raw;
   memset(pg_dir, 0, BLOCK_SIZE);
   create_kernel_page(pg_dir);
 
@@ -182,7 +185,7 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   memset(kern_task->files, 0, sizeof(struct files_struct));
   child_tty = inherit_stdio_tty(stdio_tty);
   if (current != NULL && stdio_tty == NULL) {
-    files_clone(kern_task->files, current->files);
+    files_clone_stdio(kern_task->files, current->files);
   } else if (child_tty != NULL) {
     fs_stdio_open_tty(kern_task->files, child_tty);
   } else {
@@ -340,17 +343,16 @@ PRIVATE struct task_struct *clone_current_task(void)
   if (current == NULL || current->context == NULL || current->files == NULL)
     return NULL;
 
-  pg_dir_raw = kalloc(BLOCK_SIZE * 2);
+  pg_dir_raw = aalloc(BLOCK_SIZE, BLOCK_BITS);
   if (pg_dir_raw == NULL)
     return NULL;
-  pg_dir = (u_int32_t *)(((u_int32_t)pg_dir_raw & ~(BLOCK_SIZE - 1)) +
-                         BLOCK_SIZE);
+  pg_dir = (u_int32_t *)pg_dir_raw;
   memset(pg_dir, 0, BLOCK_SIZE);
   create_kernel_page(pg_dir);
 
   child = kalloc(sizeof(struct task_struct));
   if (child == NULL) {
-    kfree(pg_dir_raw);
+    afree(pg_dir_raw);
     return NULL;
   }
   memset(child, 0, sizeof(struct task_struct));
@@ -391,6 +393,7 @@ PRIVATE struct task_struct *clone_current_task(void)
   child->allocpoint = current->allocpoint;
   child->firstexec = 1;
   child->state = TASK_RUNNING;
+  child->vm_is_fork_clone = TRUE;
   child->is_usermode = current->is_usermode;
   memcpy(child->sigactions, current->sigactions, sizeof(child->sigactions));
   init_dlist_set(&(child->run_list));
@@ -515,7 +518,7 @@ PRIVATE void cleanup_exec_task(struct task_struct *task)
   if (task->pg_dir != NULL)
     free_process_pages(task->pg_dir);
   if (task->pg_dir_raw != NULL) {
-    kfree(task->pg_dir_raw);
+    afree(task->pg_dir_raw);
     task->pg_dir_raw = NULL;
   }
   kfree(task);

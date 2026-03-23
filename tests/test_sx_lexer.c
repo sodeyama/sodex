@@ -67,12 +67,31 @@ TEST(lex_reports_unterminated_string) {
     ASSERT_STR_EQ(diag.message, "unterminated string literal");
 }
 
+TEST(lex_collection_literals_and_else_if) {
+    const char *text =
+        "let items = [1, 2, 3];\n"
+        "let meta = {\"name\": \"sx\", \"ok\": true};\n"
+        "if (false) { io.println(\"a\"); } else if (true) { io.println(\"b\"); }\n";
+    struct sx_token tokens[SX_MAX_TOKENS];
+    struct sx_diagnostic diag;
+    int count = sx_lex(text, (int)strlen(text), tokens, SX_MAX_TOKENS, &diag);
+
+    ASSERT_EQ(count > 0, 1);
+    ASSERT_EQ(find_kind_after(tokens, count, 0, SX_TOKEN_LBRACKET) >= 0, 1);
+    ASSERT_EQ(find_kind_after(tokens, count, 0, SX_TOKEN_RBRACKET) >= 0, 1);
+    ASSERT_EQ(find_kind_after(tokens, count, 0, SX_TOKEN_COLON) >= 0, 1);
+    ASSERT_EQ(find_kind_after(tokens, count, 0, SX_TOKEN_KEYWORD_ELSE) >= 0, 1);
+    ASSERT_EQ(find_kind_after(tokens, count, 0, SX_TOKEN_KEYWORD_IF) >= 0, 1);
+    ASSERT_EQ(tokens[count - 1].kind, SX_TOKEN_EOF);
+}
+
 int main(void)
 {
     printf("=== sx lexer tests ===\n");
 
     RUN_TEST(lex_function_and_control_flow);
     RUN_TEST(lex_reports_unterminated_string);
+    RUN_TEST(lex_collection_literals_and_else_if);
 
     TEST_REPORT();
 }

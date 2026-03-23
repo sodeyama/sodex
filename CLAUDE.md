@@ -8,6 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **重要**: このカーネルは完全に独自実装であり、**外部ライブラリは一切使用できません**。すべての機能（メモリ管理、プロセス管理、デバイスドライバ、ファイルシステム、ネットワークスタックなど）を独自に実装しています。標準Cライブラリ（libc）も使用不可のため、`printf`、`malloc`、`memcpy`などの関数も自前で実装する必要があります。
 
+## `sx` / `sxi` の参照先
+
+- 文法と構文規則の基準文書は [src/rootfs-overlay/home/user/sx-examples/LANGUAGE.md](/Users/sodeyama/git/sodex/src/rootfs-overlay/home/user/sx-examples/LANGUAGE.md)
+- guest 同梱 sample の入口は [src/rootfs-overlay/home/user/sx-examples/README.md](/Users/sodeyama/git/sodex/src/rootfs-overlay/home/user/sx-examples/README.md)
+- 実例は [src/rootfs-overlay/home/user/sx-examples](/Users/sodeyama/git/sodex/src/rootfs-overlay/home/user/sx-examples) 配下の `*.sx`
+- `sx` / `sxi` を変更するときは、上の文書と sample を先に確認してから parser / runtime / smoke を触る
+
 ### コアアーキテクチャ
 
 **カーネル設計**:

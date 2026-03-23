@@ -36,6 +36,11 @@ struct sx_pipe_handle {
   int write_fd;
 };
 
+struct sx_socket_handle {
+  int active;
+  int fd;
+};
+
 struct sx_list_handle {
   int active;
   int count;
@@ -83,6 +88,7 @@ struct sx_runtime {
   int argc;
   char argv[SX_MAX_RUNTIME_ARGS][SX_TEXT_MAX];
   struct sx_pipe_handle pipes[SX_MAX_PIPE_HANDLES];
+  struct sx_socket_handle sockets[SX_MAX_SOCKET_HANDLES];
   struct sx_list_handle lists[SX_MAX_LIST_HANDLES];
   struct sx_map_handle maps[SX_MAX_MAP_HANDLES];
   struct sx_result_handle results[SX_MAX_RESULT_HANDLES];

@@ -105,6 +105,7 @@
 | 03 | [plans/03-builtins-modules-and-host-bridge.md](plans/03-builtins-modules-and-host-bridge.md) | `fs` / `proc` / `json` / `text` の host bridge と module surface を決める | 01, 02, [`specs/sx-language/plans/03-type-system-and-standard-surface.md`](../sx-language/plans/03-type-system-and-standard-surface.md) | agent 用 script が guest 内で実用になる |
 | 04 | [plans/04-repl-validation-and-bytecode-handoff.md](plans/04-repl-validation-and-bytecode-handoff.md) | REPL UX、host/QEMU test、bytecode handoff 境界を固める | 01, 02, 03, [`specs/sx-language/plans/04-diagnostics-fixtures-and-compatibility.md`](../sx-language/plans/04-diagnostics-fixtures-and-compatibility.md) | 日常利用の実行経路と将来拡張の境界が固まる |
 | 05 | [plans/05-process-io-and-fork-expansion.md](plans/05-process-io-and-fork-expansion.md) | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` の runtime と guest bridge を固める | 02, 03, 04, [`specs/sx-language/plans/06-system-interop-surface-expansion.md`](../sx-language/plans/06-system-interop-surface-expansion.md) | script から fd / pid / pipe / child process と helper object を実用的に扱える |
+| 06 | [plans/06-network-runtime-and-resource-tracking.md](plans/06-network-runtime-and-resource-tracking.md) | `net` namespace、socket resource tracking、host/QEMU の client/server 回帰を固める | 02, 03, 04, 05, [`specs/sx-language/plans/07-network-literals-and-branching-sugar.md`](../sx-language/plans/07-network-literals-and-branching-sugar.md) | `sxi` で socket client / server を継続的に検証できる |
 
 ## マイルストーン
 
@@ -115,6 +116,7 @@
 | M2: host bridge の固定 | 03 | file / process / JSON / text の標準入口がそろう |
 | M3: 検証導線と次段の境界固定 | 04 | REPL、agent workflow、host/QEMU test、bytecode handoff がそろう |
 | M4: interop runtime の固定 | 05 | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` が host/QEMU で固定される |
+| M5: network runtime の固定 | 06 | `net` namespace と socket cleanup が host/QEMU の client / server 回帰で固定される |
 
 ## 現時点の判断
 
@@ -140,6 +142,7 @@
 - runtime error は fail-fast を基本にし、recoverable error 機構は後段候補とする
 - REPL の長寿命状態は session arena と `:reset` で制御する
 - process API は `execve()` の現行契約に合わせつつ、`spawn` を主 API に据え、`fork` は明示的な低水準操作として扱う
+- socket API は raw fd を返しつつ、runtime 側で追跡して cleanup を担保する
 
 ## 未解決論点
 
@@ -149,6 +152,7 @@
 - file / JSON API の戻り値を fail-fast に寄せるか、structured error を早めに持つか
 - `sxb` 用の bytecode IR を AST 直後に作るか、evaluator 専用の lowering を別に持つか
 - `fork()` を raw に expose しつつ、`spawn` / `pipe` 主体の script style をどう推奨するか
+- socket を `io.*` と共有するか、`net.*` を主入口として維持するか
 
 ## 関連 spec
 

@@ -17,6 +17,7 @@
 - 2026-03-22: 次段の system interop 拡張として、`argv`、fd I/O、path、time、`spawn` / `wait` / `pipe` / `fork` を `Plan 06` で整理した
 - 2026-03-22: `argv`、fd I/O、path、time、`spawn` / `wait` / `pipe` / `fork` を language surface / host test / QEMU smoke / guest sample まで通した
 - 2026-03-23: `proc.has_env`、`bytes`、`list`、`map`、`result`、`try_*` を sample / fixture / QEMU smoke まで広げ、guest 同梱 corpus を拡充した
+- 2026-03-23: 次段として `list` / `map` literal、`else if`、`net` namespace を `Plan 07` で整理した
 
 ## 優先順
 
@@ -72,6 +73,14 @@
 | [x] | SX-16 | `io` / `fs` / `time` namespace の fd / path / cwd / sleep 契約を固定する | SX-08, SX-10, SX-13 | stdin/stdout/fd I/O、path 操作、cwd、time API が言語 surface として説明できる |
 | [x] | SX-17 | `proc` namespace の `argv` / `spawn` / `wait` / `pipe` / `fork` / `exit` 契約を固定する | SX-08, SX-10, SX-13, SX-14 | pid / fd / child process を扱う script 契約が一貫して説明できる |
 | [x] | SX-18 | interop 系 example / fixture / smoke を追加し、guest sample を網羅化する | SX-11, SX-15, SX-16, SX-17 | `argv` / path / spawn / pipe / fork / time / env / bytes / list / map / result の sample と回帰がそろう |
+
+## M6: literal / network expansion
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | SX-19 | `list` / `map` literal と `else if` sugar の grammar / AST / semantic contract を固定する | SX-04, SX-05, SX-07, SX-13 | `[]` / `{}` / `else if` が host / QEMU で一貫して parse / eval できる |
+| [ ] | SX-20 | `net` namespace の client / server surface と check mode 契約を固定する | SX-08, SX-10, SX-16, SX-17 | `connect` / `listen` / `accept` / `read` / `write` / `poll_read` / `close` が言語 surface として説明できる |
+| [ ] | SX-21 | literal / network 系 example / fixture / smoke を追加し、guest sample を拡充する | SX-11, SX-18, SX-19, SX-20 | collection literal、`else if`、guest client / server の sample と回帰がそろう |
 
 ## 先送りする項目
 

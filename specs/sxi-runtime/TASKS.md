@@ -16,6 +16,7 @@
 - 2026-03-22: 次段の interop 拡張として、`argv`、fd I/O、path、time、`spawn` / `wait` / `pipe` / `fork` を `Plan 05` として整理した
 - 2026-03-22: `argv`、fd I/O、path、time、`spawn` / `wait` / `pipe` / `fork` を runtime / host test / QEMU smoke / guest sample まで通した
 - 2026-03-23: `proc.has_env`、`bytes`、`list`、`map`、`result` と `try_*` の sample / fixture / QEMU smoke を追加し、guest / host 回帰の粒度を上げた
+- 2026-03-23: 次段として `net` namespace と socket cleanup を `Plan 06` として整理した
 
 ## 優先順
 
@@ -63,6 +64,14 @@
 | [x] | SXI-13 | runtime に `argv`、fd、pipe handle、cwd / time helper を追加する | SXI-04, SXI-06, SXI-07 | `sxi` session が pid / fd / argv を持つ runtime state を扱える |
 | [x] | SXI-14 | `spawn` / `wait` / `pipe` / `fork` / `exit` と fd I/O を guest / host 双方で動かす | SXI-08, SXI-09, SXI-13 | host test と guest 実装の両方で child process と pipe を扱える |
 | [x] | SXI-15 | interop sample、CLI argv、QEMU smoke、fork 回帰を追加する | SXI-10, SXI-11, SXI-13, SXI-14 | `/home/user/sx-examples/` と `test-qemu-sxi` で interop 系と env / bytes / result / list / map の回帰がそろう |
+
+## M5: network runtime expansion
+
+| 状態 | ID | タスク | 主な依存 | 完了条件 |
+|---|---|---|---|---|
+| [ ] | SXI-16 | runtime に socket tracking と `net` namespace を追加する | SXI-04, SXI-05, SXI-06, SXI-13, `specs/sx-language/plans/07-network-literals-and-branching-sugar.md` | `connect` / `listen` / `accept` / `read` / `write` / `poll_read` / `close` が host / guest 双方で動く |
+| [ ] | SXI-17 | host unit test と QEMU smoke に client / server network 回帰を追加する | SXI-10, SXI-11, SXI-16 | host 側 peer と guest 側 peer の両方を使う network 回帰が安定して通る |
+| [ ] | SXI-18 | sample / language reference / fixture corpus を更新し、network と literal の使い方を guest に同梱する | SXI-03, SXI-11, SXI-16, SXI-17 | `/home/user/sx-examples/` と `LANGUAGE.md` から network と literal の最短例が追える |
 
 ## 先送りする項目
 

@@ -156,6 +156,22 @@ PRIVATE void socket_dbg_udp_event(const char *label, int sockfd,
   socket_dbg_puts("\n");
 }
 
+PRIVATE void socket_dbg_stream_recv_event(const char *label, int sockfd,
+                                          int state, int rx_len, int ret)
+{
+  socket_dbg_puts("TCP: ");
+  socket_dbg_puts(label);
+  socket_dbg_puts(" sockfd=");
+  socket_dbg_dec(sockfd);
+  socket_dbg_puts(" state=");
+  socket_dbg_dec(state);
+  socket_dbg_puts(" rx=");
+  socket_dbg_dec(rx_len);
+  socket_dbg_puts(" ret=");
+  socket_dbg_dec(ret);
+  socket_dbg_puts("\n");
+}
+
 PRIVATE void rxbuf_init(struct kern_socket *sk)
 {
   sk->rx_head = 0;
@@ -839,8 +855,15 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
       /* Distinguish timeout (0) from true EOF (SOCK_ERR_EOF) so callers
        * like tls_recv can retry on timeout but stop on EOF. */
       if (sk->state == SOCK_STATE_CLOSE_WAIT ||
-          sk->state == SOCK_STATE_CLOSED)
+          sk->state == SOCK_STATE_CLOSED) {
+        if (sk->type == SOCK_STREAM)
+          socket_dbg_stream_recv_event("RECV-EOF", sockfd,
+                                       sk->state, sk->rx_len, SOCK_ERR_EOF);
         return SOCK_ERR_EOF;
+      }
+      if (sk->type == SOCK_STREAM)
+        socket_dbg_stream_recv_event("RECV-TIMEOUT", sockfd,
+                                     sk->state, sk->rx_len, 0);
       return 0;  /* timeout — no data yet but connection still alive */
     }
   }
@@ -848,6 +871,8 @@ PUBLIC int kern_recvfrom(int sockfd, void *buf, int len, int flags,
   disableInterrupt();
   int ret = rxbuf_read(sk, (u_int8_t *)buf, len, addr);
   enableInterrupt();
+  if (sk->type == SOCK_STREAM && ret <= 0)
+    socket_dbg_stream_recv_event("RECV-RET", sockfd, sk->state, sk->rx_len, ret);
   if (signer)
     socket_dbg_udp_event("KRECV-RET", sockfd, sk->udp_conn->lport,
                          sk->udp_conn->rport, (u_int16_t)ret);

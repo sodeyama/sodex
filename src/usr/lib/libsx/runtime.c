@@ -3,20 +3,29 @@
 #include <string.h>
 
 #ifdef TEST_BUILD
+#include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #define sx_guest_debug_printf(...) ((void)0)
 #else
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <debug.h>
+#include <dns.h>
 #include <fs.h>
+#include <netinet/in.h>
+#include <poll.h>
 #include <sleep.h>
+#include <sys/socket.h>
 
 extern u_int32_t get_kernel_tick(void);
 #define sx_guest_debug_printf(...) debug_printf(__VA_ARGS__)
@@ -56,6 +65,20 @@ static void sx_copy_runtime_limits(struct sx_runtime_limits *dst,
   dst->max_scope_depth = src->max_scope_depth;
   dst->max_call_depth = src->max_call_depth;
   dst->max_loop_iterations = src->max_loop_iterations;
+}
+
+static int sx_call_stack_contains(const struct sx_runtime *runtime,
+                                  const char *name)
+{
+  int i;
+
+  if (runtime == 0 || name == 0 || name[0] == '\0')
+    return 0;
+  for (i = 0; i < runtime->call_depth && i < SX_MAX_CALL_DEPTH; i++) {
+    if (strcmp(runtime->call_stack[i], name) == 0)
+      return 1;
+  }
+  return 0;
 }
 
 static int sx_format_i32(char *buf, int cap, int value)
@@ -199,6 +222,30 @@ static void sx_set_result_value(struct sx_value *value, int handle)
   sx_set_handle_value(value, SX_VALUE_RESULT, handle, "<result");
 }
 
+static void sx_set_dummy_value_for_type(struct sx_value *value,
+                                        const char *type_name)
+{
+  if (value == 0)
+    return;
+  if (type_name == 0 || type_name[0] == '\0') {
+    sx_set_unit_value(value);
+    return;
+  }
+  if (strcmp(type_name, "str") == 0) {
+    sx_set_string_value(value, "");
+    return;
+  }
+  if (strcmp(type_name, "bool") == 0) {
+    sx_set_bool_value(value, 0);
+    return;
+  }
+  if (strcmp(type_name, "i32") == 0) {
+    sx_set_i32_value(value, 0);
+    return;
+  }
+  sx_set_unit_value(value);
+}
+
 static int sx_format_value_text(const struct sx_value *value,
                                 char *buf, int cap)
 {
@@ -256,6 +303,191 @@ static struct sx_pipe_handle *sx_get_pipe_handle(struct sx_runtime *runtime,
   if (runtime->pipes[handle].active == 0)
     return 0;
   return &runtime->pipes[handle];
+}
+
+static int sx_close_socket_fd(int fd)
+{
+  if (fd < 0)
+    return 0;
+#ifdef TEST_BUILD
+  return close(fd);
+#else
+  return closesocket(fd);
+#endif
+}
+
+static int sx_track_socket_fd(struct sx_runtime *runtime, int fd)
+{
+  int i;
+
+  if (runtime == 0 || fd < 0)
+    return -1;
+  for (i = 0; i < SX_MAX_SOCKET_HANDLES; i++) {
+    if (runtime->sockets[i].active != 0 &&
+        runtime->sockets[i].fd == fd)
+      return 0;
+  }
+  for (i = 0; i < SX_MAX_SOCKET_HANDLES; i++) {
+    if (runtime->sockets[i].active != 0)
+      continue;
+    runtime->sockets[i].active = 1;
+    runtime->sockets[i].fd = fd;
+    return 0;
+  }
+  return -1;
+}
+
+static void sx_detach_socket_fd(struct sx_runtime *runtime, int fd)
+{
+  int i;
+
+  if (runtime == 0 || fd < 0)
+    return;
+  for (i = 0; i < SX_MAX_SOCKET_HANDLES; i++) {
+    if (runtime->sockets[i].active == 0 ||
+        runtime->sockets[i].fd != fd)
+      continue;
+    runtime->sockets[i].active = 0;
+    runtime->sockets[i].fd = -1;
+  }
+}
+
+static int sx_is_tracked_socket_fd(const struct sx_runtime *runtime, int fd)
+{
+  int i;
+
+  if (runtime == 0 || fd < 0)
+    return 0;
+  for (i = 0; i < SX_MAX_SOCKET_HANDLES; i++) {
+    if (runtime->sockets[i].active != 0 &&
+        runtime->sockets[i].fd == fd)
+      return 1;
+  }
+  return 0;
+}
+
+static int sx_socket_poll_internal(int fd, int events, int timeout_ticks)
+{
+  struct pollfd poll_fd;
+  int ready;
+
+  memset(&poll_fd, 0, sizeof(poll_fd));
+  poll_fd.fd = fd;
+  poll_fd.events = (short)events;
+  ready = poll(&poll_fd, 1, timeout_ticks);
+  if (ready <= 0)
+    return ready;
+  return (poll_fd.revents & events) != 0 || (poll_fd.revents & POLLHUP) != 0;
+}
+
+static int sx_poll_socket_readable(int fd, int timeout_ticks)
+{
+  if (fd < 0)
+    return -1;
+  return sx_socket_poll_internal(fd, POLLIN, timeout_ticks);
+}
+
+static int sx_socket_send_once(int fd, const char *buf, int len)
+{
+  if (fd < 0 || buf == 0 || len < 0)
+    return -1;
+#ifdef TEST_BUILD
+  return (int)send(fd, buf, (size_t)len, 0);
+#else
+  return send_msg(fd, buf, len, 0);
+#endif
+}
+
+static int sx_socket_recv_once(int fd, char *buf, int len)
+{
+  if (fd < 0 || buf == 0 || len <= 0)
+    return -1;
+#ifdef TEST_BUILD
+  return (int)recv(fd, buf, (size_t)len, 0);
+#else
+  return recv_msg(fd, buf, len, 0);
+#endif
+}
+
+static int sx_socket_write_all(int fd, const char *buf, int len)
+{
+  int written = 0;
+
+  if (fd < 0 || buf == 0 || len < 0)
+    return -1;
+  while (written < len) {
+    int nr = sx_socket_send_once(fd, buf + written, len - written);
+
+    if (nr <= 0)
+      return -1;
+    written += nr;
+  }
+  return written;
+}
+
+static int sx_socket_read_text(int fd, char *buf, int cap)
+{
+  int len = 0;
+
+  if (fd < 0 || buf == 0 || cap <= 1)
+    return -1;
+  while (len < cap - 1) {
+    int nr = sx_socket_recv_once(fd, buf + len, cap - len - 1);
+
+    if (nr < 0)
+      return -1;
+    if (nr == 0)
+      break;
+    len += nr;
+    if (len >= cap - 1 || sx_poll_socket_readable(fd, 0) <= 0)
+      break;
+  }
+  buf[len] = '\0';
+  return len;
+}
+
+static int sx_parse_host_ipv4(const char *host, struct in_addr *addr)
+{
+  if (host == 0 || addr == 0)
+    return -1;
+#ifdef TEST_BUILD
+  if (strcmp(host, "localhost") == 0)
+    host = "127.0.0.1";
+  return inet_aton(host, addr) != 0 ? 0 : -1;
+#else
+  if (inet_aton(host, addr) != 0)
+    return 0;
+  {
+    struct dns_result resolved;
+
+    if (dns_resolve(host, &resolved) < 0)
+      return -1;
+    addr->s_addr = (u_int32_t)resolved.addr[0] |
+                   ((u_int32_t)resolved.addr[1] << 8) |
+                   ((u_int32_t)resolved.addr[2] << 16) |
+                   ((u_int32_t)resolved.addr[3] << 24);
+  }
+  return 0;
+#endif
+}
+
+static int sx_build_sockaddr(const char *host, int port,
+                             struct sockaddr_in *addr)
+{
+  if (addr == 0 || port < 0 || port > 65535)
+    return -1;
+  memset(addr, 0, sizeof(*addr));
+  addr->sin_family = AF_INET;
+  addr->sin_port = htons((u_int16_t)port);
+  if (host == 0)
+    return 0;
+  return sx_parse_host_ipv4(host, &addr->sin_addr);
+}
+
+static int sx_alloc_dummy_socket_fd(struct sx_runtime *runtime)
+{
+  (void)runtime;
+  return SX_DUMMY_FD_BASE + 100;
 }
 
 static int sx_alloc_list_handle(struct sx_runtime *runtime)
@@ -1014,6 +1246,89 @@ static int sx_wait_for_pid(pid_t pid, int *status_out)
   return 0;
 }
 
+static int sx_capture_child_output(int read_fd,
+                                   pid_t pid,
+                                   char *buf,
+                                   int cap,
+                                   int *status_out)
+{
+  struct pollfd pfd;
+  int len = 0;
+  int status = 0;
+  int child_done = 0;
+
+  if (read_fd < 0 || pid < 0 || buf == 0 || cap <= 1)
+    return -1;
+
+  memset(&pfd, 0, sizeof(pfd));
+  pfd.fd = read_fd;
+  pfd.events = POLLIN;
+
+  while (child_done == 0) {
+    int ret;
+
+    pfd.revents = 0;
+    ret = poll(&pfd, 1, 1);
+    if (ret > 0 && (pfd.revents & POLLIN) != 0) {
+      char discard[256];
+      char *dst = discard;
+      int remain = (int)sizeof(discard);
+      int nr;
+
+      if (len < cap - 1) {
+        dst = buf + len;
+        remain = cap - len - 1;
+      }
+      nr = (int)read(read_fd, dst, (size_t)remain);
+      if (nr < 0)
+        return -1;
+      if (nr > 0 && len < cap - 1) {
+        if (nr > cap - len - 1)
+          nr = cap - len - 1;
+        len += nr;
+      }
+    }
+
+    if (waitpid(pid, &status, WNOHANG) > 0)
+      child_done = 1;
+  }
+
+  for (;;) {
+    int ret;
+
+    pfd.revents = 0;
+    ret = poll(&pfd, 1, 0);
+    if (ret <= 0 || (pfd.revents & POLLIN) == 0)
+      break;
+    if (len < cap - 1) {
+      int nr = (int)read(read_fd, buf + len, (size_t)(cap - len - 1));
+
+      if (nr < 0)
+        return -1;
+      if (nr == 0)
+        break;
+      len += nr;
+    } else {
+      char discard[256];
+      int nr = (int)read(read_fd, discard, sizeof(discard));
+
+      if (nr < 0)
+        return -1;
+      if (nr == 0)
+        break;
+    }
+  }
+
+#ifdef TEST_BUILD
+  if (WIFEXITED(status))
+    status = WEXITSTATUS(status);
+#endif
+  buf[len] = '\0';
+  if (status_out != 0)
+    *status_out = status;
+  return len;
+}
+
 static int sx_build_exec_argv(const struct sx_value *args,
                               int arg_count,
                               int extra_start,
@@ -1087,30 +1402,165 @@ static int sx_host_spawn_process(struct sx_runtime *runtime,
   return 0;
 }
 #else
-static int sx_child_redirect_fd(int target_fd, int source_fd)
+static int sx_guest_save_fd_once(int target_fd, int *saved_fds)
 {
-  if (source_fd < 0 || source_fd == target_fd)
-    return 0;
-  close(target_fd);
-  if (dup(source_fd) != target_fd)
+  if (saved_fds == 0 || target_fd < STDIN_FILENO || target_fd > STDERR_FILENO)
     return -1;
-  close(source_fd);
+  if (saved_fds[target_fd] >= 0)
+    return 0;
+  saved_fds[target_fd] = dup(target_fd);
+  if (saved_fds[target_fd] < 0)
+    return -1;
   return 0;
 }
 
-static void sx_guest_close_runtime_pipe_fds(struct sx_runtime *runtime)
+static int sx_guest_dup_to_target(int source_fd, int target_fd)
+{
+  int new_fd;
+
+  if (source_fd == target_fd)
+    return 0;
+  close(target_fd);
+  new_fd = dup(source_fd);
+  if (new_fd != target_fd) {
+    if (new_fd >= 0)
+      close(new_fd);
+    return -1;
+  }
+  return 0;
+}
+
+static int sx_guest_assign_fd(int target_fd, int source_fd, int *saved_fds)
+{
+  if (source_fd < 0 || source_fd == target_fd)
+    return 0;
+  if (sx_guest_save_fd_once(target_fd, saved_fds) < 0)
+    return -1;
+  return sx_guest_dup_to_target(source_fd, target_fd);
+}
+
+static int sx_guest_hide_fd(int fd,
+                            const int *keep_fds,
+                            int keep_count,
+                            int *hidden_fds,
+                            int *saved_fds,
+                            int *hidden_count,
+                            int hidden_cap)
 {
   int i;
 
+  if (fd < STDERR_FILENO + 1 || hidden_fds == 0 || saved_fds == 0 ||
+      hidden_count == 0)
+    return 0;
+  for (i = 0; i < keep_count; i++) {
+    if (keep_fds[i] == fd)
+      return 0;
+  }
+  for (i = 0; i < *hidden_count; i++) {
+    if (hidden_fds[i] == fd)
+      return 0;
+  }
+  if (*hidden_count >= hidden_cap)
+    return -1;
+  saved_fds[*hidden_count] = dup(fd);
+  if (saved_fds[*hidden_count] < 0)
+    return -1;
+  close(fd);
+  hidden_fds[*hidden_count] = fd;
+  (*hidden_count)++;
+  return 0;
+}
+
+static int sx_guest_hide_runtime_fds(struct sx_runtime *runtime,
+                                     int stdin_fd,
+                                     int stdout_fd,
+                                     int stderr_fd,
+                                     int *hidden_fds,
+                                     int *saved_fds,
+                                     int hidden_cap,
+                                     int *hidden_count_out)
+{
+  int i;
+  int hidden_count = 0;
+  int keep_fds[3];
+
+  if (hidden_count_out != 0)
+    *hidden_count_out = 0;
   if (runtime == 0)
-    return;
+    return 0;
+
+  keep_fds[0] = stdin_fd;
+  keep_fds[1] = stdout_fd;
+  keep_fds[2] = stderr_fd;
+
   for (i = 0; i < SX_MAX_PIPE_HANDLES; i++) {
     if (runtime->pipes[i].active == 0)
       continue;
-    if (runtime->pipes[i].read_fd >= STDERR_FILENO + 1)
-      close(runtime->pipes[i].read_fd);
-    if (runtime->pipes[i].write_fd >= STDERR_FILENO + 1)
-      close(runtime->pipes[i].write_fd);
+    if (sx_guest_hide_fd(runtime->pipes[i].read_fd, keep_fds, 3,
+                         hidden_fds, saved_fds, &hidden_count,
+                         hidden_cap) < 0) {
+      if (hidden_count_out != 0)
+        *hidden_count_out = hidden_count;
+      return -1;
+    }
+    if (sx_guest_hide_fd(runtime->pipes[i].write_fd, keep_fds, 3,
+                         hidden_fds, saved_fds, &hidden_count,
+                         hidden_cap) < 0) {
+      if (hidden_count_out != 0)
+        *hidden_count_out = hidden_count;
+      return -1;
+    }
+  }
+
+  for (i = 0; i < SX_MAX_SOCKET_HANDLES; i++) {
+    if (runtime->sockets[i].active == 0)
+      continue;
+    if (sx_guest_hide_fd(runtime->sockets[i].fd, keep_fds, 3,
+                         hidden_fds, saved_fds, &hidden_count,
+                         hidden_cap) < 0) {
+      if (hidden_count_out != 0)
+        *hidden_count_out = hidden_count;
+      return -1;
+    }
+  }
+
+  if (hidden_count_out != 0)
+    *hidden_count_out = hidden_count;
+  return hidden_count;
+}
+
+static void sx_guest_restore_hidden_fds(const int *hidden_fds,
+                                        int *saved_fds,
+                                        int hidden_count)
+{
+  int i;
+
+  if (hidden_fds == 0 || saved_fds == 0)
+    return;
+  for (i = hidden_count - 1; i >= 0; i--) {
+    close(hidden_fds[i]);
+    if (dup(saved_fds[i]) != hidden_fds[i]) {
+      close(saved_fds[i]);
+      continue;
+    }
+    close(saved_fds[i]);
+    saved_fds[i] = -1;
+  }
+}
+
+static void sx_guest_restore_fds(int *saved_fds)
+{
+  int i;
+
+  if (saved_fds == 0)
+    return;
+  for (i = STDIN_FILENO; i <= STDERR_FILENO; i++) {
+    if (saved_fds[i] < 0)
+      continue;
+    close(i);
+    dup(saved_fds[i]);
+    close(saved_fds[i]);
+    saved_fds[i] = -1;
   }
 }
 
@@ -1121,29 +1571,46 @@ static int sx_guest_spawn_process(struct sx_runtime *runtime,
                                   int stderr_fd,
                                   pid_t *out_pid)
 {
-  int status = 0;
+  int saved_fds[STDERR_FILENO + 1];
+  int hidden_fds[SX_MAX_PIPE_HANDLES * 2 + SX_MAX_SOCKET_HANDLES];
+  int hidden_saved_fds[SX_MAX_PIPE_HANDLES * 2 + SX_MAX_SOCKET_HANDLES];
+  int hidden_count = 0;
+  int hide_result;
+  int i;
   pid_t pid;
-  pid_t exec_pid;
 
   if (argv == 0 || argv[0] == 0 || out_pid == 0)
     return -1;
-  pid = fork();
+
+  saved_fds[STDIN_FILENO] = -1;
+  saved_fds[STDOUT_FILENO] = -1;
+  saved_fds[STDERR_FILENO] = -1;
+  for (i = 0; i < SX_MAX_PIPE_HANDLES * 2 + SX_MAX_SOCKET_HANDLES; i++) {
+    hidden_fds[i] = -1;
+    hidden_saved_fds[i] = -1;
+  }
+  hide_result = sx_guest_hide_runtime_fds(runtime,
+                                          stdin_fd, stdout_fd, stderr_fd,
+                                          hidden_fds, hidden_saved_fds,
+                                          SX_MAX_PIPE_HANDLES * 2 +
+                                              SX_MAX_SOCKET_HANDLES,
+                                          &hidden_count);
+  if (hide_result < 0) {
+    sx_guest_restore_hidden_fds(hidden_fds, hidden_saved_fds, hidden_count);
+    return -1;
+  }
+  if (sx_guest_assign_fd(STDIN_FILENO, stdin_fd, saved_fds) < 0 ||
+      sx_guest_assign_fd(STDOUT_FILENO, stdout_fd, saved_fds) < 0 ||
+      sx_guest_assign_fd(STDERR_FILENO, stderr_fd, saved_fds) < 0) {
+    sx_guest_restore_fds(saved_fds);
+    sx_guest_restore_hidden_fds(hidden_fds, hidden_saved_fds, hidden_count);
+    return -1;
+  }
+  pid = execve(argv[0], argv, 0);
+  sx_guest_restore_fds(saved_fds);
+  sx_guest_restore_hidden_fds(hidden_fds, hidden_saved_fds, hidden_count);
   if (pid < 0)
     return -1;
-  if (pid == 0) {
-    if (sx_child_redirect_fd(STDIN_FILENO, stdin_fd) < 0 ||
-        sx_child_redirect_fd(STDOUT_FILENO, stdout_fd) < 0 ||
-        sx_child_redirect_fd(STDERR_FILENO, stderr_fd) < 0) {
-      exit(127);
-    }
-    sx_guest_close_runtime_pipe_fds(runtime);
-    exec_pid = execve(argv[0], argv, 0);
-    if (exec_pid < 0)
-      exit(127);
-    if (sx_wait_for_pid(exec_pid, &status) < 0)
-      exit(127);
-    exit(status);
-  }
   *out_pid = pid;
   return 0;
 }
@@ -1211,6 +1678,7 @@ static int sx_run_process(struct sx_runtime *runtime,
   }
   if (capture_output != 0) {
     int pipefd[2];
+    int capture_len;
 
     if (pipe(pipefd) < 0)
       return -1;
@@ -1225,24 +1693,21 @@ static int sx_run_process(struct sx_runtime *runtime,
     close(pipefd[1]);
     sx_guest_debug_printf("AUDIT sx_capture_wait_begin pid=%d read=%d\n",
                           (int)pid, pipefd[0]);
-    if (sx_wait_for_pid(pid, &status) < 0) {
+    capture_len = sx_capture_child_output(pipefd[0], pid, value->text,
+                                          sizeof(value->text), &status);
+    if (capture_len < 0) {
       close(pipefd[0]);
       return -1;
     }
     sx_guest_debug_printf("AUDIT sx_capture_wait_done pid=%d status=%d\n",
                           (int)pid, status);
-    if (sx_capture_process_output(pipefd[0], value->text,
-                                  sizeof(value->text)) < 0) {
-      close(pipefd[0]);
-      return -1;
-    }
     sx_guest_debug_printf("AUDIT sx_capture_read_done pid=%d len=%d\n",
-                          (int)pid, (int)strlen(value->text));
+                          (int)pid, capture_len);
     close(pipefd[0]);
     value->kind = SX_VALUE_STRING;
     value->bool_value = 0;
     value->int_value = 0;
-    value->data_len = (int)strlen(value->text);
+    value->data_len = capture_len;
     return 0;
   }
 
@@ -1613,6 +2078,105 @@ static int sx_eval_binary_expr(struct sx_runtime *runtime,
   return -1;
 }
 
+static int sx_eval_list_expr(struct sx_runtime *runtime,
+                             const struct sx_program *program,
+                             const struct sx_list_expr *list_expr,
+                             int execute_side_effects,
+                             struct sx_value *value,
+                             struct sx_diagnostic *diag)
+{
+  struct sx_list_handle *list_handle;
+  int handle;
+  int i;
+
+  if (runtime == 0 || program == 0 || list_expr == 0 || value == 0)
+    return -1;
+  handle = sx_alloc_list_handle(runtime);
+  if (handle < 0) {
+    sx_set_diagnostic(diag, 0, 0, 0, 0,
+                      "list handle table is full");
+    return -1;
+  }
+  list_handle = sx_get_list_handle(runtime, handle);
+  if (list_handle == 0)
+    return -1;
+  for (i = 0; i < list_expr->item_count; i++) {
+    struct sx_value item_value;
+    int item_expr_index;
+
+    if (list_expr->item_start_index + i >= program->list_literal_item_count) {
+      sx_set_diagnostic(diag, 0, 0, 0, 0, "invalid list literal");
+      return -1;
+    }
+    item_expr_index = program->list_literal_items[list_expr->item_start_index + i];
+
+    sx_set_unit_value(&item_value);
+    if (sx_eval_expr_from_index(runtime, program,
+                                item_expr_index,
+                                &item_value, execute_side_effects, diag) < 0)
+      return -1;
+    if (list_handle->count >= SX_MAX_LIST_ITEMS) {
+      sx_set_diagnostic(diag, 0, 0, 0, 0, "list is full");
+      return -1;
+    }
+    list_handle->items[list_handle->count++] = item_value;
+  }
+  sx_set_list_value(value, handle);
+  return 0;
+}
+
+static int sx_eval_map_expr(struct sx_runtime *runtime,
+                            const struct sx_program *program,
+                            const struct sx_map_expr *map_expr,
+                            int execute_side_effects,
+                            struct sx_value *value,
+                            struct sx_diagnostic *diag)
+{
+  struct sx_map_handle *map_handle;
+  int handle;
+  int i;
+
+  if (runtime == 0 || program == 0 || map_expr == 0 || value == 0)
+    return -1;
+  handle = sx_alloc_map_handle(runtime);
+  if (handle < 0) {
+    sx_set_diagnostic(diag, 0, 0, 0, 0,
+                      "map handle table is full");
+    return -1;
+  }
+  map_handle = sx_get_map_handle(runtime, handle);
+  if (map_handle == 0)
+    return -1;
+  for (i = 0; i < map_expr->item_count; i++) {
+    struct sx_value item_value;
+    const struct sx_map_literal_item *item;
+
+    if (map_expr->item_start_index + i >= program->map_literal_item_count) {
+      sx_set_diagnostic(diag, 0, 0, 0, 0, "invalid map literal");
+      return -1;
+    }
+    item = &program->map_literal_items[map_expr->item_start_index + i];
+
+    sx_set_unit_value(&item_value);
+    if (sx_eval_expr_from_index(runtime, program,
+                                item->value_expr_index,
+                                &item_value, execute_side_effects, diag) < 0)
+      return -1;
+    if (i >= SX_MAX_MAP_ITEMS) {
+      sx_set_diagnostic(diag, 0, 0, 0, 0, "map is full");
+      return -1;
+    }
+    map_handle->entries[i].used = 1;
+    sx_copy_text(map_handle->entries[i].key,
+                 sizeof(map_handle->entries[i].key),
+                 item->key);
+    map_handle->entries[i].value = item_value;
+    map_handle->count++;
+  }
+  sx_set_map_value(value, handle);
+  return 0;
+}
+
 static int sx_run_block(struct sx_runtime *runtime,
                         const struct sx_program *program,
                         int block_index,
@@ -1671,6 +2235,11 @@ static int sx_call_user_function(struct sx_runtime *runtime,
     if (sx_eval_expr_from_index(runtime, program, call->args[i],
                                 &args[i], execute_side_effects, diag) < 0)
       return -1;
+  }
+  if (execute_side_effects == 0 &&
+      sx_call_stack_contains(runtime, fn->name) != 0) {
+    sx_set_dummy_value_for_type(value, fn->return_type);
+    return 0;
   }
 
   runtime->call_depth++;
@@ -1822,13 +2391,20 @@ static int sx_eval_namespace_call(struct sx_runtime *runtime,
       }
       if (execute_side_effects == 0)
         sx_set_string_value(value, "");
-      else if (sx_capture_process_output(fd, value->text,
-                                         sizeof(value->text)) < 0) {
-        sx_set_diagnostic(diag, span->offset, span->length,
-                          span->line, span->column,
-                          "io.read_fd failed");
-        return -1;
-      } else {
+      else {
+        int read_len = 0;
+
+        sx_guest_debug_printf("AUDIT sx_io_read_fd_begin fd=%d\r\n", fd);
+        read_len = sx_capture_process_output(fd, value->text,
+                                             sizeof(value->text));
+        if (read_len < 0) {
+          sx_set_diagnostic(diag, span->offset, span->length,
+                            span->line, span->column,
+                            "io.read_fd failed");
+          return -1;
+        }
+        sx_guest_debug_printf("AUDIT sx_io_read_fd_done fd=%d len=%d\r\n",
+                              fd, read_len);
         value->kind = SX_VALUE_STRING;
       }
       value->bool_value = 0;
@@ -1876,6 +2452,8 @@ static int sx_eval_namespace_call(struct sx_runtime *runtime,
       if (execute_side_effects == 0)
         written = (int)strlen(args[1].text);
       else {
+        sx_guest_debug_printf("AUDIT sx_io_write_fd_begin fd=%d len=%d\r\n",
+                              fd, (int)strlen(args[1].text));
         written = sx_write_all_text(fd, args[1].text);
         if (written < 0) {
           sx_set_diagnostic(diag, span->offset, span->length,
@@ -1883,6 +2461,8 @@ static int sx_eval_namespace_call(struct sx_runtime *runtime,
                             "io.write_fd failed");
           return -1;
         }
+        sx_guest_debug_printf("AUDIT sx_io_write_fd_done fd=%d wrote=%d\r\n",
+                              fd, written);
       }
       sx_set_i32_value(value, written);
       return 0;
@@ -1920,6 +2500,7 @@ static int sx_eval_namespace_call(struct sx_runtime *runtime,
     }
     if (strcmp(call->member_name, "close") == 0) {
       int fd = -1;
+      int is_socket = 0;
 
       if (call->arg_count != 1 ||
           sx_value_to_i32(&args[0], span, diag, &fd) < 0) {
@@ -1928,13 +2509,16 @@ static int sx_eval_namespace_call(struct sx_runtime *runtime,
                           "io.close expects 1 i32 argument");
         return -1;
       }
-      if (execute_side_effects != 0 && close(fd) < 0) {
+      is_socket = sx_is_tracked_socket_fd(runtime, fd);
+      if (execute_side_effects != 0 &&
+          (is_socket != 0 ? sx_close_socket_fd(fd) : close(fd)) < 0) {
         sx_set_diagnostic(diag, span->offset, span->length,
                           span->line, span->column,
                           "io.close failed");
         return -1;
       }
       sx_detach_pipe_fd(runtime, fd);
+      sx_detach_socket_fd(runtime, fd);
       sx_set_bool_value(value, 1);
       return 0;
     }
@@ -2759,6 +3343,277 @@ fs_try_store_fail:
     }
   }
 
+  if (strcmp(call->target_name, "net") == 0) {
+    if (strcmp(call->member_name, "connect") == 0) {
+      struct sockaddr_in addr;
+      int sockfd = -1;
+      int port = 0;
+
+      if (call->arg_count != 2 ||
+          sx_value_to_string(&args[0], span, diag) < 0 ||
+          sx_value_to_i32(&args[1], span, diag, &port) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.connect expects host and port");
+        return -1;
+      }
+      if (execute_side_effects == 0) {
+        sx_set_i32_value(value, sx_alloc_dummy_socket_fd(runtime));
+        return 0;
+      }
+      if (sx_build_sockaddr(args[0].text, port, &addr) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.connect failed to resolve host");
+        return -1;
+      }
+      sockfd = socket(AF_INET, SOCK_STREAM, 0);
+      if (sockfd < 0 ||
+          connect(sockfd, (const struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        if (sockfd >= 0)
+          sx_close_socket_fd(sockfd);
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.connect failed");
+        return -1;
+      }
+      if (sx_track_socket_fd(runtime, sockfd) < 0) {
+        sx_close_socket_fd(sockfd);
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "socket table is full");
+        return -1;
+      }
+      sx_set_i32_value(value, sockfd);
+      return 0;
+    }
+    if (strcmp(call->member_name, "listen") == 0) {
+      struct sockaddr_in addr;
+      int listener = -1;
+      int port = 0;
+
+      if (call->arg_count != 1 ||
+          sx_value_to_i32(&args[0], span, diag, &port) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.listen expects 1 i32 port");
+        return -1;
+      }
+      if (execute_side_effects == 0) {
+        sx_set_i32_value(value, sx_alloc_dummy_socket_fd(runtime));
+        return 0;
+      }
+      if (sx_build_sockaddr(0, port, &addr) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.listen failed");
+        return -1;
+      }
+      listener = socket(AF_INET, SOCK_STREAM, 0);
+      if (listener < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.listen failed");
+        return -1;
+      }
+#ifdef TEST_BUILD
+      {
+        int reuse = 1;
+
+        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR,
+                   &reuse, (socklen_t)sizeof(reuse));
+      }
+#endif
+      if (bind(listener, (const struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+          listen(listener, 4) < 0) {
+        sx_close_socket_fd(listener);
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.listen failed");
+        return -1;
+      }
+      if (sx_track_socket_fd(runtime, listener) < 0) {
+        sx_close_socket_fd(listener);
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "socket table is full");
+        return -1;
+      }
+      sx_set_i32_value(value, listener);
+      return 0;
+    }
+    if (strcmp(call->member_name, "accept") == 0) {
+      int listener = -1;
+      int sockfd = -1;
+
+      if (call->arg_count != 1 ||
+          sx_value_to_i32(&args[0], span, diag, &listener) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.accept expects 1 i32 socket");
+        return -1;
+      }
+      if (execute_side_effects == 0) {
+        sx_set_i32_value(value, sx_alloc_dummy_socket_fd(runtime));
+        return 0;
+      }
+#ifdef TEST_BUILD
+      sockfd = accept(listener, 0, 0);
+#else
+      {
+        struct sockaddr_in peer;
+
+        sockfd = accept(listener, (struct sockaddr *)&peer, 0);
+      }
+#endif
+      if (sockfd < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.accept failed");
+        return -1;
+      }
+      if (sx_track_socket_fd(runtime, sockfd) < 0) {
+        sx_close_socket_fd(sockfd);
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "socket table is full");
+        return -1;
+      }
+      sx_set_i32_value(value, sockfd);
+      return 0;
+    }
+    if (strcmp(call->member_name, "read") == 0 ||
+        strcmp(call->member_name, "read_bytes") == 0) {
+      int sockfd = -1;
+      int len = 0;
+
+      if (call->arg_count != 1 ||
+          sx_value_to_i32(&args[0], span, diag, &sockfd) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.read/net.read_bytes expects 1 i32 socket");
+        return -1;
+      }
+      if (execute_side_effects == 0) {
+        if (strcmp(call->member_name, "read_bytes") == 0)
+          sx_set_bytes_value(value, "", 0);
+        else
+          sx_set_string_value(value, "");
+        return 0;
+      }
+      len = sx_socket_read_text(sockfd, value->text, sizeof(value->text));
+      if (len < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.read/net.read_bytes failed");
+        return -1;
+      }
+      if (strcmp(call->member_name, "read_bytes") == 0)
+        sx_set_bytes_value(value, value->text, len);
+      else {
+        value->kind = SX_VALUE_STRING;
+        value->bool_value = 0;
+        value->int_value = 0;
+        value->data_len = len;
+        value->text[len] = '\0';
+      }
+      return 0;
+    }
+    if (strcmp(call->member_name, "write") == 0 ||
+        strcmp(call->member_name, "write_bytes") == 0) {
+      int sockfd = -1;
+      int written = 0;
+      const char *payload = 0;
+      int payload_len = 0;
+
+      if (call->arg_count != 2 ||
+          sx_value_to_i32(&args[0], span, diag, &sockfd) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.write/net.write_bytes expects socket and payload");
+        return -1;
+      }
+      if (strcmp(call->member_name, "write_bytes") == 0) {
+        if (sx_value_to_bytes(&args[1], span, diag) < 0) {
+          sx_set_diagnostic(diag, span->offset, span->length,
+                            span->line, span->column,
+                            "net.write_bytes expects bytes payload");
+          return -1;
+        }
+        payload = args[1].text;
+        payload_len = args[1].data_len;
+      } else {
+        if (sx_value_to_string(&args[1], span, diag) < 0) {
+          sx_set_diagnostic(diag, span->offset, span->length,
+                            span->line, span->column,
+                            "net.write expects string payload");
+          return -1;
+        }
+        payload = args[1].text;
+        payload_len = (int)strlen(args[1].text);
+      }
+      if (execute_side_effects == 0)
+        written = payload_len;
+      else {
+        written = sx_socket_write_all(sockfd, payload, payload_len);
+        if (written < 0) {
+          sx_set_diagnostic(diag, span->offset, span->length,
+                            span->line, span->column,
+                            "net.write/net.write_bytes failed");
+          return -1;
+        }
+      }
+      sx_set_i32_value(value, written);
+      return 0;
+    }
+    if (strcmp(call->member_name, "poll_read") == 0) {
+      int sockfd = -1;
+      int timeout_ticks = 0;
+      int ready = 0;
+
+      if (call->arg_count != 2 ||
+          sx_value_to_i32(&args[0], span, diag, &sockfd) < 0 ||
+          sx_value_to_i32(&args[1], span, diag, &timeout_ticks) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.poll_read expects socket and timeout");
+        return -1;
+      }
+      if (execute_side_effects != 0) {
+        ready = sx_poll_socket_readable(sockfd, timeout_ticks);
+        if (ready < 0) {
+          sx_set_diagnostic(diag, span->offset, span->length,
+                            span->line, span->column,
+                            "net.poll_read failed");
+          return -1;
+        }
+      }
+      sx_set_bool_value(value, ready > 0);
+      return 0;
+    }
+    if (strcmp(call->member_name, "close") == 0) {
+      int sockfd = -1;
+
+      if (call->arg_count != 1 ||
+          sx_value_to_i32(&args[0], span, diag, &sockfd) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.close expects 1 i32 socket");
+        return -1;
+      }
+      if (execute_side_effects != 0 &&
+          sx_close_socket_fd(sockfd) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "net.close failed");
+        return -1;
+      }
+      sx_detach_socket_fd(runtime, sockfd);
+      sx_set_bool_value(value, 1);
+      return 0;
+    }
+  }
+
   if (strcmp(call->target_name, "proc") == 0) {
     if (strcmp(call->member_name, "argv_count") == 0) {
       if (call->arg_count != 0) {
@@ -2903,13 +3758,18 @@ fs_try_store_fail:
                           "proc.wait expects 1 i32 argument");
         return -1;
       }
-      if (execute_side_effects != 0 &&
-          sx_wait_for_pid((pid_t)pid_value, &status) < 0) {
-        sx_set_diagnostic(diag, span->offset, span->length,
-                          span->line, span->column,
-                          "proc.wait failed");
-        return -1;
+      if (execute_side_effects != 0) {
+        sx_guest_debug_printf("AUDIT sx_wait_begin pid=%d\r\n", pid_value);
+        if (sx_wait_for_pid((pid_t)pid_value, &status) < 0) {
+          sx_set_diagnostic(diag, span->offset, span->length,
+                            span->line, span->column,
+                            "proc.wait failed");
+          return -1;
+        }
       }
+      if (execute_side_effects != 0)
+        sx_guest_debug_printf("AUDIT sx_wait_done pid=%d status=%d\r\n",
+                              pid_value, status);
       sx_set_i32_value(value, status);
       return 0;
     }
@@ -3040,6 +3900,11 @@ fs_try_store_fail:
                           "proc.spawn_io failed");
         return -1;
       }
+      if (execute_side_effects != 0) {
+        sx_guest_debug_printf(
+            "AUDIT sx_spawn_io_done pid=%d stdin=%d stdout=%d stderr=%d\r\n",
+            (int)pid, stdin_fd, stdout_fd, stderr_fd);
+      }
       sx_set_i32_value(value, (int)pid);
       return 0;
     }
@@ -3122,6 +3987,12 @@ static int sx_eval_expr(struct sx_runtime *runtime,
   if (expr->kind == SX_EXPR_BINARY)
     return sx_eval_binary_expr(runtime, program, &expr->data.binary_expr,
                                &expr->span, execute_side_effects, value, diag);
+  if (expr->kind == SX_EXPR_LIST)
+    return sx_eval_list_expr(runtime, program, &expr->data.list_expr,
+                             execute_side_effects, value, diag);
+  if (expr->kind == SX_EXPR_MAP)
+    return sx_eval_map_expr(runtime, program, &expr->data.map_expr,
+                            execute_side_effects, value, diag);
   sx_set_diagnostic(diag, expr->span.offset, expr->span.length,
                     expr->span.line, expr->span.column,
                     "unsupported expression");
@@ -3493,6 +4364,13 @@ void sx_runtime_dispose(struct sx_runtime *runtime)
     return;
   for (i = 0; i < SX_MAX_PIPE_HANDLES; i++)
     sx_close_pipe_handle(&runtime->pipes[i]);
+  for (i = 0; i < SX_MAX_SOCKET_HANDLES; i++) {
+    if (runtime->sockets[i].active == 0)
+      continue;
+    sx_close_socket_fd(runtime->sockets[i].fd);
+    runtime->sockets[i].active = 0;
+    runtime->sockets[i].fd = -1;
+  }
 }
 
 void sx_runtime_default_limits(struct sx_runtime_limits *limits)

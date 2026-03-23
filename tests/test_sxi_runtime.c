@@ -1,11 +1,15 @@
 #include "test_framework.h"
+#include <arpa/inet.h>
 #include <sx_parser.h>
 #include <sx_runtime.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 struct output_buffer {
@@ -87,6 +91,94 @@ static int count_active_pipes(const struct sx_runtime *runtime)
             count++;
     }
     return count;
+}
+
+static int count_active_sockets(const struct sx_runtime *runtime)
+{
+    int count = 0;
+    int i;
+
+    if (runtime == NULL)
+        return 0;
+    for (i = 0; i < SX_MAX_SOCKET_HANDLES; i++) {
+        if (runtime->sockets[i].active != 0)
+            count++;
+    }
+    return count;
+}
+
+static int create_tcp_listener(int *out_port)
+{
+    struct sockaddr_in addr;
+    socklen_t addr_len = (socklen_t)sizeof(addr);
+    int reuse = 1;
+    int fd;
+
+    if (out_port == NULL)
+        return -1;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return -1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, (socklen_t)sizeof(reuse));
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(0);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+        listen(fd, 4) < 0 ||
+        getsockname(fd, (struct sockaddr *)&addr, &addr_len) < 0) {
+        close(fd);
+        return -1;
+    }
+    *out_port = (int)ntohs(addr.sin_port);
+    return fd;
+}
+
+static int reserve_tcp_port(void)
+{
+    int fd;
+    int port = -1;
+
+    fd = create_tcp_listener(&port);
+    if (fd < 0)
+        return -1;
+    close(fd);
+    return port;
+}
+
+static int connect_with_retry(int port, int attempts, int delay_us)
+{
+    int attempt;
+
+    for (attempt = 0; attempt < attempts; attempt++) {
+        struct sockaddr_in addr;
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+
+        if (fd < 0)
+            return -1;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons((u_int16_t)port);
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) == 0)
+            return fd;
+        close(fd);
+        usleep((useconds_t)delay_us);
+    }
+    return -1;
+}
+
+static int read_socket_text(int fd, char *buf, size_t cap)
+{
+    ssize_t len;
+
+    if (fd < 0 || buf == NULL || cap == 0)
+        return -1;
+    len = recv(fd, buf, cap - 1, 0);
+    if (len < 0)
+        return -1;
+    buf[len] = '\0';
+    return (int)len;
 }
 
 TEST(runtime_executes_function_if_block_and_return) {
@@ -547,6 +639,160 @@ TEST(runtime_executes_list_and_map_builtins) {
     ASSERT_STR_EQ(out.text, "11\n1\n");
 }
 
+TEST(runtime_executes_literals_and_else_if) {
+    const char *text =
+        "let items = [7, 9, 11];\n"
+        "let meta = {\"name\": \"sx\", \"count\": list.len(items)};\n"
+        "let branch = \"none\";\n"
+        "if (false) {\n"
+        "  branch = \"a\";\n"
+        "} else if (map.get(meta, \"count\") == 3) {\n"
+        "  branch = map.get(meta, \"name\");\n"
+        "} else {\n"
+        "  branch = \"c\";\n"
+        "}\n"
+        "io.println(list.get(items, 1));\n"
+        "io.println(branch);\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "9\nsx\n");
+    sx_runtime_dispose(&runtime);
+}
+
+TEST(runtime_executes_net_client_builtins) {
+    char script[512];
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+    int listener = -1;
+    int port = -1;
+    pid_t pid = -1;
+    int status = 0;
+
+    listener = create_tcp_listener(&port);
+    ASSERT_EQ(listener >= 0, 1);
+    pid = fork();
+    ASSERT_EQ(pid >= 0, 1);
+    if (pid == 0) {
+        char recv_buf[32];
+        int client_fd = accept(listener, NULL, NULL);
+
+        if (client_fd < 0)
+            _exit(2);
+        if (read_socket_text(client_fd, recv_buf, sizeof(recv_buf)) < 0)
+            _exit(3);
+        if (strcmp(recv_buf, "PING") != 0)
+            _exit(4);
+        if (send(client_fd, "PONG", 4, 0) != 4)
+            _exit(5);
+        close(client_fd);
+        close(listener);
+        _exit(0);
+    }
+    close(listener);
+    listener = -1;
+
+    snprintf(script, sizeof(script),
+             "let sock = net.connect(\"127.0.0.1\", %d);\n"
+             "net.write(sock, \"PING\");\n"
+             "let ready = net.poll_read(sock, 1000);\n"
+             "let body = net.read(sock);\n"
+             "net.close(sock);\n"
+             "io.println(ready);\n"
+             "io.println(body);\n",
+             port);
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(script, (int)strlen(script), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "true\nPONG\n");
+    sx_runtime_dispose(&runtime);
+
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT_EQ(WIFEXITED(status), 1);
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+}
+
+TEST(runtime_executes_net_server_builtins) {
+    char script[512];
+    int stdout_pipe[2];
+    int port = -1;
+    pid_t pid;
+    int client_fd = -1;
+    char reply[32];
+    char child_out[128];
+    int status = 0;
+
+    ASSERT_EQ(pipe(stdout_pipe), 0);
+    port = reserve_tcp_port();
+    ASSERT_EQ(port > 0, 1);
+
+    pid = fork();
+    ASSERT_EQ(pid >= 0, 1);
+    if (pid == 0) {
+        struct sx_program program;
+        struct sx_diagnostic diag;
+        struct sx_runtime runtime;
+        struct output_buffer out;
+
+        close(stdout_pipe[0]);
+        snprintf(script, sizeof(script),
+                 "let listener = net.listen(%d);\n"
+                 "let sock = net.accept(listener);\n"
+                 "let ready = net.poll_read(sock, 1000);\n"
+                 "let body = net.read(sock);\n"
+                 "net.write(sock, \"WORLD\");\n"
+                 "net.close(sock);\n"
+                 "net.close(listener);\n"
+                 "io.println(ready);\n"
+                 "io.println(body);\n",
+                 port);
+        memset(&out, 0, sizeof(out));
+        sx_runtime_init(&runtime);
+        sx_runtime_set_output(&runtime, append_output, &out);
+        if (sx_parse_program(script, (int)strlen(script), &program, &diag) < 0)
+            _exit(10);
+        if (sx_runtime_execute_program(&runtime, &program, &diag) < 0)
+            _exit(11);
+        write(stdout_pipe[1], out.text, (size_t)out.len);
+        close(stdout_pipe[1]);
+        sx_runtime_dispose(&runtime);
+        _exit(0);
+    }
+
+    close(stdout_pipe[1]);
+    client_fd = connect_with_retry(port, 40, 50000);
+    ASSERT_EQ(client_fd >= 0, 1);
+    ASSERT_EQ(send(client_fd, "HELLO", 5, 0), 5);
+    ASSERT_EQ(read_socket_text(client_fd, reply, sizeof(reply)) >= 0, 1);
+    ASSERT_STR_EQ(reply, "WORLD");
+    close(client_fd);
+    client_fd = -1;
+
+    memset(child_out, 0, sizeof(child_out));
+    ASSERT_EQ(read(stdout_pipe[0], child_out, sizeof(child_out) - 1) >= 0, 1);
+    close(stdout_pipe[0]);
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT_EQ(WIFEXITED(status), 1);
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_STR_EQ(child_out, "true\nHELLO\n");
+}
+
 TEST(runtime_executes_operators_assignment_and_loop_control) {
     const char *text =
         "let sum = 0;\n"
@@ -636,7 +882,7 @@ TEST(runtime_rejects_continue_outside_loop) {
 }
 
 TEST(runtime_reset_session_preserves_configuration_and_closes_pipes) {
-    const char *setup_text = "let handle = proc.pipe();\n";
+    char setup_text[128];
     const char *after_reset_text = "io.println(proc.argv(1));\n";
     char *argv_values[] = { "script.sx", "kept-arg", NULL };
     struct sx_program setup_program;
@@ -645,8 +891,15 @@ TEST(runtime_reset_session_preserves_configuration_and_closes_pipes) {
     struct sx_runtime runtime;
     struct sx_runtime_limits limits;
     struct output_buffer out;
+    int port;
 
     memset(&out, 0, sizeof(out));
+    port = reserve_tcp_port();
+    ASSERT_EQ(port > 0, 1);
+    snprintf(setup_text, sizeof(setup_text),
+             "let handle = proc.pipe();\n"
+             "let listener = net.listen(%d);\n",
+             port);
     sx_runtime_init(&runtime);
     sx_runtime_set_output(&runtime, append_output, &out);
     ASSERT_EQ(sx_runtime_set_argv(&runtime, 2, argv_values), 0);
@@ -656,6 +909,7 @@ TEST(runtime_reset_session_preserves_configuration_and_closes_pipes) {
     ASSERT_EQ(sx_parse_program(setup_text, (int)strlen(setup_text), &setup_program, &diag), 0);
     ASSERT_EQ(sx_runtime_execute_program(&runtime, &setup_program, &diag), 0);
     ASSERT_EQ(count_active_pipes(&runtime) > 0, 1);
+    ASSERT_EQ(count_active_sockets(&runtime) > 0, 1);
 
     sx_runtime_reset_session(&runtime);
     ASSERT_EQ(runtime.binding_count, 0);
@@ -665,6 +919,7 @@ TEST(runtime_reset_session_preserves_configuration_and_closes_pipes) {
     ASSERT_EQ(runtime.argc, 2);
     ASSERT_EQ(runtime.limits.max_loop_iterations, 3);
     ASSERT_EQ(count_active_pipes(&runtime), 0);
+    ASSERT_EQ(count_active_sockets(&runtime), 0);
 
     ASSERT_EQ(sx_parse_program(after_reset_text, (int)strlen(after_reset_text), &after_reset_program, &diag), 0);
     ASSERT_EQ(sx_runtime_execute_program(&runtime, &after_reset_program, &diag), 0);
@@ -767,6 +1022,9 @@ int main(void)
     RUN_TEST(runtime_executes_fork_and_exit);
     RUN_TEST(runtime_executes_env_bytes_and_result_builtins);
     RUN_TEST(runtime_executes_list_and_map_builtins);
+    RUN_TEST(runtime_executes_literals_and_else_if);
+    RUN_TEST(runtime_executes_net_client_builtins);
+    RUN_TEST(runtime_executes_net_server_builtins);
     RUN_TEST(runtime_executes_operators_assignment_and_loop_control);
     RUN_TEST(runtime_executes_recursive_function);
     RUN_TEST(runtime_rejects_break_outside_loop);

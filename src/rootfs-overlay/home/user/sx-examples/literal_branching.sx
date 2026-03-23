@@ -1,0 +1,19 @@
+let items = ["alpha", "beta", "gamma"];
+let meta = {
+  "head": list.get(items, 0),
+  "size": list.len(items),
+  "ready": true
+};
+let branch = "none";
+
+if (false) {
+  branch = "first";
+} else if (map.get(meta, "size") == 3) {
+  branch = map.get(meta, "head");
+} else {
+  branch = "fallback";
+}
+
+io.println(branch);
+io.println(map.get(meta, "size"));
+io.println(map.get(meta, "ready"));

@@ -792,7 +792,23 @@ static int sxi_run_text(struct sx_runtime *runtime,
     status = 2;
     goto out;
   }
-  *probe = *runtime;
+  sx_runtime_init(probe);
+  probe->output = runtime->output;
+  probe->output_ctx = runtime->output_ctx;
+  probe->binding_count = runtime->binding_count;
+  probe->scope_depth = runtime->scope_depth;
+  memcpy(probe->bindings, runtime->bindings, sizeof(probe->bindings));
+  probe->argc = runtime->argc;
+  memcpy(probe->argv, runtime->argv, sizeof(probe->argv));
+  memcpy(probe->pipes, runtime->pipes, sizeof(probe->pipes));
+  memcpy(probe->sockets, runtime->sockets, sizeof(probe->sockets));
+  memcpy(probe->lists, runtime->lists, sizeof(probe->lists));
+  memcpy(probe->maps, runtime->maps, sizeof(probe->maps));
+  memcpy(probe->results, runtime->results, sizeof(probe->results));
+  probe->limits.max_bindings = runtime->limits.max_bindings;
+  probe->limits.max_scope_depth = runtime->limits.max_scope_depth;
+  probe->limits.max_call_depth = runtime->limits.max_call_depth;
+  probe->limits.max_loop_iterations = runtime->limits.max_loop_iterations;
   if (sx_runtime_check_program(probe, program, &diag) < 0) {
     sxi_print_diagnostic(name, &diag, probe);
     status = 2;

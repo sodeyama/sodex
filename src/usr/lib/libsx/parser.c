@@ -233,6 +233,138 @@ static int sx_parse_or_expr(struct sx_parser_state *state,
                             struct sx_expr *expr,
                             struct sx_diagnostic *diag);
 
+static int sx_parse_list_literal_expr(struct sx_parser_state *state,
+                                      struct sx_program *program,
+                                      struct sx_expr *expr,
+                                      struct sx_diagnostic *diag)
+{
+  const struct sx_token *start = sx_advance_token(state);
+  const struct sx_token *end_token;
+
+  memset(expr, 0, sizeof(*expr));
+  expr->kind = SX_EXPR_LIST;
+  expr->span = start->span;
+  expr->data.list_expr.item_start_index = program->list_literal_item_count;
+  if (sx_current_token(state)->kind == SX_TOKEN_RBRACKET) {
+    end_token = sx_current_token(state);
+    if (sx_expect_token(state, SX_TOKEN_RBRACKET, diag,
+                        "expected ']' after list literal") < 0)
+      return -1;
+    expr->span = sx_merge_spans(&start->span, &end_token->span);
+    return 0;
+  }
+
+  while (1) {
+    int item_expr_index = -1;
+    struct sx_expr *item_expr;
+
+    if (expr->data.list_expr.item_count >= SX_MAX_LIST_ITEMS) {
+      const struct sx_token *token = sx_current_token(state);
+
+      sx_set_diagnostic(diag, token->span.offset, token->span.length,
+                        token->span.line, token->span.column,
+                        "list literal is too large");
+      return -1;
+    }
+    if (program->list_literal_item_count >= SX_MAX_LIST_LITERAL_ITEMS) {
+      const struct sx_token *token = sx_current_token(state);
+
+      sx_set_diagnostic(diag, token->span.offset, token->span.length,
+                        token->span.line, token->span.column,
+                        "list literal pool is full");
+      return -1;
+    }
+    if (sx_alloc_expr_index(program, &item_expr_index, &item_expr, diag,
+                            sx_current_token(state)) < 0)
+      return -1;
+    if (sx_parse_expr(state, program, item_expr, diag) < 0)
+      return -1;
+    program->list_literal_items[program->list_literal_item_count++] =
+        item_expr_index;
+    expr->data.list_expr.item_count++;
+    if (sx_current_token(state)->kind != SX_TOKEN_COMMA)
+      break;
+    sx_advance_token(state);
+  }
+
+  end_token = sx_current_token(state);
+  if (sx_expect_token(state, SX_TOKEN_RBRACKET, diag,
+                      "expected ']' after list literal") < 0)
+    return -1;
+  expr->span = sx_merge_spans(&start->span, &end_token->span);
+  return 0;
+}
+
+static int sx_parse_map_literal_expr(struct sx_parser_state *state,
+                                     struct sx_program *program,
+                                     struct sx_expr *expr,
+                                     struct sx_diagnostic *diag)
+{
+  const struct sx_token *start = sx_advance_token(state);
+  const struct sx_token *end_token;
+
+  memset(expr, 0, sizeof(*expr));
+  expr->kind = SX_EXPR_MAP;
+  expr->span = start->span;
+  expr->data.map_expr.item_start_index = program->map_literal_item_count;
+  if (sx_current_token(state)->kind == SX_TOKEN_RBRACE) {
+    end_token = sx_current_token(state);
+    if (sx_expect_token(state, SX_TOKEN_RBRACE, diag,
+                        "expected '}' after map literal") < 0)
+      return -1;
+    expr->span = sx_merge_spans(&start->span, &end_token->span);
+    return 0;
+  }
+
+  while (1) {
+    const struct sx_token *key_token = sx_current_token(state);
+    int value_expr_index = -1;
+    struct sx_expr *value_expr;
+
+    if (expr->data.map_expr.item_count >= SX_MAX_MAP_ITEMS) {
+      sx_set_diagnostic(diag, key_token->span.offset, key_token->span.length,
+                        key_token->span.line, key_token->span.column,
+                        "map literal is too large");
+      return -1;
+    }
+    if (program->map_literal_item_count >= SX_MAX_MAP_LITERAL_ITEMS) {
+      sx_set_diagnostic(diag, key_token->span.offset, key_token->span.length,
+                        key_token->span.line, key_token->span.column,
+                        "map literal pool is full");
+      return -1;
+    }
+    if (sx_expect_token(state, SX_TOKEN_STRING, diag,
+                        "expected string key in map literal") < 0)
+      return -1;
+    if (sx_expect_token(state, SX_TOKEN_COLON, diag,
+                        "expected ':' after map literal key") < 0)
+      return -1;
+    if (sx_alloc_expr_index(program, &value_expr_index, &value_expr, diag,
+                            sx_current_token(state)) < 0)
+      return -1;
+    if (sx_parse_expr(state, program, value_expr, diag) < 0)
+      return -1;
+    sx_copy_text(
+        program->map_literal_items[program->map_literal_item_count].key,
+        sizeof(program->map_literal_items[0].key),
+        key_token->text);
+    program->map_literal_items[program->map_literal_item_count].value_expr_index =
+        value_expr_index;
+    program->map_literal_item_count++;
+    expr->data.map_expr.item_count++;
+    if (sx_current_token(state)->kind != SX_TOKEN_COMMA)
+      break;
+    sx_advance_token(state);
+  }
+
+  end_token = sx_current_token(state);
+  if (sx_expect_token(state, SX_TOKEN_RBRACE, diag,
+                      "expected '}' after map literal") < 0)
+    return -1;
+  expr->span = sx_merge_spans(&start->span, &end_token->span);
+  return 0;
+}
+
 static int sx_make_unary_expr(struct sx_program *program,
                               struct sx_expr *expr,
                               enum sx_unary_op op,
@@ -343,6 +475,10 @@ static int sx_parse_primary_expr(struct sx_parser_state *state,
     expr->span = sx_merge_spans(&start->span, &end_token->span);
     return 0;
   }
+  if (token->kind == SX_TOKEN_LBRACKET)
+    return sx_parse_list_literal_expr(state, program, expr, diag);
+  if (token->kind == SX_TOKEN_LBRACE)
+    return sx_parse_map_literal_expr(state, program, expr, diag);
   if (token->kind == SX_TOKEN_IDENTIFIER && next->kind == SX_TOKEN_DOT) {
     const struct sx_token *member_token;
     const struct sx_token *end_token;
@@ -775,7 +911,25 @@ static int sx_parse_if_stmt(struct sx_parser_state *state,
                             &stmt->data.if_stmt.then_block_index, diag) < 0)
     return -1;
   if (sx_current_token(state)->kind == SX_TOKEN_KEYWORD_ELSE) {
-    sx_advance_token(state);
+    const struct sx_token *else_token = sx_advance_token(state);
+
+    if (sx_current_token(state)->kind == SX_TOKEN_KEYWORD_IF) {
+      struct sx_stmt *nested_if_stmt;
+      int nested_block_index;
+
+      if (sx_alloc_block(program, &nested_block_index, diag, else_token) < 0)
+        return -1;
+      stmt->data.if_stmt.else_block_index = nested_block_index;
+      if (sx_alloc_statement(program, &nested_if_stmt, diag,
+                             sx_current_token(state)) < 0)
+        return -1;
+      program->blocks[nested_block_index].first_stmt_index =
+          program->statement_count - 1;
+      program->blocks[nested_block_index].stmt_count = 1;
+      if (sx_parse_if_stmt(state, program, nested_if_stmt, diag) < 0)
+        return -1;
+      return 0;
+    }
     if (sx_parse_braced_block(state, program,
                               &stmt->data.if_stmt.else_block_index, diag) < 0)
       return -1;

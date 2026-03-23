@@ -339,8 +339,14 @@ int sx_lex(const char *text, int len,
         kind = SX_TOKEN_LBRACE;
       else if (ch == '}')
         kind = SX_TOKEN_RBRACE;
+      else if (ch == '[')
+        kind = SX_TOKEN_LBRACKET;
+      else if (ch == ']')
+        kind = SX_TOKEN_RBRACKET;
       else if (ch == ';')
         kind = SX_TOKEN_SEMICOLON;
+      else if (ch == ':')
+        kind = SX_TOKEN_COLON;
       else if (ch == '=')
         kind = SX_TOKEN_EQUAL;
       else if (ch == '<')

@@ -25,7 +25,9 @@ enum sx_expr_kind {
   SX_EXPR_ATOM = 0,
   SX_EXPR_CALL = 1,
   SX_EXPR_UNARY = 2,
-  SX_EXPR_BINARY = 3
+  SX_EXPR_BINARY = 3,
+  SX_EXPR_LIST = 4,
+  SX_EXPR_MAP = 5
 };
 
 enum sx_unary_op {
@@ -73,6 +75,21 @@ struct sx_binary_expr {
   int right_expr_index;
 };
 
+struct sx_list_expr {
+  int item_start_index;
+  int item_count;
+};
+
+struct sx_map_literal_item {
+  char key[SX_TEXT_MAX];
+  int value_expr_index;
+};
+
+struct sx_map_expr {
+  int item_start_index;
+  int item_count;
+};
+
 struct sx_expr {
   enum sx_expr_kind kind;
   struct sx_source_span span;
@@ -81,6 +98,8 @@ struct sx_expr {
     struct sx_call_expr call_expr;
     struct sx_unary_expr unary_expr;
     struct sx_binary_expr binary_expr;
+    struct sx_list_expr list_expr;
+    struct sx_map_expr map_expr;
   } data;
 };
 
@@ -174,6 +193,10 @@ struct sx_program {
   int function_count;
   struct sx_expr exprs[SX_MAX_EXPRS];
   int expr_count;
+  int list_literal_items[SX_MAX_LIST_LITERAL_ITEMS];
+  int list_literal_item_count;
+  struct sx_map_literal_item map_literal_items[SX_MAX_MAP_LITERAL_ITEMS];
+  int map_literal_item_count;
   struct sx_block blocks[SX_MAX_BLOCKS];
   int block_count;
   struct sx_stmt statements[SX_MAX_STATEMENTS];

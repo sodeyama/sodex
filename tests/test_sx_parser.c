@@ -221,6 +221,74 @@ TEST(parse_nested_call_arguments) {
     ASSERT_STR_EQ(print_arg->data.call_expr.member_name, "trim");
 }
 
+TEST(parse_literals_and_else_if) {
+    const char *text =
+        "let items = [1, 2, text.trim(\" x \")];\n"
+        "let meta = {\"name\": \"sx\", \"count\": list.len(items)};\n"
+        "if (false) {\n"
+        "  io.println(\"a\");\n"
+        "} else if (true) {\n"
+        "  io.println(map.get(meta, \"name\"));\n"
+        "} else {\n"
+        "  io.println(\"c\");\n"
+        "}\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    const struct sx_stmt *stmt0;
+    const struct sx_stmt *stmt1;
+    const struct sx_stmt *stmt2;
+    const struct sx_stmt *nested_if;
+    const struct sx_expr *trim_expr;
+    const struct sx_expr *count_expr;
+
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+
+    stmt0 = block_stmt_at(&program, program.top_level_block_index, 0);
+    stmt1 = block_stmt_at(&program, program.top_level_block_index, 1);
+    stmt2 = block_stmt_at(&program, program.top_level_block_index, 2);
+    ASSERT_EQ(stmt0 != NULL, 1);
+    ASSERT_EQ(stmt1 != NULL, 1);
+    ASSERT_EQ(stmt2 != NULL, 1);
+
+    ASSERT_EQ(stmt0->kind, SX_STMT_LET);
+    ASSERT_EQ(stmt0->data.let_stmt.value.kind, SX_EXPR_LIST);
+    ASSERT_EQ(stmt0->data.let_stmt.value.data.list_expr.item_count, 3);
+    trim_expr = expr_at_index(&program,
+                              program.list_literal_items[
+                                  stmt0->data.let_stmt.value.data.list_expr.item_start_index + 2]);
+    ASSERT_EQ(trim_expr != NULL, 1);
+    ASSERT_EQ(trim_expr->kind, SX_EXPR_CALL);
+    ASSERT_STR_EQ(trim_expr->data.call_expr.target_name, "text");
+    ASSERT_STR_EQ(trim_expr->data.call_expr.member_name, "trim");
+
+    ASSERT_EQ(stmt1->kind, SX_STMT_LET);
+    ASSERT_EQ(stmt1->data.let_stmt.value.kind, SX_EXPR_MAP);
+    ASSERT_EQ(stmt1->data.let_stmt.value.data.map_expr.item_count, 2);
+    ASSERT_STR_EQ(program.map_literal_items[
+                      stmt1->data.let_stmt.value.data.map_expr.item_start_index + 0].key,
+                  "name");
+    ASSERT_STR_EQ(program.map_literal_items[
+                      stmt1->data.let_stmt.value.data.map_expr.item_start_index + 1].key,
+                  "count");
+    count_expr = expr_at_index(&program,
+                               program.map_literal_items[
+                                   stmt1->data.let_stmt.value.data.map_expr.item_start_index + 1]
+                                   .value_expr_index);
+    ASSERT_EQ(count_expr != NULL, 1);
+    ASSERT_EQ(count_expr->kind, SX_EXPR_CALL);
+    ASSERT_STR_EQ(count_expr->data.call_expr.target_name, "list");
+    ASSERT_STR_EQ(count_expr->data.call_expr.member_name, "len");
+
+    ASSERT_EQ(stmt2->kind, SX_STMT_IF);
+    ASSERT_EQ(stmt2->data.if_stmt.else_block_index >= 0, 1);
+    nested_if = block_stmt_at(&program, stmt2->data.if_stmt.else_block_index, 0);
+    ASSERT_EQ(nested_if != NULL, 1);
+    ASSERT_EQ(nested_if->kind, SX_STMT_IF);
+    ASSERT_EQ(program.blocks[stmt2->data.if_stmt.else_block_index].stmt_count, 1);
+    ASSERT_EQ(program.blocks[nested_if->data.if_stmt.then_block_index].stmt_count, 1);
+    ASSERT_EQ(program.blocks[nested_if->data.if_stmt.else_block_index].stmt_count, 1);
+}
+
 TEST(parse_operators_assignment_and_for) {
     const char *text =
         "let code = -7;\n"
@@ -316,6 +384,7 @@ int main(void)
 
     RUN_TEST(parse_function_blocks_and_control_flow);
     RUN_TEST(parse_nested_call_arguments);
+    RUN_TEST(parse_literals_and_else_if);
     RUN_TEST(parse_operators_assignment_and_for);
     RUN_TEST(parse_requires_semicolon);
 

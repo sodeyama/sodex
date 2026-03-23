@@ -100,6 +100,7 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
   for (i = 0; i < header->phdrcnt; i++) {
     size_t prg_size = prg_header[i].memsize;
     u_int32_t virtaddr = prg_header[i].virtaddr;
+    void *mapped;
     if (prg_size == 0)
       continue;
     last_prg_size = prg_size;
@@ -107,7 +108,12 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
     prog_allsize += prg_size;
     com1_printf("AUDIT elf_map_seg idx=%x va=%x mem=%x file=%x\r\n",
                 (u_int32_t)i, virtaddr, prg_size, (u_int32_t)prg_header[i].filesize);
-    set_process_page(pg_dir, virtaddr, prg_size);
+    mapped = set_process_page(pg_dir, virtaddr, prg_size);
+    if (mapped == NULL) {
+      com1_printf("AUDIT elf_map_fail idx=%x va=%x mem=%x\r\n",
+                  (u_int32_t)i, virtaddr, prg_size);
+      return ELF_FAIL;
+    }
   }
   *allocation_point = CEIL(last_virtaddr+last_prg_size, BLOCK_SIZE);
   //_kprintf("allocpoint:%x\n", *allocation_point);
@@ -116,8 +122,18 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
   for (i = 0; i < header->phdrcnt; i++) {
     size_t prg_size = prg_header[i].memsize;
     int file_size = prg_header[i].filesize;
+    u_int32_t pde;
+    u_int32_t pte = 0;
     if (prg_size == 0)
       continue;
+    pde = pg_dir[(prg_header[i].virtaddr >> 22) & 0x3ff];
+    if (pde & PAGE_PRESENT) {
+      u_int32_t *pg_tbl =
+          (u_int32_t *)((pde & ~(BLOCK_SIZE - 1)) + __PAGE_OFFSET);
+      pte = pg_tbl[(prg_header[i].virtaddr >> BLOCK_BITS) & 0x3ff];
+    }
+    com1_printf("AUDIT elf_copy_seg idx=%x va=%x pde=%x pte=%x\r\n",
+                (u_int32_t)i, prg_header[i].virtaddr, pde, pte);
     if (file_size > 0)
       memcpy(prg_header[i].virtaddr, elf_buf + prg_header[i].offset, file_size);
     if (prg_size > file_size)

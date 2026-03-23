@@ -30,6 +30,8 @@
 
 EXTERN void network_poll(void);
 PUBLIC int32_t kfree(void* ptr);
+PUBLIC void* aalloc(u_int32_t size, u_int8_t align_bit);
+PUBLIC int32_t afree(void* ptr);
 EXTERN volatile u_int32_t kernel_tick;
 PUBLIC volatile int process_in_timer_interrupt = FALSE;
 
@@ -54,6 +56,8 @@ PRIVATE void reparent_children(struct task_struct *task);
 PRIVATE pid_t reap_child(struct task_struct *task, int *status);
 PRIVATE int child_is_live(const struct task_struct *task);
 PRIVATE void wakeup_parent_waiters(struct task_struct *task);
+PRIVATE void destroy_task(struct task_struct *task);
+PRIVATE void free_process_argv_copy(char **argv);
 
 PUBLIC void process_debug_unexpected_timer_cs(u_int32_t cs)
 {
@@ -77,8 +81,11 @@ PUBLIC void init_process()
   u_int16_t type_tss = 0x89;
   memset(&tss, 0, sizeof(TSS));
   tss.ss0 = __KERNEL_DS;
-  u_int32_t* pg_dir = kalloc(BLOCK_SIZE*2);
-  pg_dir = ((u_int32_t)pg_dir & ~(BLOCK_SIZE-1)) + BLOCK_SIZE;
+  u_int32_t* pg_dir = aalloc(BLOCK_SIZE, BLOCK_BITS);
+  if (pg_dir == NULL) {
+    _kputs(" PROCESS: init pg_dir alloc failed\n");
+    return;
+  }
   memset(pg_dir, 0, BLOCK_SIZE);
   create_kernel_page(pg_dir);
   makeGdt((u_int32_t)&tss, sizeof(TSS), type_tss, sel);
@@ -353,6 +360,10 @@ PUBLIC void schedule()
 
 PUBLIC void sys_exit(int status)
 {
+  com1_printf("AUDIT sys_exit pid=%x status=%x parent=%x\r\n",
+              current != 0 ? current->pid : 0,
+              status,
+              current != 0 && current->parent != 0 ? current->parent->pid : 0);
   current->exit_status = status;
   current->state = TASK_ZOMBIE;
   for(;;);
@@ -369,18 +380,14 @@ PRIVATE void _exit()
   dlist_remove(&(exiting->sibling));
   dlist_remove(&(exiting->run_list));
 
-  /* Free process memory: pages → page directory → kernel allocations → task */
-  if (exiting->pg_dir != NULL)
-    free_process_pages(exiting->pg_dir);
-  if (exiting->pg_dir_raw != NULL)
-    kfree(exiting->pg_dir_raw);
-  if (exiting->context != NULL)
-    kfree(exiting->context);
-  if (exiting->esp0_raw != NULL)
-    kfree(exiting->esp0_raw);
-  if (exiting->files != NULL)
-    kfree(exiting->files);
-  kfree(exiting);
+  /*
+   * 現在の CR3 が指している page directory 自体を解放する前に、
+   * 次タスクの CR3 へ切り替えておく。
+   */
+  if (next != NULL && next->pg_dir != NULL && next != exiting)
+    pg_load_cr3(next->pg_dir);
+
+  destroy_task(exiting);
 
   current = next;
   schedule();
@@ -424,12 +431,19 @@ PUBLIC int sys_waitpid(pid_t pid, int *status, int options)
     if (matched == NULL)
       return ERROR_WAITPID;
 
-    if (zombie != NULL)
+    if (zombie != NULL) {
+      com1_printf("AUDIT waitpid_reap self=%x pid=%x status=%x\r\n",
+                  current != 0 ? current->pid : 0,
+                  zombie->pid, zombie->exit_status);
       return reap_child(zombie, status);
+    }
 
     if ((options & WNOHANG) != 0)
       return 0;
 
+    com1_printf("AUDIT waitpid_sleep self=%x pid=%x child=%x state=%x\r\n",
+                current != 0 ? current->pid : 0,
+                pid, matched->pid, matched->state);
     sleep_on(&(current->child_wait));
   }
 }
@@ -606,14 +620,80 @@ PRIVATE pid_t reap_child(struct task_struct *task, int *status)
   if (task == NULL)
     return ERROR_WAITPID;
 
+  com1_printf("AUDIT reap_child_begin pid=%x\r\n", task->pid);
   pid = task->pid;
   if (status != NULL)
     *status = task->exit_status;
   files_close_all(task->files);
+  com1_printf("AUDIT reap_child_after_close pid=%x\r\n", task->pid);
   dlist_remove(&(task->sibling));
   dlist_remove(&(task->run_list));
   task->state = TASK_STOPPED;
+  destroy_task(task);
+  com1_printf("AUDIT reap_child_done pid=%x\r\n", pid);
   return pid;
+}
+
+PRIVATE void destroy_task(struct task_struct *task)
+{
+  if (task == NULL)
+    return;
+  com1_printf("AUDIT destroy_task_begin pid=%x\r\n", task->pid);
+  if (task->argv_data != NULL) {
+    free_process_argv_copy(task->argv_data);
+    task->argv_data = NULL;
+  }
+  if (task->envp_data != NULL) {
+    free_process_argv_copy(task->envp_data);
+    task->envp_data = NULL;
+  }
+  if (task->pg_dir != NULL) {
+    com1_printf("AUDIT destroy_task_pages pid=%x pg=%x fork_clone=%x\r\n",
+                task->pid, task->pg_dir, task->vm_is_fork_clone);
+    free_process_pages(task->pg_dir);
+    task->pg_dir = NULL;
+  }
+  if (task->pg_dir_raw != NULL) {
+    com1_printf("AUDIT destroy_task_pgdir_raw pid=%x raw=%x\r\n",
+                task->pid, task->pg_dir_raw);
+    afree(task->pg_dir_raw);
+    task->pg_dir_raw = NULL;
+  }
+  if (task->context != NULL) {
+    com1_printf("AUDIT destroy_task_context pid=%x ctx=%x\r\n",
+                task->pid, task->context);
+    kfree(task->context);
+    task->context = NULL;
+  }
+  if (task->esp0_raw != NULL) {
+    com1_printf("AUDIT destroy_task_esp0 pid=%x esp0=%x\r\n",
+                task->pid, task->esp0_raw);
+    kfree(task->esp0_raw);
+    task->esp0_raw = NULL;
+  }
+  if (task->files != NULL) {
+    com1_printf("AUDIT destroy_task_files pid=%x files=%x\r\n",
+                task->pid, task->files);
+    kfree(task->files);
+    task->files = NULL;
+  }
+  com1_printf("AUDIT destroy_task_struct pid=%x task=%x\r\n",
+              task->pid, task);
+  kfree(task);
+}
+
+PRIVATE void free_process_argv_copy(char **argv)
+{
+  int i;
+
+  if (argv == NULL)
+    return;
+  for (i = 0; i < ARGV_MAX_NUMS; i++) {
+    if (argv[i] == NULL)
+      break;
+    kfree(argv[i]);
+  }
+  kfree(argv);
 }
 
 PRIVATE int child_is_live(const struct task_struct *task)
@@ -627,5 +707,7 @@ PRIVATE void wakeup_parent_waiters(struct task_struct *task)
 {
   if (task == NULL || task->parent == NULL || task->parent == task)
     return;
+  com1_printf("AUDIT wake_parent child=%x parent=%x status=%x\r\n",
+              task->pid, task->parent->pid, task->exit_status);
   wakeup(&(task->parent->child_wait));
 }

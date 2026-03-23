@@ -6,9 +6,11 @@ from __future__ import annotations
 import os
 import pathlib
 import shutil
+import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 from typing import TextIO
 
@@ -19,6 +21,8 @@ INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 60
+HOST_SERVER_PORT = 18081
+GUEST_SERVER_PORT = 18082
 FAILURE_MARKERS = ("PF:", "PageFault", "General Protection Exception")
 READY_MARKERS = (
     "AUDIT sxi_smoke_begin",
@@ -33,6 +37,9 @@ READY_MARKERS = (
     "AUDIT sxi_fork_check_status=0",
     "AUDIT sxi_bytes_check_status=0",
     "AUDIT sxi_list_map_check_status=0",
+    "AUDIT sxi_literal_check_status=0",
+    "AUDIT sxi_net_client_check_status=0",
+    "AUDIT sxi_net_server_check_status=0",
     "AUDIT sxi_checks_status=0",
     "AUDIT sxi_hello_run_status=0",
     "AUDIT sxi_operators_run_status=0",
@@ -53,6 +60,9 @@ READY_MARKERS = (
     "AUDIT sxi_fork_run_status=0",
     "AUDIT sxi_bytes_run_status=0",
     "AUDIT sxi_list_map_run_status=0",
+    "AUDIT sxi_literal_run_status=0",
+    "AUDIT sxi_net_client_run_status=0",
+    "AUDIT sxi_net_server_run_status=0",
     "AUDIT sxi_inline_status=0",
     "AUDIT sxi_smoke_done",
     "AUDIT sxi_runs_status=0",
@@ -216,7 +226,10 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
         "/home/user/sxi_fork_out.txt": "7\nFORK_OK\n",
         "/home/user/sxi_bytes_out.txt":
             "false\n8\nBYTES_OK\nfalse\nfs.read_text failed\nBYTES_OK\nMANUAL_ERR\ntrue\nsample-from-rootfs\n",
-        "/home/user/sxi_list_map_out.txt": "2\ngamma\n2\nalpha\n2\nfalse\n",
+        "/home/user/sxi_list_map_out.txt": "3\ngamma\n3\nalpha\n2\nfalse\n",
+        "/home/user/sxi_literal_out.txt": "alpha\n3\ntrue\n",
+        "/home/user/sxi_net_client_out.txt": "true\nHOST_REPLY\n",
+        "/home/user/sxi_net_server_out.txt": "true\nHOST_TO_GUEST\n",
         "/home/user/sxi_inline.txt": "INLINE_OK\n",
     }
     removed_paths = (
@@ -244,6 +257,44 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
 def write_text(path: pathlib.Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="ascii")
+
+
+def run_host_server(errors: list[BaseException]) -> None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(("127.0.0.1", HOST_SERVER_PORT))
+            server.listen(1)
+            server.settimeout(DEFAULT_TIMEOUT)
+            conn, _addr = server.accept()
+            with conn:
+                payload = conn.recv(256).decode("ascii", errors="replace")
+                if payload != "SX_CLIENT":
+                    raise AssertionError(f"guest client payload mismatch: {payload!r}")
+                conn.sendall(b"HOST_REPLY")
+                time.sleep(0.5)
+    except BaseException as exc:  # pragma: no cover - smoke helper
+        errors.append(exc)
+
+
+def drive_guest_server(errors: list[BaseException]) -> None:
+    deadline = time.time() + DEFAULT_TIMEOUT
+
+    try:
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", GUEST_SERVER_PORT), timeout=1.0) as conn:
+                    conn.sendall(b"HOST_TO_GUEST")
+                    payload = conn.recv(256).decode("ascii", errors="replace")
+                    if payload != "SX_SERVER":
+                        raise AssertionError(f"guest server payload mismatch: {payload!r}")
+                    time.sleep(0.5)
+                    return
+            except OSError:
+                time.sleep(0.2)
+        raise AssertionError("guest server did not become reachable in time")
+    except BaseException as exc:  # pragma: no cover - smoke helper
+        errors.append(exc)
 
 
 def build_temp_rootfs(repo_root: pathlib.Path, logdir: pathlib.Path) -> pathlib.Path:
@@ -287,6 +338,12 @@ echo AUDIT sxi_fork_check_status=$?
 echo AUDIT sxi_bytes_check_status=$?
 /usr/bin/sxi --check /home/user/sx-examples/list_map.sx
 echo AUDIT sxi_list_map_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/literal_branching.sx
+echo AUDIT sxi_literal_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/net_client.sx
+echo AUDIT sxi_net_client_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/net_server.sx
+echo AUDIT sxi_net_server_check_status=$?
 exit 0
 """,
     )
@@ -330,6 +387,12 @@ echo AUDIT sxi_fork_run_status=$?
 echo AUDIT sxi_bytes_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/list_map.sx > /home/user/sxi_list_map_out.txt
 echo AUDIT sxi_list_map_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/literal_branching.sx > /home/user/sxi_literal_out.txt
+echo AUDIT sxi_literal_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/net_client.sx > /home/user/sxi_net_client_out.txt
+echo AUDIT sxi_net_client_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/net_server.sx > /home/user/sxi_net_server_out.txt
+echo AUDIT sxi_net_server_run_status=$?
 /usr/bin/sxi -e 'io.println("INLINE_OK");' > /home/user/sxi_inline.txt
 echo AUDIT sxi_inline_status=$?
 echo AUDIT sxi_smoke_done
@@ -413,14 +476,23 @@ def main() -> int:
         "-D",
         str(qemu_log),
         "-netdev",
-        "user,id=net0",
+        f"user,id=net0,hostfwd=tcp::{GUEST_SERVER_PORT}-:{GUEST_SERVER_PORT}",
         "-device",
         "ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net0",
     ]
 
     qemu_proc = None
     qemu_stderr_fp: TextIO | None = None
+    host_server_errors: list[BaseException] = []
+    host_client_errors: list[BaseException] = []
+    host_server_thread = threading.Thread(
+        target=run_host_server, args=(host_server_errors,), daemon=True
+    )
+    host_client_thread = threading.Thread(
+        target=drive_guest_server, args=(host_client_errors,), daemon=True
+    )
     try:
+        host_server_thread.start()
         qemu_stderr_fp = qemu_stderr_log.open("w", encoding="utf-8")
         qemu_proc = subprocess.Popen(
             qemu_cmd,
@@ -428,8 +500,19 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=qemu_stderr_fp,
         )
+        host_client_thread.start()
         wait_until_ready(time.time() + timeout, serial_log, qemu_log,
                          qemu_proc, qemu_stderr_log)
+        host_server_thread.join(timeout=5)
+        host_client_thread.join(timeout=5)
+        if host_server_thread.is_alive():
+            raise AssertionError("host server helper did not finish")
+        if host_client_thread.is_alive():
+            raise AssertionError("host client helper did not finish")
+        if host_server_errors:
+            raise host_server_errors[0]
+        if host_client_errors:
+            raise host_client_errors[0]
         stop_qemu(qemu_proc)
         qemu_proc = None
         assert_guest_state(temp_fsboot)

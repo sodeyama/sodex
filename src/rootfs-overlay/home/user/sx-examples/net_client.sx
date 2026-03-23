@@ -1,0 +1,10 @@
+let sock = net.connect("10.0.2.2", 18081);
+net.write(sock, "SX_CLIENT");
+
+let ready = net.poll_read(sock, 200);
+let body = net.read(sock);
+
+net.close(sock);
+
+io.println(ready);
+io.println(body);

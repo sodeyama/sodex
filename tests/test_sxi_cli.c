@@ -245,6 +245,29 @@ TEST(cli_check_mode_accepts_script_args) {
     remove(path);
 }
 
+TEST(cli_check_mode_accepts_recursive_function_calls) {
+    const char *path = "test_sxi_recursive_check.sx";
+    char *argv[] = { "sxi", "--check", "test_sxi_recursive_check.sx", NULL };
+    struct captured_run captured;
+
+    ASSERT_EQ(write_text_file(
+                  path,
+                  "fn sum_to(n) -> i32 {\n"
+                  "  if (n == 0) {\n"
+                  "    return 0;\n"
+                  "  }\n"
+                  "  return n + sum_to(n - 1);\n"
+                  "}\n"
+                  "let value = sum_to(6);\n"
+                  "io.println(value);\n"),
+              0);
+    ASSERT_EQ(capture_sxi_run(NULL, 3, argv, &captured), 0);
+    ASSERT_EQ(captured.status, 0);
+    ASSERT_STR_EQ(captured.stdout_text, "");
+    ASSERT_STR_EQ(captured.stderr_text, "");
+    remove(path);
+}
+
 TEST(cli_rejects_import_cycle) {
     const char *dir_path = "test_sxi_cycle";
     const char *a_path = "test_sxi_cycle/a.sx";
@@ -326,6 +349,7 @@ int main(void)
     RUN_TEST(cli_executes_stdlib_imports);
     RUN_TEST(cli_passes_script_args_to_runtime);
     RUN_TEST(cli_check_mode_accepts_script_args);
+    RUN_TEST(cli_check_mode_accepts_recursive_function_calls);
     RUN_TEST(cli_rejects_import_cycle);
     RUN_TEST(cli_reports_stack_trace);
     RUN_TEST(repl_handles_multiline_load_and_reset);

@@ -188,6 +188,12 @@ TEST(file_fixture_corpus_matches_expectations) {
             "fixtures/sx/runtime/list_map.out",
         },
         {
+            "literal_branching",
+            FIXTURE_RUN,
+            "fixtures/sx/runtime/literal_branching.sx",
+            "fixtures/sx/runtime/literal_branching.out",
+        },
+        {
             "undefined_name",
             FIXTURE_CHECK,
             "fixtures/sx/check/undefined_name.sx",

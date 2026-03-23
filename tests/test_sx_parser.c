@@ -32,6 +32,38 @@ static const struct sx_expr *call_arg_expr_at(const struct sx_program *program,
     return &program->exprs[expr_index];
 }
 
+static const struct sx_expr *expr_at_index(const struct sx_program *program,
+                                           int expr_index)
+{
+    if (expr_index < 0 || expr_index >= program->expr_count)
+        return NULL;
+    return &program->exprs[expr_index];
+}
+
+static const struct sx_expr *unary_operand_expr_at(const struct sx_program *program,
+                                                   const struct sx_expr *expr)
+{
+    if (expr == NULL || expr->kind != SX_EXPR_UNARY)
+        return NULL;
+    return expr_at_index(program, expr->data.unary_expr.operand_expr_index);
+}
+
+static const struct sx_expr *binary_left_expr_at(const struct sx_program *program,
+                                                 const struct sx_expr *expr)
+{
+    if (expr == NULL || expr->kind != SX_EXPR_BINARY)
+        return NULL;
+    return expr_at_index(program, expr->data.binary_expr.left_expr_index);
+}
+
+static const struct sx_expr *binary_right_expr_at(const struct sx_program *program,
+                                                  const struct sx_expr *expr)
+{
+    if (expr == NULL || expr->kind != SX_EXPR_BINARY)
+        return NULL;
+    return expr_at_index(program, expr->data.binary_expr.right_expr_index);
+}
+
 TEST(parse_function_blocks_and_control_flow) {
     const char *text =
         "fn choose(flag) -> str {\n"
@@ -99,9 +131,13 @@ TEST(parse_function_blocks_and_control_flow) {
 
         ASSERT_EQ(stmt2->kind, SX_STMT_LET);
         ASSERT_STR_EQ(stmt2->data.let_stmt.name, "code");
-        ASSERT_EQ(stmt2->data.let_stmt.value.kind, SX_EXPR_ATOM);
-        ASSERT_EQ(stmt2->data.let_stmt.value.data.atom.kind, SX_ATOM_I32);
-        ASSERT_EQ(stmt2->data.let_stmt.value.data.atom.int_value, -7);
+        ASSERT_EQ(stmt2->data.let_stmt.value.kind, SX_EXPR_UNARY);
+        ASSERT_EQ(stmt2->data.let_stmt.value.data.unary_expr.op, SX_UNARY_NEGATE);
+        arg0 = unary_operand_expr_at(&program, &stmt2->data.let_stmt.value);
+        ASSERT_EQ(arg0 != NULL, 1);
+        ASSERT_EQ(arg0->kind, SX_EXPR_ATOM);
+        ASSERT_EQ(arg0->data.atom.kind, SX_ATOM_I32);
+        ASSERT_EQ(arg0->data.atom.int_value, 7);
 
         ASSERT_EQ(stmt3->kind, SX_STMT_BLOCK);
         ASSERT_EQ(program.blocks[stmt3->data.block_stmt.block_index].stmt_count, 1);
@@ -185,6 +221,86 @@ TEST(parse_nested_call_arguments) {
     ASSERT_STR_EQ(print_arg->data.call_expr.member_name, "trim");
 }
 
+TEST(parse_operators_assignment_and_for) {
+    const char *text =
+        "let code = -7;\n"
+        "let ok = !false && (1 + 2 * 3 == 7);\n"
+        "for (let i = 0; i < 3; i = i + 1) {\n"
+        "  if (i == 1) {\n"
+        "    continue;\n"
+        "  }\n"
+        "  break;\n"
+        "}\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    const struct sx_stmt *stmt0;
+    const struct sx_stmt *stmt1;
+    const struct sx_stmt *stmt2;
+    const struct sx_stmt *init_stmt;
+    const struct sx_stmt *step_stmt;
+    const struct sx_stmt *body_stmt0;
+    const struct sx_stmt *body_stmt1;
+    const struct sx_expr *left;
+    const struct sx_expr *right;
+    const struct sx_expr *mul_expr;
+
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+
+    stmt0 = block_stmt_at(&program, program.top_level_block_index, 0);
+    stmt1 = block_stmt_at(&program, program.top_level_block_index, 1);
+    stmt2 = block_stmt_at(&program, program.top_level_block_index, 2);
+    ASSERT_EQ(stmt0 != NULL, 1);
+    ASSERT_EQ(stmt1 != NULL, 1);
+    ASSERT_EQ(stmt2 != NULL, 1);
+
+    ASSERT_EQ(stmt0->kind, SX_STMT_LET);
+    ASSERT_EQ(stmt0->data.let_stmt.value.kind, SX_EXPR_UNARY);
+    ASSERT_EQ(stmt0->data.let_stmt.value.data.unary_expr.op, SX_UNARY_NEGATE);
+
+    ASSERT_EQ(stmt1->kind, SX_STMT_LET);
+    ASSERT_EQ(stmt1->data.let_stmt.value.kind, SX_EXPR_BINARY);
+    ASSERT_EQ(stmt1->data.let_stmt.value.data.binary_expr.op, SX_BINARY_AND);
+    left = binary_left_expr_at(&program, &stmt1->data.let_stmt.value);
+    right = binary_right_expr_at(&program, &stmt1->data.let_stmt.value);
+    ASSERT_EQ(left != NULL, 1);
+    ASSERT_EQ(right != NULL, 1);
+    ASSERT_EQ(left->kind, SX_EXPR_UNARY);
+    ASSERT_EQ(left->data.unary_expr.op, SX_UNARY_NOT);
+    ASSERT_EQ(right->kind, SX_EXPR_BINARY);
+    ASSERT_EQ(right->data.binary_expr.op, SX_BINARY_EQ);
+    left = binary_left_expr_at(&program, right);
+    ASSERT_EQ(left != NULL, 1);
+    ASSERT_EQ(left->kind, SX_EXPR_BINARY);
+    ASSERT_EQ(left->data.binary_expr.op, SX_BINARY_ADD);
+    mul_expr = binary_right_expr_at(&program, left);
+    ASSERT_EQ(mul_expr != NULL, 1);
+    ASSERT_EQ(mul_expr->kind, SX_EXPR_BINARY);
+    ASSERT_EQ(mul_expr->data.binary_expr.op, SX_BINARY_MUL);
+
+    ASSERT_EQ(stmt2->kind, SX_STMT_FOR);
+    ASSERT_EQ(stmt2->data.for_stmt.has_condition, 1);
+    init_stmt = &program.statements[stmt2->data.for_stmt.init_stmt_index];
+    step_stmt = &program.statements[stmt2->data.for_stmt.step_stmt_index];
+    ASSERT_EQ(init_stmt->kind, SX_STMT_LET);
+    ASSERT_STR_EQ(init_stmt->data.let_stmt.name, "i");
+    ASSERT_EQ(stmt2->data.for_stmt.condition.kind, SX_EXPR_BINARY);
+    ASSERT_EQ(stmt2->data.for_stmt.condition.data.binary_expr.op, SX_BINARY_LT);
+    ASSERT_EQ(step_stmt->kind, SX_STMT_ASSIGN);
+    ASSERT_STR_EQ(step_stmt->data.assign_stmt.name, "i");
+    ASSERT_EQ(step_stmt->data.assign_stmt.value.kind, SX_EXPR_BINARY);
+    ASSERT_EQ(step_stmt->data.assign_stmt.value.data.binary_expr.op, SX_BINARY_ADD);
+
+    body_stmt0 = block_stmt_at(&program, stmt2->data.for_stmt.body_block_index, 0);
+    body_stmt1 = block_stmt_at(&program, stmt2->data.for_stmt.body_block_index, 1);
+    ASSERT_EQ(body_stmt0 != NULL, 1);
+    ASSERT_EQ(body_stmt1 != NULL, 1);
+    ASSERT_EQ(body_stmt0->kind, SX_STMT_IF);
+    ASSERT_EQ(body_stmt1->kind, SX_STMT_BREAK);
+    body_stmt0 = block_stmt_at(&program, body_stmt0->data.if_stmt.then_block_index, 0);
+    ASSERT_EQ(body_stmt0 != NULL, 1);
+    ASSERT_EQ(body_stmt0->kind, SX_STMT_CONTINUE);
+}
+
 TEST(parse_requires_semicolon) {
     const char *text = "let name = \"oops\"\nio.println(name);\n";
     struct sx_program program;
@@ -200,6 +316,7 @@ int main(void)
 
     RUN_TEST(parse_function_blocks_and_control_flow);
     RUN_TEST(parse_nested_call_arguments);
+    RUN_TEST(parse_operators_assignment_and_for);
     RUN_TEST(parse_requires_semicolon);
 
     TEST_REPORT();

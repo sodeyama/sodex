@@ -1,0 +1,13 @@
+let total = 0;
+
+for (let i = 0; i < 6; i = i + 1) {
+  if (i == 1) {
+    continue;
+  }
+  if (i == 5) {
+    break;
+  }
+  total = total + i;
+}
+
+io.println(total);

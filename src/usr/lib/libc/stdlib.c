@@ -1,6 +1,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef TEST_BUILD
+extern char **environ;
+#else
+char **environ = 0;
+#endif
+
 static int stdlib_is_space(char ch)
 {
   return ch == ' ' || ch == '\t' || ch == '\n' ||
@@ -50,4 +56,26 @@ int is_number(const char* nptr)
       return 0;
   }
   return 1;
+}
+
+char *getenv(const char *name)
+{
+  int name_len;
+  int i;
+
+  if (name == 0 || name[0] == '\0' || environ == 0)
+    return 0;
+  name_len = (int)strlen(name);
+  for (i = 0; environ[i] != 0; i++) {
+    char *entry = environ[i];
+
+    if (entry == 0)
+      continue;
+    if (strncmp(entry, name, (size_t)name_len) != 0)
+      continue;
+    if (entry[name_len] != '=')
+      continue;
+    return entry + name_len + 1;
+  }
+  return 0;
 }

@@ -17,6 +17,9 @@ KERNEL_STACK_SEG = 0x9000
 KERNEL_STACK_PTR = 0xF000
 
 READ_MAX_SECTS   = 0x40
+FS_DATA_BLOCK    = 12          # src/include/ext3fs.h の P_DATA_BLOCK/BLOCK_SIZE と同期
+BOOTM_LBA        = FS_DATA_BLOCK * 8
+KERNEL_LBA       = BOOTM_LBA + 8
 
 .code16
 .text
@@ -69,7 +72,7 @@ next:
         jc      error
 
 # read middle boot
-        movl    $64 , (lba)
+        movl    $BOOTM_LBA , (lba)
         movw    $4, (sector_nums)
         movw    $INITSEG, (buf_segment)
         movw    $0x400, (buf_offset)        
@@ -77,7 +80,7 @@ next:
         print   $read_success
 
 # read kernel
-        movl    $72 , (lba)
+        movl    $KERNEL_LBA , (lba)
         movw    $KERNEL_SECTS, (sector_nums)
         movw    $KERNEL_SEG, (buf_segment)
         movw    $0x0, (buf_offset)        

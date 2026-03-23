@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <execve.h>
 #include <tty.h>
+#include <rs232c.h>
 
 PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
                                      char *const envp[],
@@ -38,11 +39,26 @@ PRIVATE void free_argv_copy(char **argv);
 PRIVATE void cleanup_exec_task(struct task_struct *task);
 PRIVATE pid_t alloc_pid();
 PRIVATE struct tty *inherit_stdio_tty(struct tty *stdio_tty);
+PRIVATE struct task_struct *clone_current_task(void);
 
 PUBLIC pid_t sys_fork()
 {
-  pid_t pid = 0;
-  return pid;
+  struct task_struct *child;
+
+  if (current == NULL || current->context == NULL)
+    return -1;
+
+  disable_pic_interrupt(IRQ_TIMER);
+  child = clone_current_task();
+  if (child == NULL) {
+    enable_pic_interrupt(IRQ_TIMER);
+    return -1;
+  }
+
+  dlist_insert_after(&(child->sibling), &(current->children));
+  dlist_insert_after(&(child->run_list), &(current->run_list));
+  enable_pic_interrupt(IRQ_TIMER);
+  return child->pid;
 }
 
 PUBLIC void kernel_execve(const char *filename, char *const argv[],
@@ -129,7 +145,10 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
 {
   struct tty *child_tty;
   int argc;
+  int envc;
   char **argv_copy;
+  char **envp_copy;
+  com1_printf("AUDIT execve_begin file=%s\r\n", filename);
   /* timer IRQ の mask は caller 側で握り、run list 更新までまとめて保護する。 */
   /* set the memory translation using page feature for user process */
   // alloc 4096Byte from kernel memory manager
@@ -181,8 +200,11 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   {
     struct task_struct *saved_current = current;
     current = kern_task;
+    com1_printf("AUDIT execve_before_loader file=%s\r\n", filename);
     elf_ret = elf_loader(filename, &entrypoint, &loadaddr, pg_dir, kern_task,
                          &allocation_point);
+    com1_printf("AUDIT execve_after_loader ret=%x entry=%x alloc=%x\r\n",
+                elf_ret, entrypoint, allocation_point);
     current = saved_current;
   }
   if (elf_ret == ELF_FAIL) {
@@ -218,15 +240,27 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   kern_task->context->cs = __USER_CS;
   kern_task->context->ds = __USER_DS;
   kern_task->context->eflags = DEFAULT_EFLAGS;
+  com1_printf("AUDIT execve_before_args file=%s\r\n", filename);
   argc = get_argc(argv);
+  envc = get_argc(envp);
   argv_copy = get_argv(argv);
+  envp_copy = get_argv(envp);
   if (argc > 0 && argv_copy == NULL) {
     _kprintf("%s: argv copy failed\n", __func__);
     cleanup_exec_task(kern_task);
     return NULL;
   }
+  if (envc > 0 && envp_copy == NULL) {
+    _kprintf("%s: envp copy failed\n", __func__);
+    free_argv_copy(argv_copy);
+    cleanup_exec_task(kern_task);
+    return NULL;
+  }
+  kern_task->argv_data = argv_copy;
+  kern_task->envp_data = envp_copy;
   kern_task->context->eax = argc;
   kern_task->context->ebx = (u_int32_t)argv_copy;
+  kern_task->context->ecx = (u_int32_t)envp_copy;
   kern_task->is_usermode = OUTER_PRIVILEGE;
   kern_task->state = TASK_RUNNING;
 
@@ -242,6 +276,7 @@ PRIVATE struct task_struct* __execve(const char *filename, char *const argv[],
   kern_task->esp0 =
       ((u_int32_t)kern_task->esp0_raw & ~(BLOCK_SIZE - 1)) +
       (BLOCK_SIZE * PROC_KERNEL_STACK_PAGES);
+  com1_printf("AUDIT execve_done pid=%x file=%s\r\n", kern_task->pid, filename);
 
   return kern_task;
 }
@@ -294,6 +329,92 @@ PRIVATE struct tty *inherit_stdio_tty(struct tty *stdio_tty)
   if (tty == NULL)
     tty = tty_lookup_file(current->files, STDERR_FILENO);
   return tty;
+}
+
+PRIVATE struct task_struct *clone_current_task(void)
+{
+  void *pg_dir_raw;
+  u_int32_t *pg_dir;
+  struct task_struct *child;
+
+  if (current == NULL || current->context == NULL || current->files == NULL)
+    return NULL;
+
+  pg_dir_raw = kalloc(BLOCK_SIZE * 2);
+  if (pg_dir_raw == NULL)
+    return NULL;
+  pg_dir = (u_int32_t *)(((u_int32_t)pg_dir_raw & ~(BLOCK_SIZE - 1)) +
+                         BLOCK_SIZE);
+  memset(pg_dir, 0, BLOCK_SIZE);
+  create_kernel_page(pg_dir);
+
+  child = kalloc(sizeof(struct task_struct));
+  if (child == NULL) {
+    kfree(pg_dir_raw);
+    return NULL;
+  }
+  memset(child, 0, sizeof(struct task_struct));
+  child->pg_dir = pg_dir;
+  child->pg_dir_raw = pg_dir_raw;
+
+  child->files = kalloc(sizeof(struct files_struct));
+  if (child->files == NULL) {
+    cleanup_exec_task(child);
+    return NULL;
+  }
+  memset(child->files, 0, sizeof(struct files_struct));
+  files_clone(child->files, current->files);
+
+  if (clone_process_pages(child->pg_dir, current->pg_dir) < 0) {
+    cleanup_exec_task(child);
+    return NULL;
+  }
+
+  child->context = kalloc(sizeof(struct hard_context));
+  if (child->context == NULL) {
+    cleanup_exec_task(child);
+    return NULL;
+  }
+  memset(child->context, 0, sizeof(struct hard_context));
+
+  child->esp0_raw = kalloc(BLOCK_SIZE * (PROC_KERNEL_STACK_PAGES + 1));
+  if (child->esp0_raw == NULL) {
+    cleanup_exec_task(child);
+    return NULL;
+  }
+  child->esp0 = ((u_int32_t)child->esp0_raw & ~(BLOCK_SIZE - 1)) +
+                (BLOCK_SIZE * PROC_KERNEL_STACK_PAGES);
+
+  memcpy(child->filename, current->filename, PROC_LEN_FILENAME);
+  child->dentry = current->dentry;
+  child->parent = current;
+  child->allocpoint = current->allocpoint;
+  child->firstexec = 1;
+  child->state = TASK_RUNNING;
+  child->is_usermode = current->is_usermode;
+  memcpy(child->sigactions, current->sigactions, sizeof(child->sigactions));
+  init_dlist_set(&(child->run_list));
+  init_dlist_set(&(child->children));
+  init_dlist_set(&(child->sibling));
+  child->pid = alloc_pid();
+
+  memcpy(child->context, current->context, sizeof(struct hard_context));
+  child->argv_data = get_argv((char *const *)current->argv_data);
+  if (current->argv_data != NULL && child->argv_data == NULL) {
+    cleanup_exec_task(child);
+    return NULL;
+  }
+  child->envp_data = get_argv((char *const *)current->envp_data);
+  if (current->envp_data != NULL && child->envp_data == NULL) {
+    cleanup_exec_task(child);
+    return NULL;
+  }
+  child->context->cr3 = (u_int32_t)child->pg_dir - __PAGE_OFFSET;
+  child->context->eax = 0;
+  child->context->ebx = (u_int32_t)child->argv_data;
+  child->context->ecx = (u_int32_t)child->envp_data;
+
+  return child;
 }
 
 PRIVATE int get_argc(char *const argv[])
@@ -369,13 +490,21 @@ PRIVATE void cleanup_exec_task(struct task_struct *task)
   if (task == NULL)
     return;
 
+  if (task->argv_data != NULL) {
+    free_argv_copy(task->argv_data);
+    task->argv_data = NULL;
+  }
+  if (task->envp_data != NULL) {
+    free_argv_copy(task->envp_data);
+    task->envp_data = NULL;
+  }
+
   if (task->files != NULL) {
     files_close_all(task->files);
     kfree(task->files);
     task->files = NULL;
   }
   if (task->context != NULL) {
-    free_argv_copy((char **)task->context->ebx);
     kfree(task->context);
     task->context = NULL;
   }

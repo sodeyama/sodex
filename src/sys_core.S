@@ -25,6 +25,7 @@ VRAM_ADDRESS = 0xc00b8000
 .extern vga_text_backend_cols
 .extern vga_text_backend_vram
 .extern process_in_timer_interrupt
+.extern process_debug_null_memset
 
 enableInterrupt:
         cmpl    $0, process_in_timer_interrupt
@@ -195,6 +196,15 @@ memset:
         movl    0x8(%ebp), %edi
         movb    0xc(%ebp), %al
         movl    0x10(%ebp), %ecx
+        testl   %edi, %edi
+        jne     1f
+        testl   %ecx, %ecx
+        je      1f
+        pushl   %ecx
+        pushl   0x4(%ebp)
+        call    process_debug_null_memset
+        addl    $8, %esp
+1:
         cld
         rep
         stosb

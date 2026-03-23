@@ -1,0 +1,22 @@
+let path = "/tmp/sx-bytes.bin";
+let missing = fs.try_read_text("/tmp/sx-missing.txt");
+let raw = bytes.from_text("BYTES_OK");
+let manual = result.ok("BYTES_OK");
+let failure = result.err("MANUAL_ERR");
+let capture = proc.try_capture("/usr/bin/cat", "/home/user/sx-examples/copy_source.txt");
+
+fs.write_bytes(path, raw);
+
+let round = fs.read_bytes(path);
+
+io.println(proc.has_env("SXI_DEMO_MISSING"));
+io.println(bytes.len(round));
+io.println(bytes.to_text(round));
+io.println(result.is_ok(missing));
+io.println(result.error(missing));
+io.println(result.value(manual));
+io.println(result.error(failure));
+io.println(result.is_ok(capture));
+io.print(result.value(capture));
+
+fs.remove(path);

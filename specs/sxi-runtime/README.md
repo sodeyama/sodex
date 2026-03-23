@@ -26,7 +26,7 @@
 
 - `agent` の `write_file` は 3072 bytes 上限で、巨大 source 生成は不利
 - `agent` の `run_command` は `sh -c` 経由で約 10 秒 timeout
-- `execve()` は自己置換ではなく spawn 的で、`fork()` は stub
+- `execve()` は自己置換ではなく spawn 的で、process API はその前提を意識する必要がある
 - userland libc は最小で、host 由来の大きい runtime 前提を置きにくい
 - shell は glue には良いが、複雑な値モデルや host bridge を持ちにくい
 
@@ -48,7 +48,7 @@
 - `sxi file.sx`, `sxi -e '...'`, `sxi --check file.sx`, `sxi` REPL を持つ
 - `sx` frontend を共通 `libsx` として切り出し、将来の `sxc` と共有する
 - v0 は tree-walk source interpreter で成立させる
-- file / process / JSON / text の最小 standard surface を持つ
+- file / process / fd / path / time / JSON / text の standard surface を持つ
 - host unit test と QEMU smoke で実行系の回帰を継続確認できる
 
 ## 非ゴール
@@ -92,7 +92,7 @@
 - frontend は `libsx` として `sxi` 本体から分離する
 - value は tagged union ベースで持つ
 - 初手は GC を入れず、script/session arena と明示 reset で進める
-- process API は現状の spawn 的 `execve()` / `waitpid()` に合わせる
+- process API は現状の spawn 的 `execve()` / `waitpid()` に合わせつつ、必要な `fork()` / `pipe()` は guest から使える最小実装まで補完する
 - REPL は `:reset` を持ち、長寿命 object 問題を制御する
 - runtime error は fail-fast で止め、stack trace と source span を返す
 
@@ -104,6 +104,7 @@
 | 02 | [plans/02-evaluator-and-memory-model.md](plans/02-evaluator-and-memory-model.md) | value、environment、call frame、arena、runtime error を定義する | 01, [`specs/sx-language/plans/03-type-system-and-standard-surface.md`](../sx-language/plans/03-type-system-and-standard-surface.md) | source interpreter core が host test 可能な形で固まる |
 | 03 | [plans/03-builtins-modules-and-host-bridge.md](plans/03-builtins-modules-and-host-bridge.md) | `fs` / `proc` / `json` / `text` の host bridge と module surface を決める | 01, 02, [`specs/sx-language/plans/03-type-system-and-standard-surface.md`](../sx-language/plans/03-type-system-and-standard-surface.md) | agent 用 script が guest 内で実用になる |
 | 04 | [plans/04-repl-validation-and-bytecode-handoff.md](plans/04-repl-validation-and-bytecode-handoff.md) | REPL UX、host/QEMU test、bytecode handoff 境界を固める | 01, 02, 03, [`specs/sx-language/plans/04-diagnostics-fixtures-and-compatibility.md`](../sx-language/plans/04-diagnostics-fixtures-and-compatibility.md) | 日常利用の実行経路と将来拡張の境界が固まる |
+| 05 | [plans/05-process-io-and-fork-expansion.md](plans/05-process-io-and-fork-expansion.md) | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` の runtime と guest bridge を固める | 02, 03, 04, [`specs/sx-language/plans/06-system-interop-surface-expansion.md`](../sx-language/plans/06-system-interop-surface-expansion.md) | script から fd / pid / pipe / child process と helper object を実用的に扱える |
 
 ## マイルストーン
 
@@ -113,6 +114,7 @@
 | M1: evaluator core の固定 | 02 | value と call frame を持つ source interpreter が説明できる |
 | M2: host bridge の固定 | 03 | file / process / JSON / text の標準入口がそろう |
 | M3: 検証導線と次段の境界固定 | 04 | REPL、agent workflow、host/QEMU test、bytecode handoff がそろう |
+| M4: interop runtime の固定 | 05 | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` が host/QEMU で固定される |
 
 ## 現時点の判断
 
@@ -121,6 +123,7 @@
 - process bridge は shell 経由の文字列実行に寄せすぎず、spawn 契約を明示する
 - GC より先に arena と reset point を整備する
 - `sxb` / `sxc` は後段だが、AST と runtime 境界は今の plan で意識する
+- fd と pid を扱う runtime object は固定長 table で先に成立させる
 
 ## 実装順序
 
@@ -136,7 +139,7 @@
 - v0 は source interpreter、v1 以降で bytecode VM を視野に入れる
 - runtime error は fail-fast を基本にし、recoverable error 機構は後段候補とする
 - REPL の長寿命状態は session arena と `:reset` で制御する
-- process API は `execve()` の現行契約に合わせ、true `exec` や `fork` を前提にしない
+- process API は `execve()` の現行契約に合わせつつ、`spawn` を主 API に据え、`fork` は明示的な低水準操作として扱う
 
 ## 未解決論点
 
@@ -145,6 +148,7 @@
 - runtime stack trace をどこまで詳細に出すか
 - file / JSON API の戻り値を fail-fast に寄せるか、structured error を早めに持つか
 - `sxb` 用の bytecode IR を AST 直後に作るか、evaluator 専用の lowering を別に持つか
+- `fork()` を raw に expose しつつ、`spawn` / `pipe` 主体の script style をどう推奨するか
 
 ## 関連 spec
 

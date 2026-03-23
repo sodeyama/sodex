@@ -1,0 +1,6 @@
+let base = 7;
+let calc = (base + 5) * 2 - 4 / 2;
+let ok = calc == 22 && base % 3 == 1 && !(false || false);
+
+io.println(calc);
+io.println(ok);

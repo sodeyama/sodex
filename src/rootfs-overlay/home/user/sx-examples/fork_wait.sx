@@ -1,0 +1,15 @@
+let path = "/tmp/sx-fork.txt";
+let pid = proc.fork();
+
+if (pid == 0) {
+  fs.write_text(path, "FORK_OK");
+  proc.exit(7);
+}
+
+let status = proc.wait(pid);
+let body = fs.read_text(path);
+
+fs.remove(path);
+
+io.println(status);
+io.println(body);

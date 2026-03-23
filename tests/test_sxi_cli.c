@@ -137,6 +137,16 @@ TEST(cli_executes_inline_code) {
     ASSERT_STR_EQ(captured.stderr_text, "");
 }
 
+TEST(cli_prints_version_surface) {
+    char *argv[] = { "sxi", "--version", NULL };
+    struct captured_run captured;
+
+    ASSERT_EQ(capture_sxi_run(NULL, 2, argv, &captured), 0);
+    ASSERT_EQ(captured.status, 0);
+    ASSERT_STR_EQ(captured.stdout_text, "sxi 0.1.0 (sx 0.1.0, frontend abi 1, runtime abi 1)\n");
+    ASSERT_STR_EQ(captured.stderr_text, "");
+}
+
 TEST(cli_reports_check_failure) {
     const char *path = "test_sxi_bad.sx";
     char *argv[] = { "sxi", "--check", "test_sxi_bad.sx", NULL };
@@ -180,6 +190,59 @@ TEST(cli_executes_relative_imports) {
     remove(main_path);
     remove(module_path);
     rmdir(dir_path);
+}
+
+TEST(cli_executes_stdlib_imports) {
+    const char *path = "test_sxi_stdlib_main.sx";
+    char *argv[] = { "sxi", "test_sxi_stdlib_main.sx", NULL };
+    struct captured_run captured;
+
+    ASSERT_EQ(write_text_file(
+                  path,
+                  "import \"std/strings\";\n"
+                  "io.println(join_words(\"HELLO\", \"STDLIB\"));\n"),
+              0);
+    ASSERT_EQ(capture_sxi_run(NULL, 2, argv, &captured), 0);
+    ASSERT_EQ(captured.status, 0);
+    ASSERT_STR_EQ(captured.stdout_text, "HELLO-STDLIB\n");
+    ASSERT_STR_EQ(captured.stderr_text, "");
+    remove(path);
+}
+
+TEST(cli_passes_script_args_to_runtime) {
+    const char *path = "test_sxi_args.sx";
+    char *argv[] = { "sxi", "test_sxi_args.sx", "first", "second", NULL };
+    struct captured_run captured;
+
+    ASSERT_EQ(write_text_file(
+                  path,
+                  "io.println(proc.argv_count());\n"
+                  "io.println(proc.argv(1));\n"
+                  "io.println(proc.argv(2));\n"),
+              0);
+    ASSERT_EQ(capture_sxi_run(NULL, 4, argv, &captured), 0);
+    ASSERT_EQ(captured.status, 0);
+    ASSERT_STR_EQ(captured.stdout_text, "3\nfirst\nsecond\n");
+    ASSERT_STR_EQ(captured.stderr_text, "");
+    remove(path);
+}
+
+TEST(cli_check_mode_accepts_script_args) {
+    const char *path = "test_sxi_check_args.sx";
+    char *argv[] = { "sxi", "--check", "test_sxi_check_args.sx", "alpha", "beta", NULL };
+    struct captured_run captured;
+
+    ASSERT_EQ(write_text_file(
+                  path,
+                  "test.assert_eq(proc.argv_count(), 3);\n"
+                  "test.assert_eq(proc.argv(1), \"alpha\");\n"
+                  "test.assert_eq(proc.argv(2), \"beta\");\n"),
+              0);
+    ASSERT_EQ(capture_sxi_run(NULL, 5, argv, &captured), 0);
+    ASSERT_EQ(captured.status, 0);
+    ASSERT_STR_EQ(captured.stdout_text, "");
+    ASSERT_STR_EQ(captured.stderr_text, "");
+    remove(path);
 }
 
 TEST(cli_rejects_import_cycle) {
@@ -257,8 +320,12 @@ int main(void)
     printf("=== sxi cli tests ===\n");
 
     RUN_TEST(cli_executes_inline_code);
+    RUN_TEST(cli_prints_version_surface);
     RUN_TEST(cli_reports_check_failure);
     RUN_TEST(cli_executes_relative_imports);
+    RUN_TEST(cli_executes_stdlib_imports);
+    RUN_TEST(cli_passes_script_args_to_runtime);
+    RUN_TEST(cli_check_mode_accepts_script_args);
     RUN_TEST(cli_rejects_import_cycle);
     RUN_TEST(cli_reports_stack_trace);
     RUN_TEST(repl_handles_multiline_load_and_reset);

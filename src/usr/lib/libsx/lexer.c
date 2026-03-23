@@ -121,8 +121,25 @@ int sx_lex(const char *text, int len,
                           start, pos - start, line, start_column,
                           text + start, pos - start, diag) < 0)
           return -1;
+      } else if (pos - start == 3 && strncmp(text + start, "for", 3) == 0) {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_KEYWORD_FOR,
+                          start, pos - start, line, start_column,
+                          text + start, pos - start, diag) < 0)
+          return -1;
       } else if (pos - start == 5 && strncmp(text + start, "while", 5) == 0) {
         if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_KEYWORD_WHILE,
+                          start, pos - start, line, start_column,
+                          text + start, pos - start, diag) < 0)
+          return -1;
+      } else if (pos - start == 5 && strncmp(text + start, "break", 5) == 0) {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_KEYWORD_BREAK,
+                          start, pos - start, line, start_column,
+                          text + start, pos - start, diag) < 0)
+          return -1;
+      } else if (pos - start == 8 &&
+                 strncmp(text + start, "continue", 8) == 0) {
+        if (sx_emit_token(tokens, max_tokens, &count,
+                          SX_TOKEN_KEYWORD_CONTINUE,
                           start, pos - start, line, start_column,
                           text + start, pos - start, diag) < 0)
           return -1;
@@ -149,8 +166,7 @@ int sx_lex(const char *text, int len,
       }
       continue;
     }
-    if (sx_is_digit(ch) ||
-        (ch == '-' && pos + 1 < len && sx_is_digit(text[pos + 1]))) {
+    if (sx_is_digit(ch)) {
       int start = pos;
       int start_column = column;
 
@@ -253,8 +269,68 @@ int sx_lex(const char *text, int len,
         column += 2;
         continue;
       }
+      if (ch == '=' && pos + 1 < len && text[pos + 1] == '=') {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_EQUAL_EQUAL,
+                          pos, 2, line, column, text + pos, 2, diag) < 0)
+          return -1;
+        pos += 2;
+        column += 2;
+        continue;
+      }
+      if (ch == '!' && pos + 1 < len && text[pos + 1] == '=') {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_BANG_EQUAL,
+                          pos, 2, line, column, text + pos, 2, diag) < 0)
+          return -1;
+        pos += 2;
+        column += 2;
+        continue;
+      }
+      if (ch == '<' && pos + 1 < len && text[pos + 1] == '=') {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_LESS_EQUAL,
+                          pos, 2, line, column, text + pos, 2, diag) < 0)
+          return -1;
+        pos += 2;
+        column += 2;
+        continue;
+      }
+      if (ch == '>' && pos + 1 < len && text[pos + 1] == '=') {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_GREATER_EQUAL,
+                          pos, 2, line, column, text + pos, 2, diag) < 0)
+          return -1;
+        pos += 2;
+        column += 2;
+        continue;
+      }
+      if (ch == '&' && pos + 1 < len && text[pos + 1] == '&') {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_AND_AND,
+                          pos, 2, line, column, text + pos, 2, diag) < 0)
+          return -1;
+        pos += 2;
+        column += 2;
+        continue;
+      }
+      if (ch == '|' && pos + 1 < len && text[pos + 1] == '|') {
+        if (sx_emit_token(tokens, max_tokens, &count, SX_TOKEN_OR_OR,
+                          pos, 2, line, column, text + pos, 2, diag) < 0)
+          return -1;
+        pos += 2;
+        column += 2;
+        continue;
+      }
       if (ch == '.')
         kind = SX_TOKEN_DOT;
+      else if (ch == '+')
+        kind = SX_TOKEN_PLUS;
+      else if (ch == '-')
+        kind = SX_TOKEN_MINUS;
+      else if (ch == '*')
+        kind = SX_TOKEN_STAR;
+      else if (ch == '/')
+        kind = SX_TOKEN_SLASH;
+      else if (ch == '%')
+        kind = SX_TOKEN_PERCENT;
+      else if (ch == '!')
+        kind = SX_TOKEN_BANG;
       else if (ch == '(')
         kind = SX_TOKEN_LPAREN;
       else if (ch == ')')
@@ -267,6 +343,10 @@ int sx_lex(const char *text, int len,
         kind = SX_TOKEN_SEMICOLON;
       else if (ch == '=')
         kind = SX_TOKEN_EQUAL;
+      else if (ch == '<')
+        kind = SX_TOKEN_LESS;
+      else if (ch == '>')
+        kind = SX_TOKEN_GREATER;
       else if (ch == ',')
         kind = SX_TOKEN_COMMA;
       else {

@@ -94,6 +94,8 @@ AST / symbol / diagnostics
 | 02 | [plans/02-grammar-and-ast.md](plans/02-grammar-and-ast.md) | declaration / statement / expression grammar と AST を定義する | 01 | `libsx` frontend の parse 出力が安定する |
 | 03 | [plans/03-type-system-and-standard-surface.md](plans/03-type-system-and-standard-surface.md) | type、scope、mutability、builtin namespace、module surface を決める | 01, 02 | `sxi` と `sxc` が共有できる semantic contract が固まる |
 | 04 | [plans/04-diagnostics-fixtures-and-compatibility.md](plans/04-diagnostics-fixtures-and-compatibility.md) | 診断形式、fixture、examples、versioning を固定する | 01, 02, 03 | 実装前から回帰基準と互換ポリシーを持てる |
+| 05 | [plans/05-expression-and-control-flow-expansion.md](plans/05-expression-and-control-flow-expansion.md) | operator、assignment、`break` / `continue`、`for` を追加し、手続き表現を広げる | 02, 03, 04 | 実用的な loop / 条件 / 更新が host/QEMU で固定される |
+| 06 | [plans/06-system-interop-surface-expansion.md](plans/06-system-interop-surface-expansion.md) | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` を含む system interop surface を固定する | 03, 04, 05 | script から file / process / pipe / child process と回復可能な helper 値を一通り扱える契約が固まる |
 
 ## マイルストーン
 
@@ -103,6 +105,8 @@ AST / symbol / diagnostics
 | M1: grammar / AST の固定 | 02 | declaration / statement / expression と AST node が安定する |
 | M2: semantic contract の固定 | 03 | type と builtin namespace の責務が `sxi` / `sxc` 共通で説明できる |
 | M3: 回帰基準の固定 | 04 | diagnostics、fixtures、examples、互換ポリシーがそろう |
+| M4: 表現力拡張 | 05 | operator、assignment、`break` / `continue`、`for` が言語契約として固定される |
+| M5: system interop 拡張 | 06 | `argv`、env、fd / bytes I/O、path、time、`spawn` / `wait` / `pipe` / `fork`、`list` / `map` / `result` の surface が言語契約として固定される |
 
 ## 現時点の判断
 
@@ -127,6 +131,7 @@ AST / symbol / diagnostics
 - expression の暗黙変換は避ける
 - 複雑な型機構より、読みやすい grammar と明快な runtime contract を先に固める
 - error handling は language 機能と stdlib 契約を分けて考える
+- process / fd API は shell 文字列ではなく argv / fd / pid を中心に広げる
 
 ## 未解決論点
 
@@ -135,6 +140,7 @@ AST / symbol / diagnostics
 - `list` / `map` の element typing を v0 で持つか
 - recoverable error を generic な `Result` 型で持つか、fail-fast + predicate に寄せるか
 - 将来 `sxc` が要求する ABI 情報を AST / semantic layer にどこまで持たせるか
+- `fork` を fail-fast language surface として expose するか、より高水準の `spawn` を主 API に置くか
 
 ## 関連 spec
 

@@ -17,7 +17,7 @@ using namespace std;
 #define BLOCK_SIZE          4096    //4096Byte
 #define BLOCK_MAX           4096    //4096個
 #define INODE_SIZE          128     //128Byte
-#define INODE_MAX           128     //128個
+#define INODE_MAX           256     //256個
 #define INODE_PER_BLOCK     ((BLOCK_SIZE)/(INODE_SIZE)) //32
 #define IBLOCK_SIZE         512
 
@@ -75,13 +75,13 @@ using namespace std;
 #define P_BLOCK_BITMAP      8192    // 4096*2
 #define P_INODE_BITMAP      12288   // 4096*3
 #define P_INODE_BLOCK       16384   // 4096*4
-#define P_DATA_BLOCK        (16384+(4096*(INODE_MAX/INODE_PER_BLOCK))) // 4096*8
+#define P_DATA_BLOCK        (16384+(4096*(INODE_MAX/INODE_PER_BLOCK))) // inode table の直後
 
 // size
 #define S_GROUP_DESC        4096    // 1block
 #define S_BLOCK_BITMAP      4096    // 1block
 #define S_INODE_BITMAP      4096    // 1block
-#define S_INODE             (4096*(INODE_MAX/INODE_PER_BLOCK)) // 4block
+#define S_INODE             (4096*(INODE_MAX/INODE_PER_BLOCK)) // inode table の総サイズ
 
 // buf size
 #define BUF_BOOTA           512
@@ -237,8 +237,10 @@ void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
               ext3_group_desc* gd, u_int8_t* inode_bitmap,
               u_int8_t* block_bitmap, int parent_ino, string path);
 string ensure_dir_path(const string& path);
+int find_dir_entry_inode(fstream& ofs, ext3_inode* inode, u_int32_t parent_ino,
+                         const char *name, u_int8_t *file_type_out);
 
-int first_data_block = 8;
+int first_data_block = P_DATA_BLOCK / BLOCK_SIZE;
 
 int current_inode = 0;
 int rootdir_inode;
@@ -352,7 +354,7 @@ void set_group_block(fstream& ofs, ext3_group_desc* gd)
   gd->bg_inode_bitmap = 3;
   gd->bg_inode_table = 4;
   gd->bg_free_blocks_count = BLOCK_MAX - (P_DATA_BLOCK / BLOCK_SIZE);
-  gd->bg_free_inodes_count = 125;
+  gd->bg_free_inodes_count = INODE_MAX;
   gd->bg_used_dirs_count = 1;
 
   ofs.seekp(P_GROUP_DESC, ios::beg);
@@ -362,6 +364,8 @@ void set_group_block(fstream& ofs, ext3_group_desc* gd)
 
 void set_init_bitmap(u_int8_t* inode_bitmap, u_int8_t* block_bitmap)
 {
+  u_int32_t block;
+
   set_bitmap(inode_bitmap, 0);
   set_bitmap(inode_bitmap, 1);
   set_bitmap(inode_bitmap, 3);
@@ -373,14 +377,8 @@ void set_init_bitmap(u_int8_t* inode_bitmap, u_int8_t* block_bitmap)
   set_bitmap(inode_bitmap, 9);
   set_bitmap(inode_bitmap, 10);
 
-  set_bitmap(block_bitmap, 0);
-  set_bitmap(block_bitmap, 1);
-  set_bitmap(block_bitmap, 2);
-  set_bitmap(block_bitmap, 3);
-  set_bitmap(block_bitmap, 4);
-  set_bitmap(block_bitmap, 5);
-  set_bitmap(block_bitmap, 6);
-  set_bitmap(block_bitmap, 7);
+  for (block = 0; block < (u_int32_t)(P_DATA_BLOCK / BLOCK_SIZE); block++)
+    set_bitmap(block_bitmap, block);
 }
 
 u_int32_t alloc_inode(ext3_super_block* sb, ext3_group_desc* gd)
@@ -527,7 +525,7 @@ int create_file(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
     error("The size of data is too large blocks.");
   }
 
-  set_bitmap(ino_bitmap, newino);
+  set_bitmap(ino_bitmap, newino - 1);
 
   return newino;
 }
@@ -562,7 +560,8 @@ int insert_dir_data(fstream& ofs, ext3_inode* inode, u_int32_t n_dirinode,
 
   int dir_iblock = dino->i_block[0];
   char buf[BLOCK_SIZE];
-  ofs.seekp(dir_iblock*BLOCK_SIZE, ios::beg);
+  ofs.clear();
+  ofs.seekg(dir_iblock*BLOCK_SIZE, ios::beg);
   ofs.read((char*)buf, BLOCK_SIZE);
 
   // rec_len check and search null point
@@ -606,6 +605,7 @@ int insert_dir_data(fstream& ofs, ext3_inode* inode, u_int32_t n_dirinode,
   memcpy(p+7, &file_type, 1);
   memcpy(p+8, name_buf, name_len);
 
+  ofs.clear();
   ofs.seekp(dir_iblock*BLOCK_SIZE, ios::beg);
   ofs.write((char*)buf, BLOCK_SIZE);
   ofs.flush();
@@ -650,7 +650,7 @@ int create_root_dir(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
   insert_dir_data(ofs, inode, root_ino, dot2ino, FTYPE_DIR, "..");
   insert_dir_data(ofs, inode, root_ino, lf_ino, FTYPE_DIR, "lost+found");
  
-  set_bitmap(ino_bitmap, root_ino);
+  set_bitmap(ino_bitmap, root_ino - 1);
 
   return root_ino;
 }
@@ -688,7 +688,7 @@ int create_lostfound_dir(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
   insert_dir_data(ofs, inode, dir_ino, dotino, FTYPE_DIR, ".");
   insert_dir_data(ofs, inode, dir_ino, dot2ino, FTYPE_DIR, "..");
  
-  set_bitmap(ino_bitmap, dir_ino);
+  set_bitmap(ino_bitmap, dir_ino - 1);
 
   return dir_ino;
 }
@@ -727,7 +727,7 @@ int create_dir(fstream& ofs, ext3_inode* inode, ext3_super_block* sb,
   insert_dir_data(ofs, inode, dir_ino, dotino, FTYPE_DIR, ".");
   insert_dir_data(ofs, inode, dir_ino, dot2ino, FTYPE_DIR, "..");
  
-  set_bitmap(ino_bitmap, dir_ino);
+  set_bitmap(ino_bitmap, dir_ino - 1);
 
   return dir_ino;
 }
@@ -933,6 +933,47 @@ string ensure_dir_path(const string& path)
   return path + "/";
 }
 
+int find_dir_entry_inode(fstream& ofs, ext3_inode* inode, u_int32_t parent_ino,
+                         const char *name, u_int8_t *file_type_out)
+{
+  ext3_inode *dino;
+  int dir_iblock;
+  char buf[BLOCK_SIZE];
+  int offset = 0;
+
+  if (inode == NULL || name == NULL || parent_ino == 0)
+    return 0;
+
+  dino = (ext3_inode*)(inode + parent_ino - 1);
+  dir_iblock = dino->i_block[0];
+  if (dir_iblock == 0)
+    return 0;
+
+  ofs.clear();
+  ofs.seekg(dir_iblock * BLOCK_SIZE, ios::beg);
+  ofs.read((char*)buf, BLOCK_SIZE);
+
+  while (offset + 8 <= BLOCK_SIZE) {
+    char *p = buf + offset;
+    u_int32_t entry_ino = ((u_int32_t*)p)[0];
+    u_int16_t rec_len = ((u_int16_t*)(p + 4))[0];
+    u_int8_t name_len = (u_int8_t)p[6];
+    u_int8_t file_type = (u_int8_t)p[7];
+
+    if (rec_len < 8 || offset + rec_len > BLOCK_SIZE)
+      break;
+    if (entry_ino != 0 && name_len == strlen(name) &&
+        memcmp(p + 8, name, name_len) == 0) {
+      if (file_type_out != NULL)
+        *file_type_out = file_type;
+      return (int)entry_ino;
+    }
+    offset += rec_len;
+  }
+
+  return 0;
+}
+
 void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
               ext3_group_desc* gd, u_int8_t* inode_bitmap,
               u_int8_t* block_bitmap, int parent_ino, string path)
@@ -945,7 +986,8 @@ void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
   if (dir) {
     while ((dent = readdir(dir))) {
       if ( strcmp(dent->d_name, ".") == 0 ||
-           strcmp(dent->d_name, "..") == 0)
+           strcmp(dent->d_name, "..") == 0 ||
+           strcmp(dent->d_name, ".keep") == 0)
         continue;
       file_path = path + dent->d_name;
 
@@ -953,11 +995,18 @@ void read_dir(fstream& kernel_iofs, ext3_inode* inode, ext3_super_block* sb,
       stat(file_path.c_str(), &statbuf);
 
       int file_ino;
+      u_int8_t existing_type = 0;
+      int existing_ino = find_dir_entry_inode(kernel_iofs, inode, parent_ino,
+                                              dent->d_name, &existing_type);
       if (S_ISDIR(statbuf.st_mode)) {
-        file_ino = create_dir(kernel_iofs, inode, sb, gd,
-                              inode_bitmap, block_bitmap);
-        insert_dir_data(kernel_iofs, inode, parent_ino,
-                        file_ino, FTYPE_DIR, dent->d_name);
+        if (existing_ino != 0 && existing_type == FTYPE_DIR) {
+          file_ino = existing_ino;
+        } else {
+          file_ino = create_dir(kernel_iofs, inode, sb, gd,
+                                inode_bitmap, block_bitmap);
+          insert_dir_data(kernel_iofs, inode, parent_ino,
+                          file_ino, FTYPE_DIR, dent->d_name);
+        }
         read_dir(kernel_iofs, inode, sb, gd, inode_bitmap, block_bitmap,
                  file_ino, file_path + "/");
       } else if (S_ISREG(statbuf.st_mode)) {

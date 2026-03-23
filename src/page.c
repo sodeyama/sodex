@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <page.h>
 #include <memory_layout.h>
+#include <string.h>
 
 /* Forward declarations to avoid pulling in memory.h globals */
 PUBLIC void* palloc(u_int32_t size);
@@ -160,6 +161,60 @@ PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
   }
 
   return (void*)new_start_vaddr;
+}
+
+PUBLIC int clone_process_pages(u_int32_t *dst_pg_dir, u_int32_t *src_pg_dir)
+{
+  int pd_pos;
+
+  if (dst_pg_dir == NULL || src_pg_dir == NULL)
+    return -1;
+
+  for (pd_pos = 0; pd_pos < PGDIR_KERNEL_START; pd_pos++) {
+    u_int32_t src_pde = src_pg_dir[pd_pos];
+    u_int32_t *src_pg_tbl;
+    u_int32_t *dst_pg_tbl;
+    u_int32_t dst_pde;
+    int pt_pos;
+
+    if (src_pde == 0)
+      continue;
+    if (src_pde & PAGE_PSE)
+      return -1;
+
+    src_pg_tbl = (u_int32_t *)((src_pde & ~(BLOCK_SIZE - 1)) + __PAGE_OFFSET);
+    dst_pg_tbl = kalloc(BLOCK_SIZE * 2);
+    if (dst_pg_tbl == NULL)
+      goto fail;
+    dst_pg_tbl = (u_int32_t *)(((u_int32_t)dst_pg_tbl & ~(BLOCK_SIZE - 1)) +
+                               BLOCK_SIZE);
+    memset(dst_pg_tbl, 0, BLOCK_SIZE);
+
+    for (pt_pos = 0; pt_pos < 1024; pt_pos++) {
+      u_int32_t src_pte = src_pg_tbl[pt_pos];
+      u_int32_t dst_phys;
+
+      if ((src_pte & PAGE_PRESENT) == 0)
+        continue;
+      dst_phys = (u_int32_t)palloc(BLOCK_SIZE);
+      if (dst_phys == 0)
+        goto fail;
+      memcpy((void *)(dst_phys + __PAGE_OFFSET),
+             (void *)((src_pte & ~(BLOCK_SIZE - 1)) + __PAGE_OFFSET),
+             BLOCK_SIZE);
+      dst_pg_tbl[pt_pos] = dst_phys | (src_pte & (BLOCK_SIZE - 1));
+    }
+
+    dst_pde = ((u_int32_t)dst_pg_tbl - __PAGE_OFFSET);
+    dst_pde |= (src_pde & (BLOCK_SIZE - 1));
+    dst_pg_dir[pd_pos] = dst_pde;
+  }
+
+  return 0;
+
+fail:
+  free_process_pages(dst_pg_dir);
+  return -1;
 }
 
 PUBLIC void free_process_pages(u_int32_t *pg_dir)

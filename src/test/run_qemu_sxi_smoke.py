@@ -18,21 +18,44 @@ BLOCK_SIZE = 4096
 INODE_SIZE = 128
 P_INODE_BLOCK = 16384
 SODEX_ROOT_INO = 2
-DEFAULT_TIMEOUT = 45
+DEFAULT_TIMEOUT = 60
 FAILURE_MARKERS = ("PF:", "PageFault", "General Protection Exception")
 READY_MARKERS = (
     "AUDIT sxi_smoke_begin",
-    "AUDIT sxi_check_status=0",
     "AUDIT sxi_bad_status=2",
-    "AUDIT sxi_fs_check_status=0",
-    "AUDIT sxi_flow_check_status=0",
+    "AUDIT sxi_hello_check_status=0",
     "AUDIT sxi_import_check_status=0",
-    "AUDIT sxi_run_status=0",
-    "AUDIT sxi_fs_run_status=0",
-    "AUDIT sxi_flow_run_status=0",
+    "AUDIT sxi_stdlib_check_status=0",
+    "AUDIT sxi_stdin_check_status=0",
+    "AUDIT sxi_interop_check_status=0",
+    "AUDIT sxi_spawn_check_status=0",
+    "AUDIT sxi_pipe_check_status=0",
+    "AUDIT sxi_fork_check_status=0",
+    "AUDIT sxi_bytes_check_status=0",
+    "AUDIT sxi_list_map_check_status=0",
+    "AUDIT sxi_checks_status=0",
+    "AUDIT sxi_hello_run_status=0",
+    "AUDIT sxi_operators_run_status=0",
+    "AUDIT sxi_while_run_status=0",
+    "AUDIT sxi_for_run_status=0",
+    "AUDIT sxi_break_run_status=0",
+    "AUDIT sxi_scope_run_status=0",
+    "AUDIT sxi_recursive_run_status=0",
     "AUDIT sxi_import_run_status=0",
+    "AUDIT sxi_stdlib_run_status=0",
+    "AUDIT sxi_json_run_status=0",
+    "AUDIT sxi_copy_run_status=0",
+    "AUDIT sxi_proc_run_status=0",
+    "AUDIT sxi_stdin_run_status=0",
+    "AUDIT sxi_interop_run_status=0",
+    "AUDIT sxi_spawn_run_status=0",
+    "AUDIT sxi_pipe_run_status=0",
+    "AUDIT sxi_fork_run_status=0",
+    "AUDIT sxi_bytes_run_status=0",
+    "AUDIT sxi_list_map_run_status=0",
     "AUDIT sxi_inline_status=0",
     "AUDIT sxi_smoke_done",
+    "AUDIT sxi_runs_status=0",
 )
 
 
@@ -84,6 +107,17 @@ def wait_until_ready(deadline: float, serial_log: pathlib.Path,
     raise AssertionError("sxi smoke markers did not become ready in time")
 
 
+def stop_qemu(qemu_proc: subprocess.Popen[bytes] | None) -> None:
+    if qemu_proc is None:
+        return
+    qemu_proc.terminate()
+    try:
+        qemu_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        qemu_proc.kill()
+        qemu_proc.wait()
+
+
 def inode_bytes(image: bytes, ino: int) -> bytes:
     start = P_INODE_BLOCK + (ino - 1) * INODE_SIZE
     return image[start:start + INODE_SIZE]
@@ -97,6 +131,12 @@ def inode_block0(image: bytes, ino: int) -> int:
     return struct.unpack_from("<I", inode_bytes(image, ino), 40)[0]
 
 
+def inode_block(image: bytes, ino: int, index: int) -> int:
+    if index < 0:
+        return 0
+    return struct.unpack_from("<I", inode_bytes(image, ino), 40 + index * 4)[0]
+
+
 def read_file(image: bytes, ino: int) -> bytes:
     size = inode_size(image, ino)
     block0 = inode_block0(image, ino)
@@ -105,12 +145,20 @@ def read_file(image: bytes, ino: int) -> bytes:
 
 
 def read_dir_entries(image: bytes, ino: int) -> dict[str, tuple[int, int]]:
-    block = inode_block0(image, ino)
-    data = image[block * BLOCK_SIZE:(block + 1) * BLOCK_SIZE]
+    size = inode_size(image, ino)
+    data = bytearray()
+    block_index = 0
     offset = 0
     result: dict[str, tuple[int, int]] = {}
 
-    while offset + 8 <= len(data):
+    while len(data) < size and block_index < 12:
+        block = inode_block(image, ino, block_index)
+        if block == 0:
+            break
+        data.extend(image[block * BLOCK_SIZE:(block + 1) * BLOCK_SIZE])
+        block_index += 1
+
+    while offset + 8 <= len(data) and offset < size:
         inode_num = struct.unpack_from("<I", data, offset)[0]
         rec_len = struct.unpack_from("<H", data, offset + 4)[0]
         name_len = data[offset + 6]
@@ -147,25 +195,50 @@ def read_path_text(fsboot: pathlib.Path, path: str) -> str:
 
 
 def assert_guest_state(fsboot: pathlib.Path) -> None:
-    out_text = read_path_text(fsboot, "/home/user/sxi_out.txt")
-    fs_out_text = read_path_text(fsboot, "/home/user/sxi_fs_out.txt")
-    flow_out_text = read_path_text(fsboot, "/home/user/sxi_flow_out.txt")
-    import_out_text = read_path_text(fsboot, "/home/user/sxi_import_out.txt")
-    inline_text = read_path_text(fsboot, "/home/user/sxi_inline.txt")
-    copied_text = read_path_text(fsboot, "/home/user/copied.txt")
+    expected_outputs = {
+        "/home/user/sxi_hello_out.txt": "Hello, sodex sx\n",
+        "/home/user/sxi_operators_out.txt": "22\ntrue\n",
+        "/home/user/sxi_while_out.txt": "10\n",
+        "/home/user/sxi_for_out.txt": "15\n",
+        "/home/user/sxi_break_out.txt": "9\n",
+        "/home/user/sxi_scope_out.txt": "inner\nouter\n",
+        "/home/user/sxi_recursive_out.txt": "21\n",
+        "/home/user/sxi_import_out.txt": "IMPORT_OK\n",
+        "/home/user/sxi_stdlib_out.txt": "STDLIB-OK\n",
+        "/home/user/sxi_json_out.txt": "sodex-json\ntrue\n7\ntrue\n",
+        "/home/user/sxi_copy_out.txt": "true\nsample-from-rootfs\n\nCOPIED_BY_SX\n",
+        "/home/user/sxi_proc_out.txt": "sample-from-rootfs\ntrue\n",
+        "/home/user/sxi_stdin_out.txt": "stdin-head|stdin-tail\n",
+        "/home/user/sxi_interop_out.txt":
+            "3\n/home/user/sx-examples/argv_fs_time.sx\nbeta\ntrue\ntrue\ntrue\nalpha\ntrue\n",
+        "/home/user/sxi_spawn_out.txt": "5\nfalse\nsample-from-rootfs\n",
+        "/home/user/sxi_pipe_out.txt": "PIPE_OK\ntrue\n",
+        "/home/user/sxi_fork_out.txt": "7\nFORK_OK\n",
+        "/home/user/sxi_bytes_out.txt":
+            "false\n8\nBYTES_OK\nfalse\nfs.read_text failed\nBYTES_OK\nMANUAL_ERR\ntrue\nsample-from-rootfs\n",
+        "/home/user/sxi_list_map_out.txt": "2\ngamma\n2\nalpha\n2\nfalse\n",
+        "/home/user/sxi_inline.txt": "INLINE_OK\n",
+    }
+    removed_paths = (
+        "/tmp/sx-spawn.txt",
+        "/tmp/sx-fork.txt",
+        "/tmp/sx-interop",
+        "/tmp/sx-bytes.bin",
+    )
 
-    if out_text != "SXI_OK\n":
-        raise AssertionError(f"sxi_out.txt mismatch: {out_text!r}")
-    if fs_out_text != "true\n":
-        raise AssertionError(f"sxi_fs_out.txt mismatch: {fs_out_text!r}")
-    if flow_out_text != "SCOPE_OK\nFLOW_OK\n":
-        raise AssertionError(f"sxi_flow_out.txt mismatch: {flow_out_text!r}")
-    if import_out_text != "IMPORT_OK\n":
-        raise AssertionError(f"sxi_import_out.txt mismatch: {import_out_text!r}")
-    if inline_text != "INLINE_OK\n":
-        raise AssertionError(f"sxi_inline.txt mismatch: {inline_text!r}")
-    if copied_text != "QEMU_FS!":
-        raise AssertionError(f"copied.txt mismatch: {copied_text!r}")
+    for path, expected in expected_outputs.items():
+        actual = read_path_text(fsboot, path)
+        if actual != expected:
+            raise AssertionError(f"{path} mismatch: {actual!r}")
+
+    copied_text = read_path_text(fsboot, "/tmp/sx-copy.txt")
+    if copied_text != "sample-from-rootfs\n\nCOPIED_BY_SX":
+        raise AssertionError(f"/tmp/sx-copy.txt mismatch: {copied_text!r}")
+
+    image = fsboot.read_bytes()
+    for path in removed_paths:
+        if lookup_path(image, path) is not None:
+            raise AssertionError(f"{path} should have been removed")
 
 
 def write_text(path: pathlib.Path, text: str) -> None:
@@ -191,26 +264,72 @@ def build_temp_rootfs(repo_root: pathlib.Path, logdir: pathlib.Path) -> pathlib.
         temp_fsboot.unlink()
 
     write_text(
-        overlay_dir / "etc" / "init.d" / "rcS",
-        """echo AUDIT sxi_smoke_begin
-/usr/bin/sxi --check /home/user/hello.sx
-echo AUDIT sxi_check_status=$?
-/usr/bin/sxi --check /home/user/bad.sx
+        overlay_dir / "home" / "user" / "sxi_smoke_checks.sh",
+        """/usr/bin/sxi --check /home/user/bad.sx
 echo AUDIT sxi_bad_status=$?
-/usr/bin/sxi --check /home/user/copy.sx
-echo AUDIT sxi_fs_check_status=$?
-/usr/bin/sxi --check /home/user/flow.sx
-echo AUDIT sxi_flow_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/hello.sx
+echo AUDIT sxi_hello_check_status=$?
 /usr/bin/sxi --check /home/user/import_main.sx
 echo AUDIT sxi_import_check_status=$?
-/usr/bin/sxi /home/user/hello.sx > /home/user/sxi_out.txt
-echo AUDIT sxi_run_status=$?
-/usr/bin/sxi /home/user/copy.sx > /home/user/sxi_fs_out.txt
-echo AUDIT sxi_fs_run_status=$?
-/usr/bin/sxi /home/user/flow.sx > /home/user/sxi_flow_out.txt
-echo AUDIT sxi_flow_run_status=$?
-/usr/bin/sxi /home/user/import_main.sx > /home/user/sxi_import_out.txt
+/usr/bin/sxi --check /home/user/sx-examples/stdlib_import.sx
+echo AUDIT sxi_stdlib_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/stdin_echo.sx
+echo AUDIT sxi_stdin_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/argv_fs_time.sx alpha beta
+echo AUDIT sxi_interop_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/spawn_wait.sx
+echo AUDIT sxi_spawn_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/pipe_roundtrip.sx
+echo AUDIT sxi_pipe_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/fork_wait.sx
+echo AUDIT sxi_fork_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/env_bytes_result.sx
+echo AUDIT sxi_bytes_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/list_map.sx
+echo AUDIT sxi_list_map_check_status=$?
+exit 0
+""",
+    )
+    write_text(
+        overlay_dir / "home" / "user" / "sxi_smoke_runs.sh",
+        """/usr/bin/sxi /home/user/sx-examples/hello.sx > /home/user/sxi_hello_out.txt
+echo AUDIT sxi_hello_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/operators.sx > /home/user/sxi_operators_out.txt
+echo AUDIT sxi_operators_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/while_counter.sx > /home/user/sxi_while_out.txt
+echo AUDIT sxi_while_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/for_counter.sx > /home/user/sxi_for_out.txt
+echo AUDIT sxi_for_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/break_continue.sx > /home/user/sxi_break_out.txt
+echo AUDIT sxi_break_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/scope_blocks.sx > /home/user/sxi_scope_out.txt
+echo AUDIT sxi_scope_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/recursive_sum.sx > /home/user/sxi_recursive_out.txt
+echo AUDIT sxi_recursive_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/import_main.sx > /home/user/sxi_import_out.txt
 echo AUDIT sxi_import_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/stdlib_import.sx > /home/user/sxi_stdlib_out.txt
+echo AUDIT sxi_stdlib_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/json_report.sx > /home/user/sxi_json_out.txt
+echo AUDIT sxi_json_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/copy_file.sx > /home/user/sxi_copy_out.txt
+echo AUDIT sxi_copy_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/proc_capture.sx > /home/user/sxi_proc_out.txt
+echo AUDIT sxi_proc_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/stdin_echo.sx < /home/user/sx-examples/stdin_source.txt > /home/user/sxi_stdin_out.txt
+echo AUDIT sxi_stdin_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/argv_fs_time.sx alpha beta > /home/user/sxi_interop_out.txt
+echo AUDIT sxi_interop_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/spawn_wait.sx > /home/user/sxi_spawn_out.txt
+echo AUDIT sxi_spawn_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/pipe_roundtrip.sx > /home/user/sxi_pipe_out.txt
+echo AUDIT sxi_pipe_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/fork_wait.sx > /home/user/sxi_fork_out.txt
+echo AUDIT sxi_fork_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/env_bytes_result.sx > /home/user/sxi_bytes_out.txt
+echo AUDIT sxi_bytes_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/list_map.sx > /home/user/sxi_list_map_out.txt
+echo AUDIT sxi_list_map_run_status=$?
 /usr/bin/sxi -e 'io.println("INLINE_OK");' > /home/user/sxi_inline.txt
 echo AUDIT sxi_inline_status=$?
 echo AUDIT sxi_smoke_done
@@ -218,16 +337,13 @@ exit 0
 """,
     )
     write_text(
-        overlay_dir / "home" / "user" / "hello.sx",
-        """fn pick(flag) -> str {
-  if (flag) {
-    return "SXI_OK";
-  }
-  return "BAD";
-}
-let ok = true;
-let name = pick(ok);
-io.println(text.trim(text.concat(name, "  ")));
+        overlay_dir / "etc" / "init.d" / "rcS",
+        """echo AUDIT sxi_smoke_begin
+/usr/bin/sh /home/user/sxi_smoke_checks.sh
+echo AUDIT sxi_checks_status=$?
+/usr/bin/sh /home/user/sxi_smoke_runs.sh
+echo AUDIT sxi_runs_status=$?
+exit 0
 """,
     )
     write_text(
@@ -236,55 +352,9 @@ io.println(text.trim(text.concat(name, "  ")));
 """,
     )
     write_text(
-        overlay_dir / "home" / "user" / "copy.sx",
-        """fn copy(src, dst) -> bool {
-  let body = fs.read_text(src);
-  fs.write_text(dst, body);
-  fs.append_text(dst, "!");
-  return fs.exists(dst);
-}
-let src = "/home/user/source.txt";
-let dst = "/home/user/copied.txt";
-let ok = copy(src, dst);
-io.println(ok);
-""",
-    )
-    write_text(
-        overlay_dir / "home" / "user" / "flow.sx",
-        """fn loop_once(flag) -> str {
-  while (flag) {
-    return "FLOW_OK";
-  }
-  return "FLOW_BAD";
-}
-{
-  let shadow = "SCOPE_OK";
-  io.println(shadow);
-}
-let ok = true;
-let result = loop_once(ok);
-io.println(text.trim(text.concat(result, "  ")));
-""",
-    )
-    write_text(
-        overlay_dir / "home" / "user" / "source.txt",
-        "QEMU_FS",
-    )
-    write_text(
-        overlay_dir / "home" / "user" / "import_lib.sx",
-        """fn import_pick(flag) -> str {
-  if (flag) {
-    return "IMPORT_OK";
-  }
-  return "IMPORT_BAD";
-}
-""",
-    )
-    write_text(
         overlay_dir / "home" / "user" / "import_main.sx",
-        """import "import_lib.sx";
-let ok = true;
-io.println(import_pick(ok));
+        """import "sx-examples/import_lib.sx";
+io.println(imported_name());
 """,
     )
 
@@ -360,6 +430,8 @@ def main() -> int:
         )
         wait_until_ready(time.time() + timeout, serial_log, qemu_log,
                          qemu_proc, qemu_stderr_log)
+        stop_qemu(qemu_proc)
+        qemu_proc = None
         assert_guest_state(temp_fsboot)
         print("=== SXI QEMU SMOKE DONE ===")
         print(f"Artifacts: {serial_log}, {qemu_log}, {temp_fsboot}")
@@ -371,12 +443,7 @@ def main() -> int:
         raise
     finally:
         if qemu_proc is not None:
-            qemu_proc.terminate()
-            try:
-                qemu_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                qemu_proc.kill()
-                qemu_proc.wait()
+            stop_qemu(qemu_proc)
         if qemu_stderr_fp is not None:
             qemu_stderr_fp.close()
 

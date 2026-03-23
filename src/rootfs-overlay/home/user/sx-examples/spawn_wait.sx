@@ -1,0 +1,14 @@
+let path = "/tmp/sx-spawn.txt";
+let pid = proc.spawn(
+  "/usr/bin/sh",
+  "-c",
+  "/usr/bin/cat /home/user/sx-examples/copy_source.txt > /tmp/sx-spawn.txt; exit 5"
+);
+let status = proc.wait(pid);
+let body = fs.read_text(path);
+
+fs.remove(path);
+
+io.println(status);
+io.println(proc.status_ok(status));
+io.print(body);

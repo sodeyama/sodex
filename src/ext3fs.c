@@ -32,6 +32,7 @@ PRIVATE inline ext3_inode* ext3_get_inode(u_int32_t ino);
 PRIVATE inline void ext3_set_inode(u_int32_t ino, ext3_inode* inode);
 
 PRIVATE int __get_free_bitmap(u_int8_t* bitmap);
+PRIVATE int __get_free_bitmap_range(u_int8_t* bitmap, int start_bit, int end_bit);
 PRIVATE void __set_bitmap(u_int8_t* bitmap, u_int32_t bit);
 PRIVATE void __clear_bitmap(u_int8_t* bitmap, u_int32_t bit);
 PRIVATE int __alloc_ino();
@@ -237,15 +238,26 @@ PRIVATE void ext3_read_dir_entries_from_block(ext3_dentry *parent,
 
 PRIVATE int __alloc_ino()
 {
+  int bit_index;
+  int start_bit = SODEX_FIRST_INO - 1;
+  int next_bit = super_block.s_first_ino > SODEX_FIRST_INO ?
+                     (int)super_block.s_first_ino - 1 : start_bit;
   int newino;
+
+  bit_index = __get_free_bitmap_range(inode_bitmap, next_bit, INODE_MAX - 1);
+  if (bit_index == -1 && next_bit > start_bit)
+    bit_index = __get_free_bitmap_range(inode_bitmap, start_bit, next_bit - 1);
+  if (bit_index == -1) {
+    _kprintf("%s:inode bitmap is full\n", __func__);
+    return -1;
+  }
 
   super_block.s_free_inodes_count--;
   group_descs[0].bg_free_inodes_count--;
-  newino = __get_free_bitmap(inode_bitmap);
-  if (newino == -1)
-    _kprintf("%s:inode bitmap is full\n", __func__);
-  super_block.s_first_ino = newino;
-  __set_bitmap(inode_bitmap, newino);
+  newino = bit_index + 1;
+  super_block.s_first_ino = (newino + 1 > INODE_MAX) ? SODEX_FIRST_INO :
+                            (u_int32_t)(newino + 1);
+  __set_bitmap(inode_bitmap, newino - 1);
 
 #ifdef DIRTY
   // dirty set
@@ -278,24 +290,27 @@ PRIVATE int __alloc_block()
 
 PRIVATE int __get_free_bitmap(u_int8_t* bitmap)
 {
-  int free = 0;
-  int i, j;
-  for (i = 0; i < BLOCK_SIZE; i++) {
-    if ((0xff & ~(bitmap[i])) == 0) {
-      free += 8;
-      continue;
-    }
-    for (j = 0; j < 8; j++) {
-      if (~(bitmap[i]) & (u_int8_t)pow(2, j)) {
-        free += j;
-        break;
-      }
-    }
-    break;
-  }
-  if (i == BLOCK_SIZE)
+  return __get_free_bitmap_range(bitmap, 0, BLOCK_SIZE * 8 - 1);
+}
+
+PRIVATE int __get_free_bitmap_range(u_int8_t* bitmap, int start_bit, int end_bit)
+{
+  int bit;
+
+  if (bitmap == NULL)
     return -1;
-  return free;
+  if (start_bit < 0)
+    start_bit = 0;
+  if (end_bit >= BLOCK_SIZE * 8)
+    end_bit = BLOCK_SIZE * 8 - 1;
+  if (start_bit > end_bit)
+    return -1;
+
+  for (bit = start_bit; bit <= end_bit; bit++) {
+    if ((bitmap[bit / 8] & (1 << (bit % 8))) == 0)
+      return bit;
+  }
+  return -1;
 }
 
 PRIVATE void __set_bitmap(u_int8_t* bitmap, u_int32_t bit)
@@ -789,7 +804,8 @@ PRIVATE void ext3_release_inode(ext3_dentry *dentry)
 
   ext3_release_inode_blocks(dentry);
   memset(dentry->d_inode, 0, sizeof(ext3_inode));
-  __clear_bitmap(inode_bitmap, dentry->d_inonum);
+  if (dentry->d_inonum > 0)
+    __clear_bitmap(inode_bitmap, dentry->d_inonum - 1);
   super_block.s_free_inodes_count++;
   group_descs[0].bg_free_inodes_count++;
   rootdirty->d_super = TRUE;

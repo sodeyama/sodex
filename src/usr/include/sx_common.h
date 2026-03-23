@@ -3,17 +3,27 @@
 
 #include <sys/types.h>
 
-#define SX_MAX_TOKENS 256
-#define SX_MAX_EXPRS 128
-#define SX_MAX_STATEMENTS 64
-#define SX_MAX_BLOCKS 32
-#define SX_MAX_FUNCTIONS 8
-#define SX_MAX_BINDINGS 64
+#define SX_MAX_TOKENS 512
+#define SX_MAX_EXPRS 256
+#define SX_MAX_STATEMENTS 128
+#define SX_MAX_BLOCKS 64
+#define SX_MAX_FUNCTIONS 16
+#define SX_MAX_BINDINGS 128
 #define SX_MAX_SCOPE_DEPTH 16
 #define SX_MAX_CALL_DEPTH 16
+#define SX_MAX_RUNTIME_ARGS 16
+#define SX_MAX_PIPE_HANDLES 8
+#define SX_MAX_LIST_HANDLES 4
+#define SX_MAX_LIST_ITEMS 16
+#define SX_MAX_MAP_HANDLES 4
+#define SX_MAX_MAP_ITEMS 16
+#define SX_MAX_RESULT_HANDLES 8
 #define SX_NAME_MAX 32
 #define SX_TEXT_MAX 256
 #define SX_DIAG_MESSAGE_MAX 128
+#define SX_LANGUAGE_VERSION "0.1.0"
+#define SX_FRONTEND_ABI_VERSION 1
+#define SX_RUNTIME_ABI_VERSION 1
 
 struct sx_source_span {
   int offset;

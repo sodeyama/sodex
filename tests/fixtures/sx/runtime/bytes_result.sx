@@ -1,0 +1,18 @@
+let path = "/tmp/sx-fixture-bytes.bin";
+let missing = fs.try_read_text("/tmp/sx-fixture-missing.txt");
+let raw = bytes.from_text("fixture");
+let ok = result.ok("value-ok");
+let err = result.err("value-err");
+
+fs.write_bytes(path, raw);
+
+let round = fs.read_bytes(path);
+
+io.println(bytes.len(round));
+io.println(bytes.to_text(round));
+io.println(result.is_ok(missing));
+io.println(result.error(missing));
+io.println(result.value(ok));
+io.println(result.error(err));
+
+fs.remove(path);

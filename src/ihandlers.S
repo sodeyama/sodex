@@ -260,8 +260,13 @@ asm_process_switch:
         cmp     $__USER_CS, %ax
         je      outer_privilege_switch
 error:
-        movl    $0x9999, %eax
-        jmp     error
+        pushl   IS_USERMODE_CS(%ebp)
+        call    process_debug_unexpected_timer_cs
+        addl    $4, %esp
+1:
+        cli
+        hlt
+        jmp     1b
 same_privilege_switch:                    # kernel to kernel
         movl    $SAME_PRIVILEGE, %eax
         jmp     1f

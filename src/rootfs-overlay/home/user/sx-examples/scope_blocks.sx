@@ -1,0 +1,8 @@
+let name = "outer";
+
+{
+  let name = "inner";
+  io.println(name);
+}
+
+io.println(name);

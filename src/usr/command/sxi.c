@@ -9,12 +9,19 @@
 #ifdef TEST_BUILD
 #include <fcntl.h>
 #include <unistd.h>
+#define SXI_DEBUG_PRINTF(...) ((void)0)
+#define SXI_DEBUG_WRITE(buf, len) ((void)0)
+#else
+#include <debug.h>
+#define SXI_DEBUG_PRINTF(...) debug_printf(__VA_ARGS__)
+#define SXI_DEBUG_WRITE(buf, len) debug_write((buf), (len))
 #endif
 
 #define SXI_REPL_LINE_MAX 512
 #define SXI_REPL_BUFFER_MAX 4096
 #define SXI_IMPORT_MAX 32
 #define SXI_PATH_SEGMENT_MAX 256
+#define SXI_GUEST_STDLIB_DIR "/usr/lib/sx"
 
 struct sxi_string_builder {
   char *data;
@@ -34,6 +41,7 @@ static char *sxi_read_file_all(const char *path, int *out_len);
 static void sxi_write_text(int fd, const char *text);
 static void sxi_print_usage(void);
 static void sxi_print_help(void);
+static void sxi_print_version(void);
 static void sxi_print_diagnostic(const char *name,
                                  const struct sx_diagnostic *diag,
                                  const struct sx_runtime *runtime);
@@ -60,6 +68,13 @@ static int sxi_parse_import_line(const char *line, int len,
                                  char *import_path, int import_cap);
 static int sxi_resolve_import_path(const char *current_path,
                                    const char *import_path,
+                                   char *resolved, int resolved_cap);
+static int sxi_path_exists(const char *path);
+static int sxi_has_sx_suffix(const char *path);
+static int sxi_try_resolve_candidate(const char *base_dir,
+                                     const char *import_path,
+                                     char *resolved, int resolved_cap);
+static int sxi_resolve_stdlib_path(const char *import_path,
                                    char *resolved, int resolved_cap);
 static int sxi_collect_source_tree(const char *path,
                                    struct sxi_loader_state *loader,
@@ -126,26 +141,67 @@ int sxi_source_needs_more_input(const char *text)
 
 int sxi_command_main(int argc, char **argv)
 {
-  struct sx_runtime runtime;
+  struct sx_runtime *runtime;
+  int status = 1;
 
-  sx_runtime_init(&runtime);
+  SXI_DEBUG_PRINTF("AUDIT sxi_main_enter argc=%d argv0=%s\n",
+                   argc, (argc > 0 && argv != 0 && argv[0] != 0) ? argv[0] : "(null)");
+  runtime = (struct sx_runtime *)malloc(sizeof(*runtime));
+  if (runtime == 0) {
+    sxi_write_text(STDERR_FILENO, "sxi: out of memory\n");
+    SXI_DEBUG_WRITE("AUDIT sxi_malloc_runtime_fail\n", 30);
+    return 1;
+  }
+  sx_runtime_init(runtime);
+  if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
+    sxi_print_version();
+    status = 0;
+    goto out;
+  }
   if (argc >= 2 && strcmp(argv[1], "--check") == 0) {
-    if (argc != 3) {
+    if (argc < 3) {
       sxi_print_usage();
-      return 1;
+      goto out;
     }
-    return sxi_run_file(&runtime, argv[2], 1);
+    if (sx_runtime_set_argv(runtime, argc - 2, &argv[2]) < 0) {
+      sxi_write_text(STDERR_FILENO, "sxi: script arguments are too large\n");
+      goto out;
+    }
+    status = sxi_run_file(runtime, argv[2], 1);
+    goto out;
   }
   if (argc >= 2 && strcmp(argv[1], "-e") == 0) {
-    if (argc != 3) {
+    char *expr_argv[SX_MAX_RUNTIME_ARGS];
+    int expr_argc = 0;
+    int i;
+
+    if (argc < 3) {
       sxi_print_usage();
-      return 1;
+      goto out;
     }
-    return sxi_run_text(&runtime, "<expr>", argv[2], 0);
+    expr_argv[expr_argc++] = "<expr>";
+    for (i = 3; i < argc && expr_argc < SX_MAX_RUNTIME_ARGS; i++)
+      expr_argv[expr_argc++] = argv[i];
+    if (i < argc || sx_runtime_set_argv(runtime, expr_argc, expr_argv) < 0) {
+      sxi_write_text(STDERR_FILENO, "sxi: script arguments are too large\n");
+      goto out;
+    }
+    status = sxi_run_text(runtime, "<expr>", argv[2], 0);
+    goto out;
   }
-  if (argc >= 2)
-    return sxi_run_file(&runtime, argv[1], 0);
-  return sxi_repl();
+  if (argc >= 2) {
+    if (sx_runtime_set_argv(runtime, argc - 1, &argv[1]) < 0) {
+      sxi_write_text(STDERR_FILENO, "sxi: script arguments are too large\n");
+      goto out;
+    }
+    status = sxi_run_file(runtime, argv[1], 0);
+  } else
+    status = sxi_repl();
+
+out:
+  sx_runtime_dispose(runtime);
+  free(runtime);
+  return status;
 }
 
 #ifndef TEST_BUILD
@@ -165,7 +221,7 @@ static void sxi_write_text(int fd, const char *text)
 static void sxi_print_usage(void)
 {
   sxi_write_text(STDERR_FILENO,
-                 "usage: sxi [--check <file.sx> | -e <code> | <file.sx>]\n");
+                 "usage: sxi [--check <file.sx> [args...] | -e <code> [args...] | <file.sx> [args...]]\n");
 }
 
 static void sxi_print_help(void)
@@ -175,6 +231,19 @@ static void sxi_print_help(void)
                  ":load <file.sx>  run file in current session\n"
                  ":reset  clear current session\n"
                  ":quit  exit repl\n");
+}
+
+static void sxi_print_version(void)
+{
+  char buf[128];
+
+  snprintf(buf, sizeof(buf),
+           "sxi %s (sx %s, frontend abi %d, runtime abi %d)\n",
+           SX_LANGUAGE_VERSION,
+           SX_LANGUAGE_VERSION,
+           SX_FRONTEND_ABI_VERSION,
+           SX_RUNTIME_ABI_VERSION);
+  sxi_write_text(STDOUT_FILENO, buf);
 }
 
 static void sxi_print_diagnostic(const char *name,
@@ -195,6 +264,11 @@ static void sxi_print_diagnostic(const char *name,
            line, column,
            (diag != 0 && diag->message[0] != '\0') ?
                diag->message : "unknown error");
+  SXI_DEBUG_PRINTF("AUDIT sxi_diag name=%s line=%d col=%d msg=%s\n",
+                   name != 0 ? name : "<input>",
+                   line, column,
+                   (diag != 0 && diag->message[0] != '\0') ?
+                       diag->message : "unknown error");
   sxi_write_text(STDERR_FILENO, buf);
   if (sx_runtime_format_stack_trace(runtime, trace, sizeof(trace)) > 0)
     sxi_write_text(STDERR_FILENO, trace);
@@ -364,6 +438,14 @@ static int sxi_resolve_import_path(const char *current_path,
     return sxi_normalize_path(import_path, resolved, resolved_cap);
   if (current_path == 0)
     return sxi_normalize_path(import_path, resolved, resolved_cap);
+  if (import_path[0] != '.') {
+    if (sxi_path_dirname(current_path, dir, sizeof(dir)) < 0)
+      return -1;
+    if (sxi_try_resolve_candidate(dir, import_path,
+                                  resolved, resolved_cap) == 0)
+      return 0;
+    return sxi_resolve_stdlib_path(import_path, resolved, resolved_cap);
+  }
   if (sxi_path_dirname(current_path, dir, sizeof(dir)) < 0)
     return -1;
   if (strcmp(dir, ".") == 0)
@@ -373,6 +455,74 @@ static int sxi_resolve_import_path(const char *current_path,
   else
     snprintf(combined, sizeof(combined), "%s/%s", dir, import_path);
   return sxi_normalize_path(combined, resolved, resolved_cap);
+}
+
+static int sxi_path_exists(const char *path)
+{
+  int fd;
+
+  if (path == 0)
+    return 0;
+  fd = open(path, O_RDONLY, 0);
+  if (fd < 0)
+    return 0;
+  close(fd);
+  return 1;
+}
+
+static int sxi_has_sx_suffix(const char *path)
+{
+  int len;
+
+  if (path == 0)
+    return 0;
+  len = (int)strlen(path);
+  return len >= 3 && strcmp(path + len - 3, ".sx") == 0;
+}
+
+static int sxi_try_resolve_candidate(const char *base_dir,
+                                     const char *import_path,
+                                     char *resolved, int resolved_cap)
+{
+  char candidate[PATHNAME_MAX];
+
+  if (base_dir == 0 || import_path == 0 || resolved == 0 || resolved_cap <= 0)
+    return -1;
+  if (snprintf(candidate, sizeof(candidate), "%s/%s",
+               base_dir, import_path) >= (int)sizeof(candidate))
+    return -1;
+  if (sxi_normalize_path(candidate, resolved, resolved_cap) < 0)
+    return -1;
+  if (sxi_path_exists(resolved) != 0)
+    return 0;
+  if (sxi_has_sx_suffix(import_path) != 0)
+    return -1;
+  if (snprintf(candidate, sizeof(candidate), "%s/%s.sx",
+               base_dir, import_path) >= (int)sizeof(candidate))
+    return -1;
+  if (sxi_normalize_path(candidate, resolved, resolved_cap) < 0)
+    return -1;
+  return sxi_path_exists(resolved) != 0 ? 0 : -1;
+}
+
+static int sxi_resolve_stdlib_path(const char *import_path,
+                                   char *resolved, int resolved_cap)
+{
+#ifdef TEST_BUILD
+  static const char *roots[] = {
+    "fixtures/sx/stdlib",
+    "tests/fixtures/sx/stdlib",
+  };
+  int i;
+
+  for (i = 0; i < (int)(sizeof(roots) / sizeof(roots[0])); i++) {
+    if (sxi_try_resolve_candidate(roots[i], import_path,
+                                  resolved, resolved_cap) == 0)
+      return 0;
+  }
+#endif
+  return sxi_try_resolve_candidate(SXI_GUEST_STDLIB_DIR, import_path,
+                                   resolved, resolved_cap);
 }
 
 static int sxi_loader_has_path(char paths[][PATHNAME_MAX],
@@ -616,7 +766,7 @@ static int sxi_run_text(struct sx_runtime *runtime,
                         int check_only)
 {
   struct sx_program *program;
-  struct sx_runtime probe;
+  struct sx_runtime *probe;
   struct sx_diagnostic diag;
   int status = 0;
 
@@ -625,15 +775,26 @@ static int sxi_run_text(struct sx_runtime *runtime,
     sxi_write_text(STDERR_FILENO, "sxi: out of memory\n");
     return 1;
   }
+  probe = (struct sx_runtime *)malloc(sizeof(*probe));
+  if (probe == 0) {
+    free(program);
+    sxi_write_text(STDERR_FILENO, "sxi: out of memory\n");
+    SXI_DEBUG_WRITE("AUDIT sxi_malloc_probe_fail\n", 28);
+    return 1;
+  }
 
+  SXI_DEBUG_PRINTF("AUDIT sxi_run_text name=%s len=%d check=%d\n",
+                   name != 0 ? name : "<input>",
+                   text != 0 ? (int)strlen(text) : -1,
+                   check_only);
   if (sx_parse_program(text, (int)strlen(text), program, &diag) < 0) {
     sxi_print_diagnostic(name, &diag, 0);
     status = 2;
     goto out;
   }
-  probe = *runtime;
-  if (sx_runtime_check_program(&probe, program, &diag) < 0) {
-    sxi_print_diagnostic(name, &diag, &probe);
+  *probe = *runtime;
+  if (sx_runtime_check_program(probe, program, &diag) < 0) {
+    sxi_print_diagnostic(name, &diag, probe);
     status = 2;
     goto out;
   }
@@ -646,6 +807,9 @@ static int sxi_run_text(struct sx_runtime *runtime,
   }
 
 out:
+  SXI_DEBUG_PRINTF("AUDIT sxi_run_text_done name=%s status=%d\n",
+                   name != 0 ? name : "<input>", status);
+  free(probe);
   free(program);
   return status;
 }
@@ -654,10 +818,18 @@ static int sxi_run_file(struct sx_runtime *runtime,
                         const char *path,
                         int check_only)
 {
-  struct sxi_loader_state loader;
+  struct sxi_loader_state *loader;
+  int status;
 
-  memset(&loader, 0, sizeof(loader));
-  return sxi_run_file_with_loader(runtime, path, check_only, &loader);
+  loader = (struct sxi_loader_state *)malloc(sizeof(*loader));
+  if (loader == 0) {
+    sxi_write_text(STDERR_FILENO, "sxi: out of memory\n");
+    return 1;
+  }
+  memset(loader, 0, sizeof(*loader));
+  status = sxi_run_file_with_loader(runtime, path, check_only, loader);
+  free(loader);
+  return status;
 }
 
 static int sxi_run_file_with_loader(struct sx_runtime *runtime,
@@ -677,10 +849,15 @@ static int sxi_run_file_with_loader(struct sx_runtime *runtime,
     return 1;
   if (sxi_resolve_import_path(0, path, normalized, sizeof(normalized)) < 0) {
     sxi_write_text(STDERR_FILENO, "sxi: source path is too long\n");
+    SXI_DEBUG_PRINTF("AUDIT sxi_resolve_path_fail path=%s\n",
+                     path != 0 ? path : "(null)");
     return 1;
   }
+  SXI_DEBUG_PRINTF("AUDIT sxi_run_file path=%s normalized=%s check=%d\n",
+                   path != 0 ? path : "(null)", normalized, check_only);
   if (sxi_builder_init(&builder) < 0) {
     sxi_write_text(STDERR_FILENO, "sxi: out of memory\n");
+    SXI_DEBUG_WRITE("AUDIT sxi_builder_init_fail\n", 28);
     return 1;
   }
   if (sxi_collect_source_tree(normalized, loader, &builder,
@@ -689,6 +866,8 @@ static int sxi_run_file_with_loader(struct sx_runtime *runtime,
     sxi_builder_reset(&builder);
     return error_kind;
   }
+  SXI_DEBUG_PRINTF("AUDIT sxi_source_tree_done path=%s size=%d\n",
+                   normalized, builder.len);
   status = sxi_run_text(runtime, normalized, builder.data, check_only);
   sxi_builder_reset(&builder);
   return status;
@@ -754,26 +933,38 @@ static int sxi_append_line(char *buf, int cap, int *len, const char *line)
 
 static int sxi_repl(void)
 {
-  struct sx_runtime runtime;
+  struct sx_runtime *runtime;
   char line[SXI_REPL_LINE_MAX];
   char source[SXI_REPL_BUFFER_MAX];
   int source_len = 0;
 
-  sx_runtime_init(&runtime);
+  runtime = (struct sx_runtime *)malloc(sizeof(*runtime));
+  if (runtime == 0) {
+    sxi_write_text(STDERR_FILENO, "sxi: out of memory\n");
+    return 1;
+  }
+  sx_runtime_init(runtime);
   source[0] = '\0';
   while (1) {
     int len;
 
     sxi_write_text(STDOUT_FILENO, source_len == 0 ? "sxi> " : "...> ");
     len = sxi_read_line(line, sizeof(line));
-    if (len < 0)
+    if (len < 0) {
+      sx_runtime_dispose(runtime);
+      free(runtime);
       return 1;
+    }
     if (len == 0) {
       if (source_len != 0) {
         sxi_write_text(STDERR_FILENO, "sxi: incomplete input\n");
+        sx_runtime_dispose(runtime);
+        free(runtime);
         return 1;
       }
       sxi_write_text(STDOUT_FILENO, "\n");
+      sx_runtime_dispose(runtime);
+      free(runtime);
       return 0;
     }
     len = sxi_trim_line(line);
@@ -782,9 +973,9 @@ static int sxi_repl(void)
 
     if (source_len == 0 && line[0] == ':') {
       if (strcmp(line, ":quit") == 0)
-        return 0;
+        break;
       if (strcmp(line, ":reset") == 0) {
-        sx_runtime_init(&runtime);
+        sx_runtime_reset_session(runtime);
         source_len = 0;
         source[0] = '\0';
         continue;
@@ -795,7 +986,6 @@ static int sxi_repl(void)
       }
       if (strncmp(line, ":load", 5) == 0) {
         const char *path = line + 5;
-        struct sxi_loader_state loader;
 
         while (*path == ' ' || *path == '\t')
           path++;
@@ -803,8 +993,7 @@ static int sxi_repl(void)
           sxi_write_text(STDERR_FILENO, "sxi: missing path\n");
           continue;
         }
-        memset(&loader, 0, sizeof(loader));
-        sxi_run_file_with_loader(&runtime, path, 0, &loader);
+        sxi_run_file(runtime, path, 0);
         continue;
       }
       sxi_write_text(STDERR_FILENO, "sxi: unknown repl command\n");
@@ -819,8 +1008,11 @@ static int sxi_repl(void)
     }
     if (sxi_source_needs_more_input(source) != 0)
       continue;
-    sxi_run_text(&runtime, "<repl>", source, 0);
+    sxi_run_text(runtime, "<repl>", source, 0);
     source_len = 0;
     source[0] = '\0';
   }
+  sx_runtime_dispose(runtime);
+  free(runtime);
+  return 0;
 }

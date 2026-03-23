@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include <sx_parser.h>
 #include <sx_runtime.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,20 @@ static int read_text_file(const char *path, char *buf, size_t cap)
     return 0;
 }
 
+static int write_raw_file(const char *path, const unsigned char *data, size_t len)
+{
+    FILE *fp = fopen(path, "wb");
+
+    if (fp == NULL)
+        return -1;
+    if (len > 0 && fwrite(data, 1, len, fp) != len) {
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+    return 0;
+}
+
 static int append_output(void *ctx, const char *text, int len)
 {
     struct output_buffer *out = (struct output_buffer *)ctx;
@@ -58,6 +73,20 @@ static int discard_output(void *ctx, const char *text, int len)
     (void)text;
     (void)len;
     return 0;
+}
+
+static int count_active_pipes(const struct sx_runtime *runtime)
+{
+    int count = 0;
+    int i;
+
+    if (runtime == NULL)
+        return 0;
+    for (i = 0; i < SX_MAX_PIPE_HANDLES; i++) {
+        if (runtime->pipes[i].active != 0)
+            count++;
+    }
+    return count;
 }
 
 TEST(runtime_executes_function_if_block_and_return) {
@@ -270,7 +299,6 @@ TEST(runtime_executes_proc_and_list_dir_builtins) {
     sx_runtime_init(&runtime);
     sx_runtime_set_output(&runtime, append_output, &out);
     ASSERT_EQ(sx_parse_program(script, (int)strlen(script), &program, &diag), 0);
-    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), 0);
 
     sx_runtime_init(&runtime);
     sx_runtime_set_output(&runtime, append_output, &out);
@@ -280,6 +308,445 @@ TEST(runtime_executes_proc_and_list_dir_builtins) {
     remove(file_a);
     remove(file_b);
     rmdir(dir_path);
+}
+
+TEST(runtime_executes_argv_fs_and_time_builtins) {
+    char dir_template[] = "/tmp/sxi_runtime_interopXXXXXX";
+    char *dir_path;
+    char script[1024];
+    char *argv_values[] = { "script.sx", "alpha", "beta", NULL };
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    dir_path = mkdtemp(dir_template);
+    ASSERT_EQ(dir_path != NULL, 1);
+    snprintf(script, sizeof(script),
+             "let root = \"%s\";\n"
+             "let sub = text.concat(root, \"/sub\");\n"
+             "let base = fs.cwd();\n"
+             "fs.mkdir(sub);\n"
+             "let before = time.now_ticks();\n"
+             "time.sleep_ticks(1);\n"
+             "fs.chdir(sub);\n"
+             "let cwd = fs.cwd();\n"
+             "let dir_ok = fs.is_dir(cwd);\n"
+             "fs.write_text(\"note.txt\", proc.argv(1));\n"
+             "fs.rename(\"note.txt\", \"renamed.txt\");\n"
+             "let content = fs.read_text(\"renamed.txt\");\n"
+             "fs.remove(\"renamed.txt\");\n"
+             "fs.chdir(base);\n"
+             "fs.remove(sub);\n"
+             "let after = time.now_ticks();\n"
+             "io.println(proc.argv_count());\n"
+             "io.println(proc.argv(0));\n"
+             "io.println(proc.argv(2));\n"
+             "io.println(text.contains(cwd, \"/sub\"));\n"
+             "io.println(dir_ok);\n"
+             "io.println(content);\n"
+             "io.println(after >= before);\n",
+             dir_path);
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_set_argv(&runtime, 3, argv_values), 0);
+    ASSERT_EQ(sx_parse_program(script, (int)strlen(script), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), 0);
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_set_argv(&runtime, 3, argv_values), 0);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "3\nscript.sx\nbeta\ntrue\ntrue\nalpha\ntrue\n");
+    sx_runtime_dispose(&runtime);
+    rmdir(dir_path);
+}
+
+TEST(runtime_executes_io_pipe_spawn_and_wait) {
+    const char *stdin_path = "/tmp/sxi_runtime_stdin.txt";
+    const char *text =
+        "let line = io.read_line();\n"
+        "let rest = io.read_all();\n"
+        "let input = proc.pipe();\n"
+        "let output = proc.pipe();\n"
+        "let in_r = proc.pipe_read_fd(input);\n"
+        "let in_w = proc.pipe_write_fd(input);\n"
+        "let out_r = proc.pipe_read_fd(output);\n"
+        "let out_w = proc.pipe_write_fd(output);\n"
+        "let pid = proc.spawn_io(\"/bin/sh\", in_r, out_w, -1, \"-c\", \"cat\");\n"
+        "io.close(in_r);\n"
+        "io.close(out_w);\n"
+        "io.write_fd(in_w, text.concat(line, rest));\n"
+        "io.close(in_w);\n"
+        "let body = io.read_fd(out_r);\n"
+        "io.close(out_r);\n"
+        "proc.pipe_close(input);\n"
+        "proc.pipe_close(output);\n"
+        "let status = proc.wait(pid);\n"
+        "io.println(body);\n"
+        "io.println(proc.status_ok(status));\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+    int saved_stdin = -1;
+    int stdin_fd = -1;
+
+    ASSERT_EQ(write_text_file(stdin_path, "HELLO\n_PIPE"), 0);
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    saved_stdin = dup(STDIN_FILENO);
+    ASSERT_EQ(saved_stdin >= 0, 1);
+    stdin_fd = open(stdin_path, O_RDONLY, 0);
+    ASSERT_EQ(stdin_fd >= 0, 1);
+    ASSERT_EQ(dup2(stdin_fd, STDIN_FILENO) >= 0, 1);
+    close(stdin_fd);
+    stdin_fd = -1;
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_EQ(dup2(saved_stdin, STDIN_FILENO) >= 0, 1);
+    close(saved_stdin);
+    saved_stdin = -1;
+    ASSERT_STR_EQ(out.text, "HELLO_PIPE\ntrue\n");
+    sx_runtime_dispose(&runtime);
+    remove(stdin_path);
+}
+
+TEST(runtime_executes_fork_and_exit) {
+    const char *fork_path = "/tmp/sxi_runtime_fork.txt";
+    char script[512];
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    remove(fork_path);
+    snprintf(script, sizeof(script),
+             "let path = \"%s\";\n"
+             "let pid = proc.fork();\n"
+             "if (pid == 0) {\n"
+             "  fs.write_text(path, \"child\");\n"
+             "  proc.exit(5);\n"
+             "}\n"
+             "let status = proc.wait(pid);\n"
+             "io.println(proc.status_ok(status));\n"
+             "io.println(status);\n"
+             "io.println(fs.read_text(path));\n"
+             "fs.remove(path);\n",
+             fork_path);
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(script, (int)strlen(script), &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "false\n5\nchild\n");
+    sx_runtime_dispose(&runtime);
+}
+
+TEST(runtime_executes_env_bytes_and_result_builtins) {
+    const char *src_path = "/tmp/sxi_runtime_bytes.bin";
+    const char *dst_path = "/tmp/sxi_runtime_bytes_out.bin";
+    const unsigned char raw_bytes[] = { 'A', 0, 'B' };
+    char script[1024];
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    ASSERT_EQ(write_raw_file(src_path, raw_bytes, sizeof(raw_bytes)), 0);
+    remove(dst_path);
+    ASSERT_EQ(setenv("SX_TEST_ENV", "env-ok", 1), 0);
+    snprintf(script, sizeof(script),
+             "let env_ok = proc.has_env(\"SX_TEST_ENV\");\n"
+             "let env_value = proc.env(\"SX_TEST_ENV\");\n"
+             "let missing = fs.try_read_text(\"/tmp/does-not-exist.sx\");\n"
+             "let raw = fs.read_bytes(\"%s\");\n"
+             "let pipe = proc.pipe();\n"
+             "let read_fd = proc.pipe_read_fd(pipe);\n"
+             "let write_fd = proc.pipe_write_fd(pipe);\n"
+             "io.write_fd_bytes(write_fd, raw);\n"
+             "io.close(write_fd);\n"
+             "let round = io.read_fd_bytes(read_fd);\n"
+             "io.close(read_fd);\n"
+             "proc.pipe_close(pipe);\n"
+             "fs.write_bytes(\"%s\", round);\n"
+             "let ok_capture = proc.try_capture(\"/bin/sh\", \"-c\", \"printf cap\");\n"
+             "test.assert_eq(env_ok, true);\n"
+             "test.assert_eq(env_value, \"env-ok\");\n"
+             "test.assert_eq(bytes.len(raw), 3);\n"
+             "test.assert_eq(raw, round);\n"
+             "test.assert_eq(result.is_ok(missing), false);\n"
+             "test.assert_eq(result.error(missing), \"fs.read_text failed\");\n"
+             "test.assert_eq(result.is_ok(ok_capture), true);\n"
+             "test.assert_eq(result.value(ok_capture), \"cap\");\n"
+             "io.println(env_value);\n"
+             "io.println(bytes.len(round));\n"
+             "io.println(result.error(missing));\n"
+             "io.println(result.value(ok_capture));\n",
+             src_path, dst_path);
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(script, (int)strlen(script), &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "env-ok\n3\nfs.read_text failed\ncap\n");
+    sx_runtime_dispose(&runtime);
+    remove(src_path);
+    remove(dst_path);
+}
+
+TEST(runtime_executes_list_and_map_builtins) {
+    const char *text =
+        "let items = list.new();\n"
+        "list.push(items, 7);\n"
+        "list.push(items, 9);\n"
+        "test.assert_eq(list.len(items), 2);\n"
+        "test.assert_eq(list.get(items, 1), 9);\n"
+        "list.set(items, 0, 11);\n"
+        "let meta = map.new();\n"
+        "map.set(meta, \"name\", \"sx\");\n"
+        "map.set(meta, \"count\", list.len(items));\n"
+        "test.assert_eq(map.has(meta, \"name\"), true);\n"
+        "test.assert_eq(map.get(meta, \"count\"), 2);\n"
+        "map.remove(meta, \"name\");\n"
+        "test.assert_eq(map.has(meta, \"name\"), false);\n"
+        "let ok = result.ok(list.get(items, 0));\n"
+        "test.assert_eq(result.is_ok(ok), true);\n"
+        "test.assert_eq(result.value(ok), 11);\n"
+        "io.println(list.get(items, 0));\n"
+        "io.println(map.len(meta));\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "11\n1\n");
+}
+
+TEST(runtime_executes_operators_assignment_and_loop_control) {
+    const char *text =
+        "let sum = 0;\n"
+        "let i = 0;\n"
+        "while (i < 4) {\n"
+        "  sum = sum + i;\n"
+        "  i = i + 1;\n"
+        "}\n"
+        "for (let j = 0; j < 6; j = j + 1) {\n"
+        "  if (j == 1) {\n"
+        "    continue;\n"
+        "  }\n"
+        "  if (j == 5) {\n"
+        "    break;\n"
+        "  }\n"
+        "  sum = sum + j;\n"
+        "}\n"
+        "let ok = sum == 15 && !(false || false);\n"
+        "io.println(sum);\n"
+        "io.println(ok);\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "15\ntrue\n");
+}
+
+TEST(runtime_executes_recursive_function) {
+    const char *text =
+        "fn sum_to(n) -> i32 {\n"
+        "  if (n == 0) {\n"
+        "    return 0;\n"
+        "  }\n"
+        "  return n + sum_to(n - 1);\n"
+        "}\n"
+        "let value = sum_to(6);\n"
+        "io.println(value);\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "21\n");
+}
+
+TEST(runtime_rejects_break_outside_loop) {
+    const char *text = "break;\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+
+    sx_runtime_init(&runtime);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), -1);
+    ASSERT_STR_EQ(diag.message, "break outside loop");
+}
+
+TEST(runtime_rejects_continue_outside_loop) {
+    const char *text = "continue;\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+
+    sx_runtime_init(&runtime);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), -1);
+    ASSERT_STR_EQ(diag.message, "continue outside loop");
+}
+
+TEST(runtime_reset_session_preserves_configuration_and_closes_pipes) {
+    const char *setup_text = "let handle = proc.pipe();\n";
+    const char *after_reset_text = "io.println(proc.argv(1));\n";
+    char *argv_values[] = { "script.sx", "kept-arg", NULL };
+    struct sx_program setup_program;
+    struct sx_program after_reset_program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct sx_runtime_limits limits;
+    struct output_buffer out;
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_set_argv(&runtime, 2, argv_values), 0);
+    sx_runtime_default_limits(&limits);
+    limits.max_loop_iterations = 3;
+    ASSERT_EQ(sx_runtime_set_limits(&runtime, &limits), 0);
+    ASSERT_EQ(sx_parse_program(setup_text, (int)strlen(setup_text), &setup_program, &diag), 0);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &setup_program, &diag), 0);
+    ASSERT_EQ(count_active_pipes(&runtime) > 0, 1);
+
+    sx_runtime_reset_session(&runtime);
+    ASSERT_EQ(runtime.binding_count, 0);
+    ASSERT_EQ(runtime.scope_depth, 0);
+    ASSERT_EQ(runtime.call_depth, 0);
+    ASSERT_EQ(runtime.error_call_depth, 0);
+    ASSERT_EQ(runtime.argc, 2);
+    ASSERT_EQ(runtime.limits.max_loop_iterations, 3);
+    ASSERT_EQ(count_active_pipes(&runtime), 0);
+
+    ASSERT_EQ(sx_parse_program(after_reset_text, (int)strlen(after_reset_text), &after_reset_program, &diag), 0);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &after_reset_program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "kept-arg\n");
+    sx_runtime_dispose(&runtime);
+}
+
+TEST(runtime_enforces_custom_binding_limit) {
+    const char *text =
+        "let a = 1;\n"
+        "let b = 2;\n"
+        "let c = 3;\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct sx_runtime_limits limits;
+
+    sx_runtime_init(&runtime);
+    sx_runtime_default_limits(&limits);
+    limits.max_bindings = 2;
+    ASSERT_EQ(sx_runtime_set_limits(&runtime, &limits), 0);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), -1);
+    ASSERT_STR_EQ(diag.message, "binding table is full");
+}
+
+TEST(runtime_enforces_custom_loop_limit) {
+    const char *text =
+        "let i = 0;\n"
+        "while (i < 4) {\n"
+        "  i = i + 1;\n"
+        "}\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct sx_runtime_limits limits;
+
+    sx_runtime_init(&runtime);
+    sx_runtime_default_limits(&limits);
+    limits.max_loop_iterations = 2;
+    ASSERT_EQ(sx_runtime_set_limits(&runtime, &limits), 0);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), -1);
+    ASSERT_STR_EQ(diag.message, "while iteration limit exceeded");
+    sx_runtime_dispose(&runtime);
+}
+
+TEST(runtime_enforces_custom_call_limit) {
+    const char *text =
+        "fn descend(n) -> i32 {\n"
+        "  if (n == 0) {\n"
+        "    return 0;\n"
+        "  }\n"
+        "  return descend(n - 1);\n"
+        "}\n"
+        "let value = descend(4);\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct sx_runtime_limits limits;
+
+    sx_runtime_init(&runtime);
+    sx_runtime_default_limits(&limits);
+    limits.max_call_depth = 2;
+    ASSERT_EQ(sx_runtime_set_limits(&runtime, &limits), 0);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), -1);
+    ASSERT_STR_EQ(diag.message, "call depth limit exceeded");
+    sx_runtime_dispose(&runtime);
+}
+
+TEST(runtime_rejects_invalid_limit_configuration) {
+    struct sx_runtime runtime;
+    struct sx_runtime_limits limits;
+
+    sx_runtime_init(&runtime);
+    sx_runtime_default_limits(&limits);
+    limits.max_bindings = SX_MAX_BINDINGS + 1;
+    ASSERT_EQ(sx_runtime_set_limits(&runtime, &limits), -1);
+    limits.max_bindings = SX_MAX_BINDINGS;
+    limits.max_call_depth = 0;
+    ASSERT_EQ(sx_runtime_set_limits(&runtime, &limits), -1);
 }
 
 int main(void)
@@ -295,6 +762,20 @@ int main(void)
     RUN_TEST(runtime_fs_builtins_copy_and_append);
     RUN_TEST(runtime_executes_json_text_and_i32_builtins);
     RUN_TEST(runtime_executes_proc_and_list_dir_builtins);
+    RUN_TEST(runtime_executes_argv_fs_and_time_builtins);
+    RUN_TEST(runtime_executes_io_pipe_spawn_and_wait);
+    RUN_TEST(runtime_executes_fork_and_exit);
+    RUN_TEST(runtime_executes_env_bytes_and_result_builtins);
+    RUN_TEST(runtime_executes_list_and_map_builtins);
+    RUN_TEST(runtime_executes_operators_assignment_and_loop_control);
+    RUN_TEST(runtime_executes_recursive_function);
+    RUN_TEST(runtime_rejects_break_outside_loop);
+    RUN_TEST(runtime_rejects_continue_outside_loop);
+    RUN_TEST(runtime_reset_session_preserves_configuration_and_closes_pipes);
+    RUN_TEST(runtime_enforces_custom_binding_limit);
+    RUN_TEST(runtime_enforces_custom_loop_limit);
+    RUN_TEST(runtime_enforces_custom_call_limit);
+    RUN_TEST(runtime_rejects_invalid_limit_configuration);
 
     TEST_REPORT();
 }

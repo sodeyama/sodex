@@ -32,23 +32,6 @@ static int build_long_list_script(char *buf, size_t cap, int count)
 static int build_sxi_smoke_script(char *buf, size_t cap)
 {
     static const char *lines[] = {
-        "echo AUDIT sxi_smoke_begin\n",
-        "/usr/bin/sxi --check /home/user/bad.sx\n",
-        "echo AUDIT sxi_bad_status=$?\n",
-        "/usr/bin/sxi --check /home/user/sx-examples/hello.sx\n",
-        "echo AUDIT sxi_hello_check_status=$?\n",
-        "/usr/bin/sxi --check /home/user/import_main.sx\n",
-        "echo AUDIT sxi_import_check_status=$?\n",
-        "/usr/bin/sxi --check /home/user/sx-examples/stdin_echo.sx\n",
-        "echo AUDIT sxi_stdin_check_status=$?\n",
-        "/usr/bin/sxi --check /home/user/sx-examples/argv_fs_time.sx\n",
-        "echo AUDIT sxi_interop_check_status=$?\n",
-        "/usr/bin/sxi --check /home/user/sx-examples/spawn_wait.sx\n",
-        "echo AUDIT sxi_spawn_check_status=$?\n",
-        "/usr/bin/sxi --check /home/user/sx-examples/pipe_roundtrip.sx\n",
-        "echo AUDIT sxi_pipe_check_status=$?\n",
-        "/usr/bin/sxi --check /home/user/sx-examples/fork_wait.sx\n",
-        "echo AUDIT sxi_fork_check_status=$?\n",
         "/usr/bin/sxi /home/user/sx-examples/hello.sx > /home/user/sxi_hello_out.txt\n",
         "echo AUDIT sxi_hello_run_status=$?\n",
         "/usr/bin/sxi /home/user/sx-examples/operators.sx > /home/user/sxi_operators_out.txt\n",
@@ -81,6 +64,10 @@ static int build_sxi_smoke_script(char *buf, size_t cap)
         "echo AUDIT sxi_pipe_run_status=$?\n",
         "/usr/bin/sxi /home/user/sx-examples/fork_wait.sx > /home/user/sxi_fork_out.txt\n",
         "echo AUDIT sxi_fork_run_status=$?\n",
+        "/usr/bin/sxi /home/user/sx-examples/env_bytes_result.sx > /home/user/sxi_bytes_out.txt\n",
+        "echo AUDIT sxi_bytes_run_status=$?\n",
+        "/usr/bin/sxi /home/user/sx-examples/list_map.sx > /home/user/sxi_list_map_out.txt\n",
+        "echo AUDIT sxi_list_map_run_status=$?\n",
         "/usr/bin/sxi -e 'io.println(\"INLINE_OK\");' > /home/user/sxi_inline.txt\n",
         "echo AUDIT sxi_inline_status=$?\n",
         "echo AUDIT sxi_smoke_done\n",
@@ -246,11 +233,11 @@ TEST(parse_sxi_smoke_script) {
 
     len = build_sxi_smoke_script(text, sizeof(text));
     ASSERT_EQ(len > 0, 1);
-    ASSERT_EQ(shell_parse_program(text, len, &program), 53);
-    ASSERT_EQ(program.lists[program.root_list_index].item_count, 53);
-    ASSERT_EQ(program.pipeline_count, 53);
-    ASSERT_STR_EQ(root_pipeline(&program, 0)->commands[0].argv[0], "echo");
-    ASSERT_STR_EQ(root_pipeline(&program, 52)->commands[0].argv[0], "exit");
+    ASSERT_EQ(shell_parse_program(text, len, &program), 42);
+    ASSERT_EQ(program.lists[program.root_list_index].item_count, 42);
+    ASSERT_EQ(program.pipeline_count, 42);
+    ASSERT_STR_EQ(root_pipeline(&program, 0)->commands[0].argv[0], "/usr/bin/sxi");
+    ASSERT_STR_EQ(root_pipeline(&program, 41)->commands[0].argv[0], "exit");
 }
 
 int main(void)

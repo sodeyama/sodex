@@ -31,6 +31,7 @@ PUBLIC void create_kernel_page(u_int32_t* pg_dir);
 PUBLIC void* create_process_page(u_int32_t* pg_dir, size_t size);
 PUBLIC void* set_process_page(u_int32_t* pg_dir, u_int32_t start_vaddr,
 							  size_t size);
+PUBLIC int clone_process_pages(u_int32_t *dst_pg_dir, u_int32_t *src_pg_dir);
 PUBLIC void pg_set_kernel_4m_page(u_int32_t virt_addr, u_int32_t phys_addr,
                                   u_int32_t flags);
 PUBLIC void free_process_pages(u_int32_t *pg_dir);

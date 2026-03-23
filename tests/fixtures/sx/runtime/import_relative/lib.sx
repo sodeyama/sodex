@@ -1,0 +1,3 @@
+fn relative_label() -> str {
+  return "LOCAL";
+}

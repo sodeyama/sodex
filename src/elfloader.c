@@ -18,6 +18,7 @@
 #include <page.h>
 #include <lib.h>
 #include <ihandlers.h>
+#include <rs232c.h>
 
 PRIVATE char* __create_filepath(const char* filename, const char* path);
 
@@ -34,14 +35,15 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
   if (fd == FS_OPEN_FAIL) {
     /* 相対コマンドの未検出は shell 側で整形して表示する。 */
     if (filename != NULL && filename[0] == '/')
-      _kprintf("%s: file open error for '%s'\n", __func__, filename);
+      com1_printf("AUDIT elf_open_fail file=%s\r\n", filename);
     return ELF_FAIL;
   }
   ext3_inode* inode = FD_TOINODE(fd, current);
+  com1_printf("AUDIT elf_open_ok file=%s size=%x\r\n", filename, inode->i_size);
 
   char *elf_buf = kalloc(inode->i_size);
   if (elf_buf == NULL) {
-    _kprintf("%s: kalloc error\n", __func__);
+    com1_printf("AUDIT elf_buf_alloc_fail size=%x\r\n", inode->i_size);
     return ELF_FAIL;
   }
   memset(elf_buf, 0, inode->i_size);
@@ -53,21 +55,29 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
 
   elf_header *header = kalloc(sizeof(elf_header));
   if (header == NULL) {
-    _kprintf("%s: elf_header kalloc error\n", __func__);
+    com1_printf("AUDIT elf_header_alloc_fail\r\n");
     return ELF_FAIL;
   }
   memcpy(header, elf_buf, sizeof(elf_header));
 
   if (strncmp(header->magic, "\177ELF", 4) != 0) {
-    _kprintf("%s: The file of filedescriptor %x is not ELF format.\n"
-             "The filename is %s\n", __func__, fd, filename);
+    com1_printf("AUDIT elf_magic_fail fd=%x file=%s magic=%x%x%x%x\r\n",
+                fd, filename,
+                (u_int32_t)(u_int8_t)header->magic[0],
+                (u_int32_t)(u_int8_t)header->magic[1],
+                (u_int32_t)(u_int8_t)header->magic[2],
+                (u_int32_t)(u_int8_t)header->magic[3]);
     return ELF_FAIL;
   }
+  com1_printf("AUDIT elf_header_ok entry=%x phnum=%x shnum=%x\r\n",
+              header->entry, (u_int32_t)header->phdrcnt,
+              (u_int32_t)header->shdrcnt);
 
   elf_program_header *prg_header =
     kalloc(header->phdrent*header->phdrcnt);
   if (prg_header == NULL) {
-    _kprintf("%s: prg_header kalloc error\n", __func__);
+    com1_printf("AUDIT elf_ph_alloc_fail bytes=%x\r\n",
+                header->phdrent * header->phdrcnt);
     return ELF_FAIL;
   }
   memcpy(prg_header, elf_buf+header->phdrpos, header->phdrent*header->phdrcnt);
@@ -75,7 +85,8 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
   elf_section_header *sect_header =
     kalloc(header->shdrent*header->shdrcnt);
   if (sect_header == NULL) {
-    _kprintf("%s: sect_header kalloc error\n", __func__);
+    com1_printf("AUDIT elf_sh_alloc_fail bytes=%x\r\n",
+                header->shdrent * header->shdrcnt);
     return ELF_FAIL;
   }
   memcpy(sect_header, elf_buf+header->shdrpos,
@@ -94,6 +105,8 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
     last_prg_size = prg_size;
     last_virtaddr = virtaddr;
     prog_allsize += prg_size;
+    com1_printf("AUDIT elf_map_seg idx=%x va=%x mem=%x file=%x\r\n",
+                (u_int32_t)i, virtaddr, prg_size, (u_int32_t)prg_header[i].filesize);
     set_process_page(pg_dir, virtaddr, prg_size);
   }
   *allocation_point = CEIL(last_virtaddr+last_prg_size, BLOCK_SIZE);

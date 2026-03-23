@@ -1,0 +1,3 @@
+fn join_words(left, right) -> str {
+  return text.concat(text.concat(left, "-"), right);
+}

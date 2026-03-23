@@ -152,9 +152,18 @@ PUBLIC void start_kernel()
   admin_server_init();
   http_server_init();
   debug_shell_server_init();
+  dbg_serial_puts("AUDIT server_runtime_init_done\n");
+  com1_printf("AUDIT precheck_usr=%x usr_bin=%x init=%x sh=%x tee=%x\r\n",
+              get_dentry_by_path("/usr"),
+              get_dentry_by_path("/usr/bin"),
+              get_dentry_by_path("/usr/bin/init"),
+              get_dentry_by_path("/usr/bin/sh"),
+              get_dentry_by_path("/usr/bin/tee"));
   _kputs(" KERNEL: SETUP SERVER RUNTIME\n");
 
+  dbg_serial_puts("AUDIT before_init_process\n");
   init_process();
+  dbg_serial_puts("AUDIT after_init_process\n");
   _kputs(" KERNEL: SETUP PROCESS\n");
   _kputs(" KERNEL: SETUP SIGNAL\n");
 

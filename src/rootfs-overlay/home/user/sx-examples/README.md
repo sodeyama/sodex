@@ -227,8 +227,10 @@ sxi static_httpd.sx 18085
 ```
 
 `/home/user/www/index.html` を `GET /` と `GET /index.html` で返す最小の static server です。
-host から browser で見たいときは、例えば guest でこの server を起動したうえで、
-host 側で SSH local forward を張って `http://127.0.0.1:18085/` を開いてください。
+第 1 引数で port、第 2 引数で処理する request 数を指定できます。
+既定値は `18085` と `32` です。
+`bin/start.sh` で起動していれば、host の browser からそのまま `http://127.0.0.1:18085/` を開けます。
+別経路で guest を起動していて `18085` を直接 forward していないときは、SSH local forward でも見られます。
 
 ```sh
 ssh -N -L 18085:127.0.0.1:18085 -p 10022 -o PubkeyAuthentication=no root@127.0.0.1

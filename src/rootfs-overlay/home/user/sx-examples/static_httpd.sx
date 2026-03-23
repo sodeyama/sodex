@@ -44,15 +44,19 @@ fn handle_client(sock) -> bool {
 }
 
 let port = arg_or_default(1, 18085);
-let max_requests = arg_or_default(2, 0);
+let max_requests = arg_or_default(2, 32);
 let handled = 0;
 let listener = net.listen(port);
+let keep_running = true;
 
-while (max_requests == 0 || handled < max_requests) {
+while (keep_running) {
   let sock = net.accept(listener);
 
   handle_client(sock);
   handled = handled + 1;
+  if (max_requests > 0 && handled >= max_requests) {
+    keep_running = false;
+  }
 }
 
 net.close(listener);

@@ -33,6 +33,7 @@ extern u_int32_t get_kernel_tick(void);
 
 #define SX_DUMMY_PID 1
 #define SX_DUMMY_FD_BASE 1000
+#define SX_LISTENER_TIMEOUT_MS 600000
 
 enum sx_flow_kind {
   SX_FLOW_NEXT = 0,
@@ -3557,6 +3558,14 @@ fs_try_store_fail:
 
         setsockopt(listener, SOL_SOCKET, SO_REUSEADDR,
                    &reuse, (socklen_t)sizeof(reuse));
+      }
+#else
+      {
+        u_int32_t timeout_ms = SX_LISTENER_TIMEOUT_MS;
+
+        /* listener の accept timeout を長めにして待受け中の失敗を避ける。 */
+        setsockopt(listener, SOL_SOCKET, SO_RCVTIMEO,
+                   &timeout_ms, (socklen_t)sizeof(timeout_ms));
       }
 #endif
       if (bind(listener, (const struct sockaddr *)&addr, sizeof(addr)) < 0 ||

@@ -42,7 +42,9 @@ QEMU_MEM_MB="${SODEX_QEMU_MEM_MB:-1024}"
 HOST_BIND_ADDR="${SODEX_HOST_BIND_ADDR:-127.0.0.1}"
 HOST_HTTP_PORT="${SODEX_HOST_HTTP_PORT:-18080}"
 HOST_ADMIN_PORT="${SODEX_HOST_ADMIN_PORT:-10023}"
+HOST_STATIC_HTTP_PORT="${SODEX_HOST_STATIC_HTTP_PORT:-18085}"
 HOST_SSH_PORT="${SODEX_HOST_SSH_PORT:-10022}"
+GUEST_STATIC_HTTP_PORT="${SODEX_GUEST_STATIC_HTTP_PORT:-18085}"
 GUEST_SSH_PORT="${SODEX_SSH_PORT:-10022}"
 WEBFETCH_AUTO_START="${SODEX_WEBFETCH_AUTO_START-1}"
 WEBFETCH_PORT="${SODEX_WEBFETCH_PORT-8081}"
@@ -317,6 +319,7 @@ fi
 NIC_OPTS="-device ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net0"
 QEMU_CMD="${QEMU_CMD:-qemu-system-i386}"
 SSH_HOSTFWD_OPTS=""
+STATIC_HTTP_HOSTFWD_OPTS=",hostfwd=tcp:$HOST_BIND_ADDR:$HOST_STATIC_HTTP_PORT-10.0.2.15:$GUEST_STATIC_HTTP_PORT"
 if [ "$ENABLE_SSH" -eq 1 ]; then
   SSH_HOSTFWD_OPTS=",hostfwd=tcp:$HOST_BIND_ADDR:$HOST_SSH_PORT-10.0.2.15:$GUEST_SSH_PORT"
 fi
@@ -330,6 +333,7 @@ case "$MODE" in
     echo "=== user net mode with hostfwd ==="
     echo "host $HOST_BIND_ADDR:$HOST_HTTP_PORT -> guest 10.0.2.15:8080"
     echo "host $HOST_BIND_ADDR:$HOST_ADMIN_PORT -> guest 10.0.2.15:10023"
+    echo "host $HOST_BIND_ADDR:$HOST_STATIC_HTTP_PORT -> guest 10.0.2.15:$GUEST_STATIC_HTTP_PORT"
     if [ "$ENABLE_SSH" -eq 1 ]; then
       echo "host $HOST_BIND_ADDR:$HOST_SSH_PORT -> guest 10.0.2.15:$GUEST_SSH_PORT"
     fi
@@ -339,7 +343,7 @@ case "$MODE" in
         $COMMON_SERIAL_FILE_OPTS \
         $COMMON_DEBUG_OPTS \
         $COMMON_ACCEL_OPTS \
-        -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023$SSH_HOSTFWD_OPTS \
+        -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023$STATIC_HTTP_HOSTFWD_OPTS$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \
         -display "$QEMU_DISPLAY"
     ;;
@@ -347,6 +351,7 @@ case "$MODE" in
     echo "=== headless server mode with hostfwd ==="
     echo "host $HOST_BIND_ADDR:$HOST_HTTP_PORT -> guest 10.0.2.15:8080"
     echo "host $HOST_BIND_ADDR:$HOST_ADMIN_PORT -> guest 10.0.2.15:10023"
+    echo "host $HOST_BIND_ADDR:$HOST_STATIC_HTTP_PORT -> guest 10.0.2.15:$GUEST_STATIC_HTTP_PORT"
     if [ "$ENABLE_SSH" -eq 1 ]; then
       echo "host $HOST_BIND_ADDR:$HOST_SSH_PORT -> guest 10.0.2.15:$GUEST_SSH_PORT"
     fi
@@ -359,7 +364,7 @@ case "$MODE" in
         -monitor unix:$LOG_DIR/monitor.sock,server,nowait \
         $COMMON_DEBUG_OPTS \
         $COMMON_ACCEL_OPTS \
-        -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023$SSH_HOSTFWD_OPTS \
+        -netdev user,id=net0,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_HTTP_PORT-10.0.2.15:8080,hostfwd=tcp:$HOST_BIND_ADDR:$HOST_ADMIN_PORT-10.0.2.15:10023$STATIC_HTTP_HOSTFWD_OPTS$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \
         -display none
     ;;
@@ -384,6 +389,7 @@ case "$MODE" in
     ;;
   *)
     echo "=== user net mode ==="
+    echo "host $HOST_BIND_ADDR:$HOST_STATIC_HTTP_PORT -> guest 10.0.2.15:$GUEST_STATIC_HTTP_PORT"
     if [ "$ENABLE_SSH" -eq 1 ]; then
       echo "host $HOST_BIND_ADDR:$HOST_SSH_PORT -> guest 10.0.2.15:$GUEST_SSH_PORT"
     else
@@ -395,7 +401,7 @@ case "$MODE" in
         $COMMON_SERIAL_FILE_OPTS \
         $COMMON_DEBUG_OPTS \
         $COMMON_ACCEL_OPTS \
-        -netdev user,id=net0$SSH_HOSTFWD_OPTS \
+        -netdev user,id=net0$STATIC_HTTP_HOSTFWD_OPTS$SSH_HOSTFWD_OPTS \
         $NIC_OPTS \
         -display "$QEMU_DISPLAY"
     ;;

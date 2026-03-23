@@ -168,11 +168,6 @@ static int list_directory(const char *path)
       memcpy(name, de->name, (size_t)name_len);
       name[name_len] = '\0';
 
-      if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-        offset += de->rec_len;
-        continue;
-      }
-
       printf("%s\n", name);
       offset += de->rec_len;
     }

@@ -7,6 +7,7 @@
  */
 #include "test_framework.h"
 #include <stdint.h>
+#include <string.h>
 
 typedef uint8_t  u_int8_t;
 typedef uint32_t u_int32_t;
@@ -317,6 +318,138 @@ TEST(dentry_name_extraction) {
     ASSERT_STR_EQ(name, "hello.txt");
 }
 
+typedef struct test_path_dentry {
+    const char *name;
+    struct test_path_dentry *parent;
+    struct test_path_dentry *children[8];
+    int child_count;
+} test_path_dentry;
+
+static void init_path_dentry(test_path_dentry *dentry, const char *name)
+{
+    memset(dentry, 0, sizeof(*dentry));
+    dentry->name = name;
+}
+
+static void add_path_child(test_path_dentry *parent, test_path_dentry *child)
+{
+    parent->children[parent->child_count++] = child;
+    child->parent = parent;
+}
+
+static test_path_dentry *get_path_child(test_path_dentry *parent, const char *name)
+{
+    int i;
+
+    if (parent == NULL || name == NULL)
+        return NULL;
+    for (i = 0; i < parent->child_count; i++) {
+        if (_test_strcmp(parent->children[i]->name, name) == 0)
+            return parent->children[i];
+    }
+    return NULL;
+}
+
+static test_path_dentry *walk_path_component(const char *pathname, int len,
+                                             test_path_dentry *search_dentry)
+{
+    char namebuf[256];
+
+    if (pathname == NULL || search_dentry == NULL || len < 0)
+        return NULL;
+    if (len == 0)
+        return search_dentry;
+    if (len == 1 && pathname[0] == '.')
+        return search_dentry;
+    if (len == 2 && pathname[0] == '.' && pathname[1] == '.') {
+        if (search_dentry->parent != NULL)
+            return search_dentry->parent;
+        return search_dentry;
+    }
+    if (len >= (int)sizeof(namebuf))
+        return NULL;
+
+    memset(namebuf, 0, sizeof(namebuf));
+    memcpy(namebuf, pathname, (size_t)len);
+    return get_path_child(search_dentry, namebuf);
+}
+
+static test_path_dentry *walk_test_path(const char *pathname,
+                                        test_path_dentry *search_dentry)
+{
+    const char *slash;
+    int len;
+    test_path_dentry *dentry;
+
+    if (pathname == NULL || search_dentry == NULL)
+        return NULL;
+    while (pathname[0] == '/')
+        pathname++;
+    if (pathname[0] == '\0')
+        return search_dentry;
+
+    slash = strchr(pathname, '/');
+    len = (slash == NULL) ? (int)strlen(pathname) : (int)(slash - pathname);
+    dentry = walk_path_component(pathname, len, search_dentry);
+    if (dentry == NULL)
+        return NULL;
+    if (slash == NULL)
+        return dentry;
+    return walk_test_path(slash + 1, dentry);
+}
+
+static void build_test_tree(test_path_dentry *root, test_path_dentry *home,
+                            test_path_dentry *user, test_path_dentry *sub,
+                            test_path_dentry *peer)
+{
+    init_path_dentry(root, "/");
+    init_path_dentry(home, "home");
+    init_path_dentry(user, "user");
+    init_path_dentry(sub, "sub");
+    init_path_dentry(peer, "peer");
+    add_path_child(root, home);
+    add_path_child(home, user);
+    add_path_child(user, sub);
+    add_path_child(user, peer);
+}
+
+TEST(path_walk_dot_returns_current_directory) {
+    test_path_dentry root;
+    test_path_dentry home;
+    test_path_dentry user;
+    test_path_dentry sub;
+    test_path_dentry peer;
+
+    build_test_tree(&root, &home, &user, &sub, &peer);
+    ASSERT(walk_test_path(".", &user) == &user);
+    ASSERT(walk_test_path("./sub", &user) == &sub);
+}
+
+TEST(path_walk_dotdot_returns_parent_directory) {
+    test_path_dentry root;
+    test_path_dentry home;
+    test_path_dentry user;
+    test_path_dentry sub;
+    test_path_dentry peer;
+
+    build_test_tree(&root, &home, &user, &sub, &peer);
+    ASSERT(walk_test_path("..", &sub) == &user);
+    ASSERT(walk_test_path("../peer", &sub) == &peer);
+}
+
+TEST(path_walk_root_parent_stays_root) {
+    test_path_dentry root;
+    test_path_dentry home;
+    test_path_dentry user;
+    test_path_dentry sub;
+    test_path_dentry peer;
+
+    build_test_tree(&root, &home, &user, &sub, &peer);
+    ASSERT(walk_test_path("/", &root) == &root);
+    ASSERT(walk_test_path("..", &root) == &root);
+    ASSERT(walk_test_path("/home/../home/user", &root) == &user);
+}
+
 int main(void)
 {
     printf("=== ext3fs bitmap/parse tests ===\n");
@@ -345,6 +478,9 @@ int main(void)
     RUN_TEST(dentry_parse_single);
     RUN_TEST(dentry_parse_chain);
     RUN_TEST(dentry_name_extraction);
+    RUN_TEST(path_walk_dot_returns_current_directory);
+    RUN_TEST(path_walk_dotdot_returns_parent_directory);
+    RUN_TEST(path_walk_root_parent_stays_root);
 
     TEST_REPORT();
 }

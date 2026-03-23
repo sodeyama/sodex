@@ -51,6 +51,8 @@ PRIVATE ext3_dentry* __read_rootdir(u_int32_t ino);
 PRIVATE ext3_dentry* __create_file(const char* pathname,
                                    int flags, mode_t mode);
 PRIVATE ext3_dentry* __get_dentry(const char* dirname, ext3_dentry* dentry);
+PRIVATE ext3_dentry* ext3_walk_component(const char *pathname, int len,
+                                         ext3_dentry *search_dentry);
 PRIVATE ext3_dentry* __dir_walk(const char* pathname,
                                 ext3_dentry* search_dentry);
 PRIVATE void ext3_trim_trailing_slash(char *path);
@@ -1024,6 +1026,30 @@ PRIVATE ext3_dentry* __get_dentry(const char* filename, ext3_dentry* dentry)
   return NULL;
 }
 
+PRIVATE ext3_dentry* ext3_walk_component(const char *pathname, int len,
+                                         ext3_dentry *search_dentry)
+{
+  char namebuf[EXT3_NAME_LEN];
+
+  if (pathname == NULL || search_dentry == NULL || len < 0)
+    return NULL;
+  if (len == 0)
+    return search_dentry;
+  if (len == 1 && pathname[0] == '.')
+    return search_dentry;
+  if (len == 2 && pathname[0] == '.' && pathname[1] == '.') {
+    if (search_dentry->d_parent != NULL)
+      return search_dentry->d_parent;
+    return search_dentry;
+  }
+  if (len >= EXT3_NAME_LEN)
+    return NULL;
+
+  memset(namebuf, 0, sizeof(namebuf));
+  memcpy(namebuf, pathname, (size_t)len);
+  return __get_dentry(namebuf, search_dentry);
+}
+
 PUBLIC ext3_dentry* get_dentry_from_current(const char* filename)
 {
   ext3_dentry* dentry = current->dentry;
@@ -1065,22 +1091,25 @@ PUBLIC ext3_dentry* get_dentry_by_path(const char* pathname)
 PRIVATE ext3_dentry* __dir_walk(const char* pathname,
                                 ext3_dentry* search_dentry)
 {
-  ext3_dentry* dentry;
-  char* p = strchr(pathname, '/');
+  const char *p;
+  ext3_dentry *dentry;
+  int len;
 
   if (pathname == NULL || search_dentry == NULL)
     return NULL;
+  while (pathname[0] == '/')
+    pathname++;
+  if (pathname[0] == '\0')
+    return search_dentry;
 
-  if (p == NULL) { // end of search
-    return __get_dentry(pathname, search_dentry);
-  } else if (pathname[0] == '/') { // pathname is /xxx
-    dentry = search_dentry;
-    return __dir_walk(p+1, dentry);
-  } else {
-    *p = 0;
-    dentry = __get_dentry(pathname, search_dentry);
-    return __dir_walk(p+1, dentry);
-  }
+  p = strchr(pathname, '/');
+  len = (p == NULL) ? strlen(pathname) : (int)(p - pathname);
+  dentry = ext3_walk_component(pathname, len, search_dentry);
+  if (dentry == NULL)
+    return NULL;
+  if (p == NULL)
+    return dentry;
+  return __dir_walk(p + 1, dentry);
 }
 
 PUBLIC int ext3_open(const char* pathname, int flags, mode_t mode)

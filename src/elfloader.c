@@ -153,7 +153,10 @@ PUBLIC int elf_loader(const char *filename, u_int32_t *entrypoint, void *loadadd
 
 PUBLIC int open_env(const char* filename, int flags, mode_t mode)
 {
-  if (filename[0] == '/') {
+  if (filename == NULL || filename[0] == '\0')
+    return FS_OPEN_FAIL;
+
+  if (strchr(filename, '/') != NULL) {
     return ext3_open(filename, flags, mode);
   }
 

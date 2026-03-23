@@ -219,6 +219,38 @@ expect eof
     return run_expect(script, timeout=SSH_EXPECT_TIMEOUT)
 
 
+def ssh_retry_and_command_session(host_ssh_port: int, password: str) -> str:
+    script = f"""
+set timeout {SSH_EXPECT_TIMEOUT}
+log_user 1
+spawn ssh -tt -F /dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {host_ssh_port} root@127.0.0.1
+expect -re {{[Pp]assword:}}
+send "wrong-secret\\r"
+expect -re {{[Pp]assword:}}
+send "{password}\\r"
+expect -re {{sodex .*> }}
+send "command -v ls\\r"
+expect "/usr/bin/ls"
+expect -re {{sodex .*> }}
+send "ls\\r"
+expect "usr"
+expect -re {{sodex .*> }}
+send "cd\\r"
+expect -re {{sodex /home/user> }}
+send "pwd\\r"
+expect "/home/user"
+expect -re {{sodex /home/user> }}
+send "ls\\r"
+expect "sx-examples"
+expect -re {{sodex /home/user> }}
+send "exit\\r"
+expect eof
+puts "SSH_RETRY_COMMAND_OK"
+exit 0
+"""
+    return run_expect(script, timeout=SSH_EXPECT_TIMEOUT)
+
+
 def ssh_tab_completion_session(host_ssh_port: int, password: str) -> str:
     script = f"""
 set timeout {SSH_EXPECT_TIMEOUT}
@@ -362,6 +394,8 @@ def main() -> int:
         assert_contains(output, "SSH_TAB_COMPLETION_OK", "ssh tab completion")
         output = ssh_wrong_password(host_ssh_port)
         assert_contains(output, "SSH_BADPASS_OK", "ssh bad password")
+        output = ssh_retry_and_command_session(host_ssh_port, SSH_PASSWORD)
+        assert_contains(output, "SSH_RETRY_COMMAND_OK", "ssh retry command session")
 
         output = ssh_success_session(host_ssh_port, SSH_PASSWORD)
         assert_contains(output, "SSH_SESSION_OK", "ssh reconnect")

@@ -23,6 +23,9 @@ SODEX_ROOT_INO = 2
 DEFAULT_TIMEOUT = 60
 HOST_SERVER_PORT = 18081
 GUEST_SERVER_PORT = 18082
+GUEST_HTTP_PORT = 18083
+GUEST_SXC_HTTP_PORT = 18084
+GUEST_STATIC_HTTP_PORT = 18085
 FAILURE_MARKERS = ("PF:", "PageFault", "General Protection Exception")
 READY_MARKERS = (
     "AUDIT sxi_smoke_begin",
@@ -41,6 +44,9 @@ READY_MARKERS = (
     "AUDIT sxi_literal_check_status=0",
     "AUDIT sxi_net_client_check_status=0",
     "AUDIT sxi_net_server_check_status=0",
+    "AUDIT sxi_httpd_check_status=0",
+    "AUDIT sxi_static_httpd_check_status=0",
+    "AUDIT sxc_httpd_check_status=0",
     "AUDIT sxi_checks_status=0",
     "AUDIT sxi_hello_run_status=0",
     "AUDIT sxi_operators_run_status=0",
@@ -65,6 +71,12 @@ READY_MARKERS = (
     "AUDIT sxi_literal_run_status=0",
     "AUDIT sxi_net_client_run_status=0",
     "AUDIT sxi_net_server_run_status=0",
+    "AUDIT sxi_httpd_run_status=0",
+    "AUDIT sxi_static_httpd_run_status=0",
+    "AUDIT sxc_httpd_compile_status=0",
+    "AUDIT sxc_httpd_run_status=0",
+    "AUDIT sxc_hello_compile_status=0",
+    "AUDIT sxc_hello_rel_run_status=0",
     "AUDIT sxi_inline_status=0",
     "AUDIT sxi_smoke_done",
     "AUDIT sxi_runs_status=0",
@@ -233,6 +245,10 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
         "/home/user/sxi_literal_out.txt": "alpha\n3\ntrue\n",
         "/home/user/sxi_net_client_out.txt": "true\nHOST_REPLY\n",
         "/home/user/sxi_net_server_out.txt": "true\nHOST_TO_GUEST\n",
+        "/home/user/sxi_httpd_out.txt": "/healthz\n/\n/missing\n3\n",
+        "/home/user/sxi_static_httpd_out.txt": "1\n",
+        "/home/user/sxc_httpd_out.txt": "/healthz\n/\n/missing\n3\n",
+        "/home/user/sxc_hello_rel_out.txt": "Hello, sodex sx\n",
         "/home/user/sxi_inline.txt": "INLINE_OK\n",
     }
     removed_paths = (
@@ -250,6 +266,15 @@ def assert_guest_state(fsboot: pathlib.Path) -> None:
     copied_text = read_path_text(fsboot, "/tmp/sx-copy.txt")
     if copied_text != "sample-from-rootfs\n\nCOPIED_BY_SX":
         raise AssertionError(f"/tmp/sx-copy.txt mismatch: {copied_text!r}")
+
+    html_text = read_path_text(fsboot, "/home/user/www/index.html")
+    if html_text != (
+        "<!doctype html>\n"
+        "<title>sodex</title>\n"
+        "<h1>sodex demo</h1>\n"
+        "<p>served from /home/user/www/index.html</p>\n"
+    ):
+        raise AssertionError(f"/home/user/www/index.html mismatch: {html_text!r}")
 
     image = fsboot.read_bytes()
     for path in removed_paths:
@@ -280,13 +305,22 @@ def run_host_server(errors: list[BaseException]) -> None:
         errors.append(exc)
 
 
-def drive_guest_server(errors: list[BaseException]) -> None:
+def drive_guest_server(errors: list[BaseException], serial_log: pathlib.Path) -> None:
     deadline = time.time() + DEFAULT_TIMEOUT
+    start_marker = "port=18082"
 
     try:
         while time.time() < deadline:
+            serial_text = read_text(serial_log)
+            if "TCP: LISTEN" in serial_text and start_marker in serial_text:
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError("guest server did not start in time")
+        while time.time() < deadline:
             try:
-                with socket.create_connection(("127.0.0.1", GUEST_SERVER_PORT), timeout=1.0) as conn:
+                with socket.create_connection(("127.0.0.1", GUEST_SERVER_PORT), timeout=5.0) as conn:
+                    conn.settimeout(5.0)
                     conn.sendall(b"HOST_TO_GUEST")
                     payload = conn.recv(256).decode("ascii", errors="replace")
                     if payload != "SX_SERVER":
@@ -296,6 +330,95 @@ def drive_guest_server(errors: list[BaseException]) -> None:
             except OSError:
                 time.sleep(0.2)
         raise AssertionError("guest server did not become reachable in time")
+    except BaseException as exc:  # pragma: no cover - smoke helper
+        errors.append(exc)
+
+
+def recv_all(conn: socket.socket) -> str:
+    chunks: list[bytes] = []
+
+    while True:
+        chunk = conn.recv(256)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks).decode("ascii", errors="replace")
+
+
+def drive_guest_httpd_requests(errors: list[BaseException], serial_log: pathlib.Path,
+                               port: int, start_marker: str, label: str) -> None:
+    deadline = time.time() + DEFAULT_TIMEOUT
+    requests = (
+        ("GET /healthz HTTP/1.1\r\nHost: host\r\n\r\n", "HTTP/1.1 200 OK", "\r\n\r\nok\n"),
+        ("GET / HTTP/1.1\r\nHost: host\r\n\r\n", "HTTP/1.1 200 OK", "\r\n\r\nsx-httpd\n"),
+        ("GET /missing HTTP/1.1\r\nHost: host\r\n\r\n", "HTTP/1.1 404 Not Found", "\r\n\r\nnot found\n"),
+    )
+
+    try:
+        while time.time() < deadline:
+            if start_marker in read_text(serial_log):
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError(f"{label} did not start in time")
+        while time.time() < deadline:
+            try:
+                for request_text, expected_status, expected_body in requests:
+                    with socket.create_connection(("127.0.0.1", port), timeout=1.0) as conn:
+                        conn.sendall(request_text.encode("ascii"))
+                        payload = recv_all(conn)
+                        if expected_status not in payload:
+                            raise AssertionError(
+                                f"{label} status mismatch for {request_text!r}: {payload!r}"
+                            )
+                        if expected_body not in payload:
+                            raise AssertionError(
+                                f"{label} body mismatch for {request_text!r}: {payload!r}"
+                            )
+                time.sleep(0.5)
+                return
+            except OSError:
+                time.sleep(0.2)
+        raise AssertionError(f"{label} did not become reachable in time")
+    except BaseException as exc:  # pragma: no cover - smoke helper
+        errors.append(exc)
+
+
+def drive_guest_static_httpd(errors: list[BaseException],
+                             serial_log: pathlib.Path) -> None:
+    deadline = time.time() + DEFAULT_TIMEOUT
+    request_text = "GET / HTTP/1.1\r\nHost: host\r\n\r\n"
+
+    try:
+        while time.time() < deadline:
+            if "AUDIT sxi_static_httpd_start" in read_text(serial_log):
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError("guest static httpd did not start in time")
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", GUEST_STATIC_HTTP_PORT),
+                                              timeout=1.0) as conn:
+                    conn.sendall(request_text.encode("ascii"))
+                    payload = recv_all(conn)
+                    if "HTTP/1.1 200 OK" not in payload:
+                        raise AssertionError(
+                            f"guest static httpd status mismatch: {payload!r}"
+                        )
+                    if "Content-Type: text/html" not in payload:
+                        raise AssertionError(
+                            f"guest static httpd content-type mismatch: {payload!r}"
+                        )
+                    if "<h1>sodex demo</h1>" not in payload:
+                        raise AssertionError(
+                            f"guest static httpd body mismatch: {payload!r}"
+                        )
+                    time.sleep(0.5)
+                    return
+            except OSError:
+                time.sleep(0.2)
+        raise AssertionError("guest static httpd did not become reachable in time")
     except BaseException as exc:  # pragma: no cover - smoke helper
         errors.append(exc)
 
@@ -349,11 +472,17 @@ echo AUDIT sxi_literal_check_status=$?
 echo AUDIT sxi_net_client_check_status=$?
 /usr/bin/sxi --check /home/user/sx-examples/net_server.sx
 echo AUDIT sxi_net_server_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/httpd.sx 18083 3
+echo AUDIT sxi_httpd_check_status=$?
+/usr/bin/sxi --check /home/user/sx-examples/static_httpd.sx 18085 1
+echo AUDIT sxi_static_httpd_check_status=$?
+/usr/bin/sxc --check /home/user/sx-examples/httpd.sx
+echo AUDIT sxc_httpd_check_status=$?
 exit 0
 """,
     )
     write_text(
-        overlay_dir / "home" / "user" / "sxi_smoke_runs.sh",
+        overlay_dir / "home" / "user" / "sxi_smoke_runs_a.sh",
         """/usr/bin/sxi /home/user/sx-examples/hello.sx > /home/user/sxi_hello_out.txt
 echo AUDIT sxi_hello_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/operators.sx > /home/user/sxi_operators_out.txt
@@ -378,7 +507,12 @@ echo AUDIT sxi_json_run_status=$?
 echo AUDIT sxi_copy_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/proc_capture.sx > /home/user/sxi_proc_out.txt
 echo AUDIT sxi_proc_run_status=$?
-/usr/bin/sxi /home/user/sx-examples/stdin_echo.sx < /home/user/sx-examples/stdin_source.txt > /home/user/sxi_stdin_out.txt
+exit 0
+""",
+    )
+    write_text(
+        overlay_dir / "home" / "user" / "sxi_smoke_runs_b.sh",
+        """/usr/bin/sxi /home/user/sx-examples/stdin_echo.sx < /home/user/sx-examples/stdin_source.txt > /home/user/sxi_stdin_out.txt
 echo AUDIT sxi_stdin_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/grep_lite.sx alpha < /home/user/sx-examples/grep_source.txt > /home/user/sxi_grep_out.txt
 echo AUDIT sxi_grep_run_status=$?
@@ -396,14 +530,49 @@ echo AUDIT sxi_bytes_run_status=$?
 echo AUDIT sxi_list_map_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/literal_branching.sx > /home/user/sxi_literal_out.txt
 echo AUDIT sxi_literal_run_status=$?
-/usr/bin/sxi /home/user/sx-examples/net_client.sx > /home/user/sxi_net_client_out.txt
+exit 0
+""",
+    )
+    write_text(
+        overlay_dir / "home" / "user" / "sxi_smoke_runs_c.sh",
+        """/usr/bin/sxi /home/user/sx-examples/net_client.sx > /home/user/sxi_net_client_out.txt
 echo AUDIT sxi_net_client_run_status=$?
 /usr/bin/sxi /home/user/sx-examples/net_server.sx > /home/user/sxi_net_server_out.txt
 echo AUDIT sxi_net_server_run_status=$?
+/usr/bin/sxi /home/user/sx-examples/httpd.sx 18083 3 > /home/user/sxi_httpd_out.txt
+echo AUDIT sxi_httpd_run_status=$?
+echo AUDIT sxi_static_httpd_start
+/usr/bin/sxi /home/user/sx-examples/static_httpd.sx 18085 1 > /home/user/sxi_static_httpd_out.txt
+echo AUDIT sxi_static_httpd_run_status=$?
+/usr/bin/sxc /home/user/sx-examples/httpd.sx -o /home/user/httpd
+echo AUDIT sxc_httpd_compile_status=$?
+echo AUDIT sxc_httpd_start
+/home/user/httpd 18084 3 > /home/user/sxc_httpd_out.txt
+echo AUDIT sxc_httpd_run_status=$?
+/usr/bin/sxc /home/user/sx-examples/hello.sx -o /home/user/sx-examples/hello
+echo AUDIT sxc_hello_compile_status=$?
+cd /home/user/sx-examples
+./hello > /home/user/sxc_hello_rel_out.txt
+echo AUDIT sxc_hello_rel_run_status=$?
+cd /home/user
 /usr/bin/sxi -e 'io.println("INLINE_OK");' > /home/user/sxi_inline.txt
 echo AUDIT sxi_inline_status=$?
 echo AUDIT sxi_smoke_done
 exit 0
+""",
+    )
+    write_text(
+        overlay_dir / "home" / "user" / "sxi_smoke_runs.sh",
+        """/usr/bin/sh /home/user/sxi_smoke_runs_a.sh
+if [ $? -ne 0 ]; then
+  exit 1
+fi
+/usr/bin/sh /home/user/sxi_smoke_runs_b.sh
+if [ $? -ne 0 ]; then
+  exit 1
+fi
+/usr/bin/sh /home/user/sxi_smoke_runs_c.sh
+exit $?
 """,
     )
     write_text(
@@ -483,7 +652,10 @@ def main() -> int:
         "-D",
         str(qemu_log),
         "-netdev",
-        f"user,id=net0,hostfwd=tcp::{GUEST_SERVER_PORT}-:{GUEST_SERVER_PORT}",
+        f"user,id=net0,hostfwd=tcp::{GUEST_SERVER_PORT}-:{GUEST_SERVER_PORT},"
+        f"hostfwd=tcp::{GUEST_HTTP_PORT}-:{GUEST_HTTP_PORT},"
+        f"hostfwd=tcp::{GUEST_SXC_HTTP_PORT}-:{GUEST_SXC_HTTP_PORT},"
+        f"hostfwd=tcp::{GUEST_STATIC_HTTP_PORT}-:{GUEST_STATIC_HTTP_PORT}",
         "-device",
         "ne2k_isa,irq=11,iobase=0xc100,mac=52:54:00:12:34:56,netdev=net0",
     ]
@@ -492,11 +664,35 @@ def main() -> int:
     qemu_stderr_fp: TextIO | None = None
     host_server_errors: list[BaseException] = []
     host_client_errors: list[BaseException] = []
+    httpd_client_errors: list[BaseException] = []
+    static_httpd_client_errors: list[BaseException] = []
+    compiled_httpd_client_errors: list[BaseException] = []
     host_server_thread = threading.Thread(
         target=run_host_server, args=(host_server_errors,), daemon=True
     )
     host_client_thread = threading.Thread(
-        target=drive_guest_server, args=(host_client_errors,), daemon=True
+        target=drive_guest_server, args=(host_client_errors, serial_log), daemon=True
+    )
+    httpd_client_thread = threading.Thread(
+        target=drive_guest_httpd_requests,
+        args=(httpd_client_errors, serial_log,
+              GUEST_HTTP_PORT,
+              "AUDIT sxi_run_file path=/home/user/sx-examples/httpd.sx",
+              "guest sxi httpd"),
+        daemon=True
+    )
+    static_httpd_client_thread = threading.Thread(
+        target=drive_guest_static_httpd,
+        args=(static_httpd_client_errors, serial_log),
+        daemon=True
+    )
+    compiled_httpd_client_thread = threading.Thread(
+        target=drive_guest_httpd_requests,
+        args=(compiled_httpd_client_errors, serial_log,
+              GUEST_SXC_HTTP_PORT,
+              "AUDIT sxc_httpd_start",
+              "guest compiled httpd"),
+        daemon=True
     )
     try:
         host_server_thread.start()
@@ -508,18 +704,36 @@ def main() -> int:
             stderr=qemu_stderr_fp,
         )
         host_client_thread.start()
+        httpd_client_thread.start()
+        static_httpd_client_thread.start()
+        compiled_httpd_client_thread.start()
         wait_until_ready(time.time() + timeout, serial_log, qemu_log,
                          qemu_proc, qemu_stderr_log)
         host_server_thread.join(timeout=5)
         host_client_thread.join(timeout=5)
+        httpd_client_thread.join(timeout=5)
+        static_httpd_client_thread.join(timeout=5)
+        compiled_httpd_client_thread.join(timeout=5)
         if host_server_thread.is_alive():
             raise AssertionError("host server helper did not finish")
         if host_client_thread.is_alive():
             raise AssertionError("host client helper did not finish")
+        if httpd_client_thread.is_alive():
+            raise AssertionError("httpd client helper did not finish")
+        if static_httpd_client_thread.is_alive():
+            raise AssertionError("static httpd client helper did not finish")
+        if compiled_httpd_client_thread.is_alive():
+            raise AssertionError("compiled httpd client helper did not finish")
         if host_server_errors:
             raise host_server_errors[0]
         if host_client_errors:
             raise host_client_errors[0]
+        if httpd_client_errors:
+            raise httpd_client_errors[0]
+        if static_httpd_client_errors:
+            raise static_httpd_client_errors[0]
+        if compiled_httpd_client_errors:
+            raise compiled_httpd_client_errors[0]
         stop_qemu(qemu_proc)
         qemu_proc = None
         assert_guest_state(temp_fsboot)

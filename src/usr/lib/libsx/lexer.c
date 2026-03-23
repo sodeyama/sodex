@@ -214,6 +214,8 @@ int sx_lex(const char *text, int len,
           ch = text[pos];
           if (ch == 'n')
             escaped = '\n';
+          else if (ch == 'r')
+            escaped = '\r';
           else if (ch == 't')
             escaped = '\t';
           else if (ch == '"')

@@ -149,7 +149,7 @@ AST / symbol / diagnostics
 ## corpus / regression set
 
 - host fixture runner は `tests/test_sx_fixtures.c` を基準にし、stdin 付き sample まで同じ経路で回す
-- valid runtime corpus は recursive sum、relative import、stdlib import、spawn / wait、bytes / result、list / map、literal / branching、grep-lite を含む
+- valid runtime corpus は recursive sum、relative import、stdlib import、spawn / wait、bytes / result、list / map、literal / branching、grep-lite、minimal `httpd` を含む
 - negative corpus は undefined name と import cycle を持ち、`--check` 診断の基準にする
 - guest 同梱 corpus は `/home/user/sx-examples/` に置き、README と LANGUAGE.md と QEMU smoke で共有する
 
@@ -176,6 +176,7 @@ AST / symbol / diagnostics
 ## 関連 spec
 
 - [`specs/sxi-runtime/README.md`](../sxi-runtime/README.md)
+- [`specs/sxc-compiler/README.md`](../sxc-compiler/README.md)
 - [`specs/agent-filesystem-tools/README.md`](../agent-filesystem-tools/README.md)
 - [`specs/shell-and-init/README.md`](../shell-and-init/README.md)
 - [`specs/memory-scaling/README.md`](../memory-scaling/README.md)

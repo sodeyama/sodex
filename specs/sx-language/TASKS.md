@@ -19,6 +19,7 @@
 - 2026-03-23: `proc.has_env`、`bytes`、`list`、`map`、`result`、`try_*` を sample / fixture / QEMU smoke まで広げ、guest 同梱 corpus を拡充した
 - 2026-03-23: 次段として `list` / `map` literal、`else if`、`net` namespace を `Plan 07` で整理した
 - 2026-03-23: stdin 対応 fixture runner と grep-lite corpus を追加し、module / visibility / versioning / literal / network の仕様と task 状態を更新した
+- 2026-03-23: `\r` escape、`text.len` / `text.index_of` / `text.slice` / `text.to_i32`、minimal `httpd` sample、host/QEMU 回帰を追加し、userland service の最小到達点を固定した
 
 ## 優先順
 

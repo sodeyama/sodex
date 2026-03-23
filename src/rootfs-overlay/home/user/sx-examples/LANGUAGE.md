@@ -28,7 +28,7 @@ sxi
 - block は `{ ... }` で書きます
 - `if` / `while` / `for` の条件には `(` `)` が必要です
 - list literal は `[` `]`、map literal は `{` `}` を使います
-- string escape は `\"`、`\\n`、`\\t`、`\\\\` です
+- string escape は `\"`、`\\n`、`\\r`、`\\t`、`\\\\` です
 - integer literal は 10 進 `i32` です
 - `true` と `false` が bool literal です
 
@@ -205,6 +205,7 @@ proc.spawn("/usr/bin/cat", "/tmp/a.txt");
 - process: `proc.run`, `proc.capture`, `proc.spawn`, `proc.spawn_io`, `proc.wait`, `proc.pipe`, `proc.fork`, `proc.exit`
 - process helper: `proc.argv_count`, `proc.argv`, `proc.env`, `proc.has_env`, `proc.status_ok`, `proc.try_run`, `proc.try_capture`
 - network: `net.connect`, `net.listen`, `net.accept`, `net.read`, `net.read_bytes`, `net.write`, `net.write_bytes`, `net.poll_read`, `net.close`
+- text: `text.contains`, `text.trim`, `text.concat`, `text.len`, `text.index_of`, `text.slice`, `text.to_i32`
 - JSON: `json.get_str`, `json.get_bool`, `json.get_i32`, `json.valid`
 - bytes / collection: `bytes.*`, `list.*`, `map.*`, `result.*`
 

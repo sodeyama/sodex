@@ -1,7 +1,7 @@
 # sx examples
 
 `/home/user/sx-examples/` は、`sxi` を guest 内で試すためのサンプル集です。
-構文の基本だけでなく、literal、`stdin`、grep-lite、file I/O、`argv`、`spawn`、pipe、`fork`、network client/server までまとめて置いています。
+構文の基本だけでなく、literal、`stdin`、grep-lite、file I/O、`argv`、`spawn`、pipe、`fork`、network client/server、最小 `httpd`、静的 HTML `httpd` までまとめて置いています。
 文法と構文規則は `LANGUAGE.md` を先に見てください。
 
 ## 最初の実行
@@ -209,6 +209,33 @@ sxi net_server.sx
 `net.listen`、`net.accept`、`net.read`、`net.write`、`net.close` の例です。
 QEMU smoke では host 側 client が接続します。
 
+### 24. minimal `httpd`
+
+```sh
+sxi httpd.sx 18083 3
+```
+
+`text.index_of`、`text.slice`、`text.to_i32` と `net.listen` / `net.accept` を使って
+最小の HTTP server を書く例です。
+第 1 引数で port、第 2 引数で処理する request 数を指定できます。
+既定値は `18083` と無限ループです。
+
+### 25. static HTML `httpd`
+
+```sh
+sxi static_httpd.sx 18085
+```
+
+`/home/user/www/index.html` を `GET /` と `GET /index.html` で返す最小の static server です。
+第 1 引数で port、第 2 引数で処理する request 数を指定できます。
+既定値は `18085` と `32` です。
+`bin/start.sh` で起動していれば、host の browser からそのまま `http://127.0.0.1:18085/` を開けます。
+別経路で guest を起動していて `18085` を直接 forward していないときは、SSH local forward でも見られます。
+
+```sh
+ssh -N -L 18085:127.0.0.1:18085 -p 10022 -o PubkeyAuthentication=no root@127.0.0.1
+```
+
 ## ファイル一覧
 
 - `hello.sx`
@@ -235,14 +262,18 @@ QEMU smoke では host 側 client が接続します。
 - `literal_branching.sx`
 - `net_client.sx`
 - `net_server.sx`
+- `httpd.sx`
+- `static_httpd.sx`
 - `LANGUAGE.md`
 - `copy_source.txt`
 - `stdin_source.txt`
 - `grep_source.txt`
 
+`static_httpd.sx` が返す page 本体は `/home/user/www/index.html` に置いてあります。
+
 ## メモ
 
 - comment は `//`
-- string は `\"`、`\\n`、`\\t`、`\\\\` を使えます
+- string は `\"`、`\\n`、`\\r`、`\\t`、`\\\\` を使えます
 - path は文字列で渡します
 - 失敗時は診断と stack trace を表示します

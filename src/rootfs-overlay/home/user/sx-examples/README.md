@@ -1,7 +1,7 @@
 # sx examples
 
 `/home/user/sx-examples/` は、`sxi` を guest 内で試すためのサンプル集です。
-構文の基本だけでなく、literal、`stdin`、grep-lite、file I/O、`argv`、`spawn`、pipe、`fork`、network client/server までまとめて置いています。
+構文の基本だけでなく、literal、`stdin`、grep-lite、file I/O、`argv`、`spawn`、pipe、`fork`、network client/server、最小 `httpd` までまとめて置いています。
 文法と構文規則は `LANGUAGE.md` を先に見てください。
 
 ## 最初の実行
@@ -209,6 +209,17 @@ sxi net_server.sx
 `net.listen`、`net.accept`、`net.read`、`net.write`、`net.close` の例です。
 QEMU smoke では host 側 client が接続します。
 
+### 24. minimal `httpd`
+
+```sh
+sxi httpd.sx 18083 3
+```
+
+`text.index_of`、`text.slice`、`text.to_i32` と `net.listen` / `net.accept` を使って
+最小の HTTP server を書く例です。
+第 1 引数で port、第 2 引数で処理する request 数を指定できます。
+既定値は `18083` と無限ループです。
+
 ## ファイル一覧
 
 - `hello.sx`
@@ -235,6 +246,7 @@ QEMU smoke では host 側 client が接続します。
 - `literal_branching.sx`
 - `net_client.sx`
 - `net_server.sx`
+- `httpd.sx`
 - `LANGUAGE.md`
 - `copy_source.txt`
 - `stdin_source.txt`
@@ -243,6 +255,6 @@ QEMU smoke では host 側 client が接続します。
 ## メモ
 
 - comment は `//`
-- string は `\"`、`\\n`、`\\t`、`\\\\` を使えます
+- string は `\"`、`\\n`、`\\r`、`\\t`、`\\\\` を使えます
 - path は文字列で渡します
 - 失敗時は診断と stack trace を表示します

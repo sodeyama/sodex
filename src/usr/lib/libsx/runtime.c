@@ -1183,6 +1183,73 @@ static int sx_concat_text(const char *lhs, const char *rhs, char *buf, int cap)
   return len;
 }
 
+static int sx_text_len(const char *text)
+{
+  if (text == 0)
+    return -1;
+  return (int)strlen(text);
+}
+
+static int sx_text_index_of(const char *text, const char *needle)
+{
+  int i;
+  int j;
+
+  if (text == 0 || needle == 0)
+    return -1;
+  if (needle[0] == '\0')
+    return 0;
+  for (i = 0; text[i] != '\0'; i++) {
+    for (j = 0; needle[j] != '\0'; j++) {
+      if (text[i + j] == '\0' || text[i + j] != needle[j])
+        break;
+    }
+    if (needle[j] == '\0')
+      return i;
+  }
+  return -1;
+}
+
+static int sx_slice_text(const char *text,
+                         int start,
+                         int end,
+                         char *buf,
+                         int cap)
+{
+  int text_len;
+  int len;
+  int i;
+
+  if (text == 0 || buf == 0 || cap <= 0)
+    return -1;
+  text_len = (int)strlen(text);
+  if (start < 0 || end < start || end > text_len)
+    return -1;
+  len = end - start;
+  if (len >= cap)
+    return -1;
+  for (i = 0; i < len; i++)
+    buf[i] = text[start + i];
+  buf[len] = '\0';
+  return len;
+}
+
+static int sx_parse_i32_string(const char *text, int *out_value)
+{
+  char *end = 0;
+  long value;
+
+  if (text == 0 || out_value == 0 || text[0] == '\0')
+    return -1;
+  value = strtol(text, &end, 10);
+  if (end == text || end == 0 || *end != '\0')
+    return -1;
+  if (value < (-2147483647L - 1L) || value > 2147483647L)
+    return -1;
+  *out_value = (int)value;
+  return 0;
+}
+
 static int sx_parse_json(const char *text,
                          struct json_token *tokens,
                          int *token_count)
@@ -2850,6 +2917,74 @@ fs_try_store_fail:
   }
 
   if (strcmp(call->target_name, "text") == 0) {
+    if (strcmp(call->member_name, "len") == 0) {
+      if (call->arg_count != 1 ||
+          sx_value_to_string(&args[0], span, diag) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "text.len expects 1 string argument");
+        return -1;
+      }
+      sx_set_i32_value(value, sx_text_len(args[0].text));
+      return 0;
+    }
+    if (strcmp(call->member_name, "index_of") == 0) {
+      if (call->arg_count != 2 ||
+          sx_value_to_string(&args[0], span, diag) < 0 ||
+          sx_value_to_string(&args[1], span, diag) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "text.index_of expects 2 string arguments");
+        return -1;
+      }
+      sx_set_i32_value(value, sx_text_index_of(args[0].text, args[1].text));
+      return 0;
+    }
+    if (strcmp(call->member_name, "slice") == 0) {
+      int start = 0;
+      int end = 0;
+
+      if (call->arg_count != 3 ||
+          sx_value_to_string(&args[0], span, diag) < 0 ||
+          sx_value_to_i32(&args[1], span, diag, &start) < 0 ||
+          sx_value_to_i32(&args[2], span, diag, &end) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "text.slice expects string, start, end");
+        return -1;
+      }
+      if (sx_slice_text(args[0].text, start, end,
+                        value->text, sizeof(value->text)) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "text.slice failed");
+        return -1;
+      }
+      value->kind = SX_VALUE_STRING;
+      value->bool_value = 0;
+      value->int_value = 0;
+      value->data_len = (int)strlen(value->text);
+      return 0;
+    }
+    if (strcmp(call->member_name, "to_i32") == 0) {
+      int parsed = 0;
+
+      if (call->arg_count != 1 ||
+          sx_value_to_string(&args[0], span, diag) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "text.to_i32 expects 1 string argument");
+        return -1;
+      }
+      if (sx_parse_i32_string(args[0].text, &parsed) < 0) {
+        sx_set_diagnostic(diag, span->offset, span->length,
+                          span->line, span->column,
+                          "text.to_i32 failed");
+        return -1;
+      }
+      sx_set_i32_value(value, parsed);
+      return 0;
+    }
     if (strcmp(call->member_name, "contains") == 0) {
       if (call->arg_count != 2 ||
           sx_value_to_string(&args[0], span, diag) < 0 ||

@@ -48,7 +48,7 @@
 - `sxi file.sx`, `sxi -e '...'`, `sxi --check file.sx`, `sxi` REPL を持つ
 - `sx` frontend を共通 `libsx` として切り出し、将来の `sxc` と共有する
 - v0 は tree-walk source interpreter で成立させる
-- file / process / fd / path / time / JSON / text の standard surface を持つ
+- file / process / fd / path / time / JSON / text / network の standard surface を持つ
 - host unit test と QEMU smoke で実行系の回帰を継続確認できる
 
 ## 非ゴール
@@ -164,7 +164,7 @@
 
 - host unit test は lexer / parser / runtime / CLI / fixture corpus をカバーする
 - representative fixture corpus は `tests/test_sx_fixtures.c` で回し、stdin 付き grep-lite まで同じ経路で検証する
-- guest/QEMU smoke は `make -C src test-qemu-sxi` で representative sample を実行する
+- guest/QEMU smoke は `make -C src test-qemu-sxi` で representative sample を実行し、guest 内 minimal `httpd` の HTTP 応答まで確認する
 - agent workflow smoke は `make -C src test-qemu-sxi-agent` で回し、`write_file` -> `sxi --check` -> `sxi run` -> fix loop を mock Claude 経由で検証する
 
 ## shared boundary for `sxb` / `sxc`
@@ -187,6 +187,7 @@
 ## 関連 spec
 
 - [`specs/sx-language/README.md`](../sx-language/README.md)
+- [`specs/sxc-compiler/README.md`](../sxc-compiler/README.md)
 - [`specs/agent-filesystem-tools/README.md`](../agent-filesystem-tools/README.md)
 - [`specs/shell-and-init/README.md`](../shell-and-init/README.md)
 - [`specs/memory-scaling/README.md`](../memory-scaling/README.md)

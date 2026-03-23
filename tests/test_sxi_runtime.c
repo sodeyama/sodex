@@ -181,6 +181,25 @@ static int read_socket_text(int fd, char *buf, size_t cap)
     return (int)len;
 }
 
+static int read_socket_until_close(int fd, char *buf, size_t cap)
+{
+    size_t len = 0;
+
+    if (fd < 0 || buf == NULL || cap == 0)
+        return -1;
+    while (len < cap - 1) {
+        ssize_t nr = recv(fd, buf + len, cap - len - 1, 0);
+
+        if (nr < 0)
+            return -1;
+        if (nr == 0)
+            break;
+        len += (size_t)nr;
+    }
+    buf[len] = '\0';
+    return (int)len;
+}
+
 TEST(runtime_executes_function_if_block_and_return) {
     const char *text =
         "fn choose(flag) -> str {\n"
@@ -671,6 +690,136 @@ TEST(runtime_executes_literals_and_else_if) {
     sx_runtime_dispose(&runtime);
 }
 
+TEST(runtime_executes_text_search_slice_and_parse_helpers) {
+    const char *text =
+        "let line = \"GET /healthz HTTP/1.1\";\n"
+        "let start = text.index_of(line, \"GET \");\n"
+        "let tail = text.slice(line, 4, text.len(line));\n"
+        "let space = text.index_of(tail, \" \");\n"
+        "let path = text.slice(tail, 0, space);\n"
+        "let port = text.to_i32(\"18083\");\n"
+        "io.println(start);\n"
+        "io.println(path);\n"
+        "io.println(port);\n";
+    struct sx_program program;
+    struct sx_diagnostic diag;
+    struct sx_runtime runtime;
+    struct output_buffer out;
+
+    memset(&out, 0, sizeof(out));
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_parse_program(text, (int)strlen(text), &program, &diag), 0);
+    ASSERT_EQ(sx_runtime_check_program(&runtime, &program, &diag), 0);
+
+    sx_runtime_init(&runtime);
+    sx_runtime_set_output(&runtime, append_output, &out);
+    ASSERT_EQ(sx_runtime_execute_program(&runtime, &program, &diag), 0);
+    ASSERT_STR_EQ(out.text, "0\n/healthz\n18083\n");
+    sx_runtime_dispose(&runtime);
+}
+
+TEST(runtime_executes_httpd_sample) {
+    char script[4096];
+    char port_text[16];
+    char *argv_values[] = { "httpd.sx", port_text, "3", NULL };
+    const char *healthz_request = "GET /healthz HTTP/1.1\r\nHost: test\r\n\r\n";
+    const char *root_request = "GET / HTTP/1.1\r\nHost: test\r\n\r\n";
+    const char *missing_request = "GET /missing HTTP/1.1\r\nHost: test\r\n\r\n";
+    int stdout_pipe[2];
+    int port = -1;
+    pid_t pid;
+    int client_fd = -1;
+    char response[512];
+    char child_out[128];
+    int status = 0;
+    const char *sample_path = "../src/rootfs-overlay/home/user/sx-examples/httpd.sx";
+    const char *alt_sample_path = "src/rootfs-overlay/home/user/sx-examples/httpd.sx";
+
+    if (read_text_file(sample_path, script, sizeof(script)) < 0)
+        ASSERT_EQ(read_text_file(alt_sample_path, script, sizeof(script)), 0);
+    port = reserve_tcp_port();
+    ASSERT_EQ(port > 0, 1);
+    snprintf(port_text, sizeof(port_text), "%d", port);
+    ASSERT_EQ(pipe(stdout_pipe), 0);
+
+    pid = fork();
+    ASSERT_EQ(pid >= 0, 1);
+    if (pid == 0) {
+        struct sx_program program;
+        struct sx_diagnostic diag;
+        struct sx_runtime runtime;
+        struct output_buffer out;
+
+        close(stdout_pipe[0]);
+        memset(&out, 0, sizeof(out));
+        sx_runtime_init(&runtime);
+        sx_runtime_set_output(&runtime, append_output, &out);
+        if (sx_runtime_set_argv(&runtime, 3, argv_values) < 0)
+            _exit(10);
+        if (sx_parse_program(script, (int)strlen(script), &program, &diag) < 0)
+            _exit(11);
+        if (sx_runtime_execute_program(&runtime, &program, &diag) < 0)
+            _exit(12);
+        write(stdout_pipe[1], out.text, (size_t)out.len);
+        close(stdout_pipe[1]);
+        sx_runtime_dispose(&runtime);
+        _exit(0);
+    }
+
+    close(stdout_pipe[1]);
+
+    client_fd = connect_with_retry(port, 40, 50000);
+    ASSERT_EQ(client_fd >= 0, 1);
+    ASSERT_EQ(send(client_fd,
+                   healthz_request,
+                   strlen(healthz_request),
+                   0),
+              (ssize_t)strlen(healthz_request));
+    ASSERT_EQ(shutdown(client_fd, SHUT_WR), 0);
+    ASSERT_EQ(read_socket_until_close(client_fd, response, sizeof(response)) > 0, 1);
+    ASSERT_EQ(strstr(response, "HTTP/1.1 200 OK") != NULL, 1);
+    ASSERT_EQ(strstr(response, "\r\n\r\nok\n") != NULL, 1);
+    close(client_fd);
+    client_fd = -1;
+
+    client_fd = connect_with_retry(port, 40, 50000);
+    ASSERT_EQ(client_fd >= 0, 1);
+    ASSERT_EQ(send(client_fd,
+                   root_request,
+                   strlen(root_request),
+                   0),
+              (ssize_t)strlen(root_request));
+    ASSERT_EQ(shutdown(client_fd, SHUT_WR), 0);
+    ASSERT_EQ(read_socket_until_close(client_fd, response, sizeof(response)) > 0, 1);
+    ASSERT_EQ(strstr(response, "HTTP/1.1 200 OK") != NULL, 1);
+    ASSERT_EQ(strstr(response, "\r\n\r\nsx-httpd\n") != NULL, 1);
+    close(client_fd);
+    client_fd = -1;
+
+    client_fd = connect_with_retry(port, 40, 50000);
+    ASSERT_EQ(client_fd >= 0, 1);
+    ASSERT_EQ(send(client_fd,
+                   missing_request,
+                   strlen(missing_request),
+                   0),
+              (ssize_t)strlen(missing_request));
+    ASSERT_EQ(shutdown(client_fd, SHUT_WR), 0);
+    ASSERT_EQ(read_socket_until_close(client_fd, response, sizeof(response)) > 0, 1);
+    ASSERT_EQ(strstr(response, "HTTP/1.1 404 Not Found") != NULL, 1);
+    ASSERT_EQ(strstr(response, "\r\n\r\nnot found\n") != NULL, 1);
+    close(client_fd);
+    client_fd = -1;
+
+    memset(child_out, 0, sizeof(child_out));
+    ASSERT_EQ(read(stdout_pipe[0], child_out, sizeof(child_out) - 1) >= 0, 1);
+    close(stdout_pipe[0]);
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT_EQ(WIFEXITED(status), 1);
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_STR_EQ(child_out, "/healthz\n/\n/missing\n3\n");
+}
+
 TEST(runtime_executes_net_client_builtins) {
     char script[512];
     struct sx_program program;
@@ -1023,6 +1172,8 @@ int main(void)
     RUN_TEST(runtime_executes_env_bytes_and_result_builtins);
     RUN_TEST(runtime_executes_list_and_map_builtins);
     RUN_TEST(runtime_executes_literals_and_else_if);
+    RUN_TEST(runtime_executes_text_search_slice_and_parse_helpers);
+    RUN_TEST(runtime_executes_httpd_sample);
     RUN_TEST(runtime_executes_net_client_builtins);
     RUN_TEST(runtime_executes_net_server_builtins);
     RUN_TEST(runtime_executes_operators_assignment_and_loop_control);

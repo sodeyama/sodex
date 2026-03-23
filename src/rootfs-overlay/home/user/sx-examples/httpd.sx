@@ -1,0 +1,91 @@
+fn arg_or_default(index, fallback) -> i32 {
+  if (proc.argv_count() > index) {
+    return text.to_i32(proc.argv(index));
+  }
+  return fallback;
+}
+
+fn request_line(request) -> str {
+  let line_end = text.index_of(request, "\r\n");
+
+  if (line_end < 0) {
+    line_end = text.index_of(request, "\n");
+  }
+  if (line_end < 0) {
+    return request;
+  }
+  return text.slice(request, 0, line_end);
+}
+
+fn request_path(line) -> str {
+  let tail = "";
+  let space = -1;
+
+  if (text.index_of(line, "GET ") != 0) {
+    return "";
+  }
+  tail = text.slice(line, 4, text.len(line));
+  space = text.index_of(tail, " ");
+  if (space < 0) {
+    return "";
+  }
+  return text.slice(tail, 0, space);
+}
+
+fn write_response(sock, status_line, body) -> i32 {
+  let response = text.concat(status_line,
+                             "\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n");
+
+  response = text.concat(response, body);
+  return net.write(sock, response);
+}
+
+fn handle_client(sock) -> str {
+  let ready = net.poll_read(sock, 5000);
+  let request = "";
+  let line = "";
+  let path = "";
+
+  if (!ready) {
+    net.close(sock);
+    return "";
+  }
+
+  request = net.read(sock);
+  line = request_line(request);
+  path = request_path(line);
+
+  if (path == "/healthz") {
+    write_response(sock, "HTTP/1.1 200 OK", "ok\n");
+  } else if (path == "/") {
+    write_response(sock, "HTTP/1.1 200 OK", "sx-httpd\n");
+  } else {
+    write_response(sock, "HTTP/1.1 404 Not Found", "not found\n");
+  }
+
+  net.close(sock);
+  return path;
+}
+
+let port = arg_or_default(1, 18083);
+let max_requests = arg_or_default(2, 0);
+let handled = 0;
+let listener = net.listen(port);
+let keep_running = true;
+
+while (keep_running) {
+  let sock = net.accept(listener);
+  let path = handle_client(sock);
+
+  handled = handled + 1;
+  if (path != "") {
+    io.println(path);
+  }
+
+  if (max_requests > 0 && handled >= max_requests) {
+    keep_running = false;
+  }
+}
+
+net.close(listener);
+io.println(handled);

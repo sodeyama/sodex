@@ -18,6 +18,7 @@
 - 2026-03-23: `proc.has_env`、`bytes`、`list`、`map`、`result` と `try_*` の sample / fixture / QEMU smoke を追加し、guest / host 回帰の粒度を上げた
 - 2026-03-23: 次段として `net` namespace と socket cleanup を `Plan 06` として整理した
 - 2026-03-23: grep-lite corpus、runtime limit/cleanup policy、agent の `sxi` write/check/run/fix smoke、shared boundary 文書を追加し、残 task を更新した
+- 2026-03-23: `text` helper 拡張と guest 同梱 minimal `httpd` を追加し、`test-qemu-sxi` で host から HTTP 応答まで継続確認できるようにした
 
 ## 優先順
 

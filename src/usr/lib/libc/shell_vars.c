@@ -331,3 +331,26 @@ int shell_history_entry_number(const struct shell_state *state, int index)
     return 0;
   return state->history_base + index;
 }
+
+void shell_state_clear_last_error(struct shell_state *state)
+{
+  if (state == 0)
+    return;
+  state->last_error_text[0] = '\0';
+}
+
+void shell_state_set_last_error(struct shell_state *state, const char *text)
+{
+  if (state == 0)
+    return;
+  shell_copy_text(state->last_error_text,
+                  sizeof(state->last_error_text),
+                  text != 0 ? text : "");
+}
+
+const char *shell_state_last_error(const struct shell_state *state)
+{
+  if (state == 0)
+    return "";
+  return state->last_error_text;
+}

@@ -146,6 +146,14 @@ agent action としての履歴は session / audit に残す。
   - `echo hi > file` 提案 -> approval 必須
   - long-running command の detach / reattach
 
+実装メモ:
+
+- 現時点の MVP は `run_command` を backend で `propose` audit に変換し、
+  `eshell --agent-fusion` の text drawer に command block を描く
+- approved 実行は `tool_run_command` の bounded capture を再利用する
+- QEMU smoke はまだ proposal path を直接叩いておらず、host test が主検証
+- long-running attach / detach は未着手
+
 ## 完了条件
 
 - agent 提案 command を実行候補 block として表示できる

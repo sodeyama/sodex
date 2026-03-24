@@ -19,6 +19,7 @@
 #define SHELL_ALIAS_VALUE_MAX 256
 #define SHELL_HISTORY_MAX 32
 #define SHELL_HISTORY_TEXT_MAX 512
+#define SHELL_ERROR_TEXT_MAX 160
 #define SHELL_MAX_PARAMS 16
 #define SHELL_MAX_BG_PIDS 16
 #define SHELL_JOB_TEXT_MAX 160
@@ -184,6 +185,7 @@ struct shell_state {
   char history[SHELL_HISTORY_MAX][SHELL_HISTORY_TEXT_MAX];
   int history_count;
   int history_base;
+  char last_error_text[SHELL_ERROR_TEXT_MAX];
   pid_t background_pids[SHELL_MAX_BG_PIDS];
   int background_count;
   struct shell_job jobs[SHELL_MAX_BG_PIDS];
@@ -211,6 +213,9 @@ int shell_history_expand_line(const struct shell_state *state,
 int shell_history_count(const struct shell_state *state);
 const char *shell_history_get(const struct shell_state *state, int index);
 int shell_history_entry_number(const struct shell_state *state, int index);
+void shell_state_clear_last_error(struct shell_state *state);
+void shell_state_set_last_error(struct shell_state *state, const char *text);
+const char *shell_state_last_error(const struct shell_state *state);
 
 int shell_parse_program(const char *text, int len, struct shell_program *program);
 int shell_execute_program(struct shell_state *state,

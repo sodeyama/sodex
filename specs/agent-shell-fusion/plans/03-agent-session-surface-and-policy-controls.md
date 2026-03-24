@@ -166,9 +166,15 @@ agent へ送るときだけ recent block を構造化注入する。
   - recent command block truncation
   - approval state transitions
 - QEMU
-  - `@` で drawer が開く
-  - `/compact` と `/permissions` が terminal 内で動く
-  - 直前 command の stderr tail を session context に取り込める
+  - `@` で agent route が動く
+  - `/status` で session surface が描画される
+  - typo/path recovery と recent command bridge が共存する
+
+実装メモ:
+
+- 現時点の MVP は `term` overlay ではなく `eshell --agent-fusion` の text drawer
+- `/permissions`、`/clear`、`/resume`、permission override は host test で担保
+- approval UI は未実装で、M3 の shell action flow へ送る
 
 ## 完了条件
 

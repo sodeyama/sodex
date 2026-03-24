@@ -30,11 +30,15 @@ enum mock_scenario {
     MOCK_SCENARIO_NONE = 0,
     MOCK_SCENARIO_FRESH_LOOKUP_RETRY,
     MOCK_SCENARIO_PLAIN_END_TURN,
+    MOCK_SCENARIO_RUN_COMMAND_PROPOSAL,
 };
 
 static int s_mock_scenario = MOCK_SCENARIO_NONE;
 static int s_send_count = 0;
 static int s_tool_dispatch_count = 0;
+static int s_last_perm_mode = -1;
+static int s_audit_count = 0;
+static struct audit_entry s_last_audit;
 
 const struct llm_provider provider_claude = {0};
 
@@ -165,6 +169,15 @@ int claude_send_conversation_with_key(
                               "Current weather verified with source http://127.0.0.1:18081/weather/tokyo");
             return 0;
         }
+    }
+
+    if (s_mock_scenario == MOCK_SCENARIO_RUN_COMMAND_PROPOSAL) {
+        set_tool_use_response(out,
+                              "run_command",
+                              "toolu_run_1",
+                              "{\"command\":\"find specs -name '*.md'\"}",
+                              "README を確認するため候補 command を出します。");
+        return 0;
     }
 
     set_text_response(out, "Plain completion.");
@@ -329,10 +342,10 @@ void perm_set_default(struct permission_policy *policy)
 int perm_check_tool(const struct permission_policy *policy,
                     const char *tool_name, const char *input_json, int input_len)
 {
-    (void)policy;
     (void)tool_name;
     (void)input_json;
     (void)input_len;
+    s_last_perm_mode = policy ? policy->mode : -1;
     return 1;
 }
 
@@ -350,7 +363,10 @@ int audit_init(void)
 
 int audit_log(const struct audit_entry *entry)
 {
-    (void)entry;
+    if (entry) {
+        memcpy(&s_last_audit, entry, sizeof(s_last_audit));
+        s_audit_count++;
+    }
     return 0;
 }
 
@@ -374,6 +390,12 @@ static void reset_mocks(enum mock_scenario scenario)
     s_mock_scenario = scenario;
     s_send_count = 0;
     s_tool_dispatch_count = 0;
+    s_last_perm_mode = -1;
+    s_audit_count = 0;
+    memset(&s_last_audit, 0, sizeof(s_last_audit));
+    agent_set_permission_mode_override(0, PERM_STANDARD);
+    agent_set_shell_proposal_mode(0);
+    agent_set_active_session_id("");
 }
 
 static void test_fresh_lookup_retries_after_text_only_end_turn(void)
@@ -455,12 +477,79 @@ static void test_system_prompt_mentions_text_commands(void)
     TEST_PASS("system_prompt_mentions_text_commands");
 }
 
+static void test_permission_override_and_audit_session_id(void)
+{
+    struct agent_config config;
+    struct agent_state state;
+    struct agent_result result;
+
+    TEST_START("permission_override_and_audit_session_id");
+    reset_mocks(MOCK_SCENARIO_FRESH_LOOKUP_RETRY);
+
+    agent_config_init(&config);
+    config.api_key = "test-key";
+    config.provider = &provider_claude;
+    config.max_steps = 5;
+    agent_state_init(&state, &config);
+
+    agent_set_permission_mode_override(1, PERM_STRICT);
+    agent_set_active_session_id("sess-123");
+    ASSERT(agent_run_turn(&config, &state, "東京の天気しらべて", &result) == 0,
+           "agent_run_turn should succeed");
+    ASSERT(s_last_perm_mode == PERM_STRICT,
+           "permission override should reach perm_check_tool");
+    ASSERT(s_audit_count > 0, "audit should be called");
+    ASSERT(strcmp(s_last_audit.session_id, "sess-123") == 0,
+           "audit should keep active session id");
+    agent_set_permission_mode_override(0, PERM_STANDARD);
+    agent_set_active_session_id("");
+    TEST_PASS("permission_override_and_audit_session_id");
+}
+
+static void test_run_command_stops_as_proposal(void)
+{
+    struct agent_config config;
+    struct agent_state state;
+    struct agent_result result;
+
+    TEST_START("run_command_stops_as_proposal");
+    reset_mocks(MOCK_SCENARIO_RUN_COMMAND_PROPOSAL);
+
+    agent_config_init(&config);
+    config.api_key = "test-key";
+    config.provider = &provider_claude;
+    config.max_steps = 3;
+    agent_state_init(&state, &config);
+
+    agent_set_shell_proposal_mode(1);
+    agent_set_active_session_id("sess-proposal");
+    ASSERT(agent_run_turn(&config, &state, "README を探して", &result) == 0,
+           "agent_run_turn should succeed");
+    ASSERT(result.stop_reason == AGENT_STOP_APPROVAL_REQUIRED,
+           "stop reason should require approval");
+    ASSERT(strcmp(result.proposed_command, "find specs -name '*.md'") == 0,
+           "proposal command mismatch");
+    ASSERT(result.proposed_command_class == TERM_COMMAND_CLASS_READ_ONLY,
+           "proposal class mismatch");
+    ASSERT(s_tool_dispatch_count == 0,
+           "proposal mode should not execute tool");
+    ASSERT(strcmp(s_last_audit.action, "propose") == 0,
+           "audit action should be propose");
+    ASSERT(strcmp(s_last_audit.session_id, "sess-proposal") == 0,
+           "proposal audit should keep session id");
+    agent_set_shell_proposal_mode(0);
+    agent_set_active_session_id("");
+    TEST_PASS("run_command_stops_as_proposal");
+}
+
 int main(void)
 {
     printf("=== agent autonomy tests ===\n\n");
     test_fresh_lookup_retries_after_text_only_end_turn();
     test_plain_prompt_does_not_force_retry();
     test_system_prompt_mentions_text_commands();
+    test_permission_override_and_audit_session_id();
+    test_run_command_stops_as_proposal();
     printf("\n=== RESULT: %d passed, %d failed ===\n", passed, failed);
     return failed ? 1 : 0;
 }

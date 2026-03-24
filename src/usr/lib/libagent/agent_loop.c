@@ -49,6 +49,10 @@ static const char DEFAULT_SYSTEM_PROMPT[] =
 
 static agent_event_fn s_event_callback = (agent_event_fn)0;
 static void *s_event_userdata = (void *)0;
+static int s_permission_override_enabled = 0;
+static enum permission_mode s_permission_override_mode = PERM_STANDARD;
+static int s_shell_proposal_mode = 0;
+static char s_active_session_id[33];
 static const char FRESH_LOOKUP_PROMPT_PREFIX[] =
     "これは時間変動する可能性が高い依頼です。"
     "推測で終えず、少なくとも1回は tool を使って確認してください。"
@@ -66,6 +70,62 @@ PRIVATE void emit_agent_event(const struct agent_event *event)
     if (!event || !s_event_callback)
         return;
     s_event_callback(event, s_event_userdata);
+}
+
+void agent_set_permission_mode_override(int enabled,
+                                        enum permission_mode mode)
+{
+    s_permission_override_enabled = enabled != 0;
+    s_permission_override_mode = mode;
+}
+
+int agent_get_permission_mode_override(enum permission_mode *mode_out)
+{
+    if (s_permission_override_enabled == 0)
+        return -1;
+    if (mode_out)
+        *mode_out = s_permission_override_mode;
+    return 0;
+}
+
+void agent_set_active_session_id(const char *session_id)
+{
+    int len = 0;
+
+    if (!session_id)
+        session_id = "";
+    while (session_id[len] != '\0' && len < (int)sizeof(s_active_session_id) - 1) {
+        s_active_session_id[len] = session_id[len];
+        len++;
+    }
+    s_active_session_id[len] = '\0';
+}
+
+void agent_set_shell_proposal_mode(int enabled)
+{
+    s_shell_proposal_mode = enabled != 0;
+}
+
+static int agent_extract_run_command_text(const char *input_json,
+                                          int input_len,
+                                          char *out, int out_cap)
+{
+    struct json_parser jp;
+    struct json_token tokens[32];
+    int ntokens;
+    int tok;
+
+    if (!input_json || input_len <= 0 || !out || out_cap <= 0)
+        return -1;
+    out[0] = '\0';
+    json_init(&jp);
+    ntokens = json_parse(&jp, input_json, input_len, tokens, 32);
+    if (ntokens < 0)
+        return -1;
+    tok = json_find_key(input_json, tokens, ntokens, 0, "command");
+    if (tok < 0)
+        return -1;
+    return json_token_str(input_json, &tokens[tok], out, out_cap);
 }
 
 static int text_contains_any(const char *text, const char *const *needles)
@@ -687,6 +747,38 @@ static int agent_run_loop(
                     return 0;
                 }
 
+                if (s_shell_proposal_mode != 0 &&
+                    strcmp(resp.blocks[i].tool_use.name, "run_command") == 0) {
+                    struct audit_entry ae;
+
+                    memset(&ae, 0, sizeof(ae));
+                    extract_final_text(&resp, result);
+                    if (agent_extract_run_command_text(
+                            resp.blocks[i].tool_use.input_json,
+                            resp.blocks[i].tool_use.input_json_len,
+                            result->proposed_command,
+                            sizeof(result->proposed_command)) < 0) {
+                        snprintf(result->proposed_command,
+                                 sizeof(result->proposed_command),
+                                 "(invalid run_command input)");
+                    }
+                    result->proposed_command_class =
+                        term_command_block_classify(result->proposed_command);
+                    ae.step = step;
+                    strncpy(ae.session_id, s_active_session_id,
+                            sizeof(ae.session_id) - 1);
+                    strncpy(ae.tool_name, "run_command", sizeof(ae.tool_name) - 1);
+                    strncpy(ae.action, "propose", sizeof(ae.action) - 1);
+                    strncpy(ae.detail, result->proposed_command,
+                            sizeof(ae.detail) - 1);
+                    audit_log(&ae);
+                    fill_result(result, state,
+                                AGENT_STOP_APPROVAL_REQUIRED, step + 1);
+                    agent_print_summary(result);
+                    debug_printf("[AGENT] === Agent Run End ===\n");
+                    return 0;
+                }
+
                 debug_printf("[AGENT] executing tool: %s\n",
                             resp.blocks[i].tool_use.name);
 
@@ -700,15 +792,21 @@ static int agent_run_loop(
 
                 /* AT-97: Permission check */
                 {
-                    static struct permission_policy s_policy;
+                    static struct permission_policy s_policy_base;
                     static int s_policy_init = 0;
+                    struct permission_policy effective_policy;
+
                     if (!s_policy_init) {
-                        if (perm_load_policy(&s_policy,
+                        if (perm_load_policy(&s_policy_base,
                                              "/etc/agent/permissions.conf") < 0)
-                            perm_set_default(&s_policy);
+                            perm_set_default(&s_policy_base);
                         s_policy_init = 1;
                     }
-                    if (!perm_check_tool(&s_policy,
+                    memcpy(&effective_policy, &s_policy_base,
+                           sizeof(effective_policy));
+                    if (s_permission_override_enabled != 0)
+                        effective_policy.mode = s_permission_override_mode;
+                    if (!perm_check_tool(&effective_policy,
                                          resp.blocks[i].tool_use.name,
                                          resp.blocks[i].tool_use.input_json,
                                          resp.blocks[i].tool_use.input_json_len)) {
@@ -751,6 +849,19 @@ static int agent_run_loop(
                         event.tool_is_error =
                             tool_results[tool_count_exec].is_error;
                         emit_agent_event(&event);
+                        {
+                            struct audit_entry ae;
+
+                            memset(&ae, 0, sizeof(ae));
+                            ae.step = step;
+                            strncpy(ae.session_id, s_active_session_id,
+                                    sizeof(ae.session_id) - 1);
+                            strncpy(ae.tool_name, resp.blocks[i].tool_use.name, 63);
+                            strncpy(ae.action, "blocked", 15);
+                            strncpy(ae.detail, "permission denied",
+                                    sizeof(ae.detail) - 1);
+                            audit_log(&ae);
+                        }
                         tool_count_exec++;
                         if (tool_count_exec >= CLAUDE_MAX_BLOCKS) break;
                         continue;
@@ -797,6 +908,20 @@ static int agent_run_loop(
                         event.tool_is_error =
                             tool_results[tool_count_exec].is_error;
                         emit_agent_event(&event);
+                        {
+                            struct audit_entry ae;
+
+                            memset(&ae, 0, sizeof(ae));
+                            ae.step = step;
+                            strncpy(ae.session_id, s_active_session_id,
+                                    sizeof(ae.session_id) - 1);
+                            strncpy(ae.tool_name, resp.blocks[i].tool_use.name, 63);
+                            strncpy(ae.action, "blocked", 15);
+                            strncpy(ae.detail,
+                                    hresp.message[0] ? hresp.message : "blocked by hook",
+                                    sizeof(ae.detail) - 1);
+                            audit_log(&ae);
+                        }
                         tool_count_exec++;
                         if (tool_count_exec >= CLAUDE_MAX_BLOCKS) break;
                         continue;
@@ -831,6 +956,8 @@ static int agent_run_loop(
                     struct audit_entry ae;
                     memset(&ae, 0, sizeof(ae));
                     ae.step = step;
+                    strncpy(ae.session_id, s_active_session_id,
+                            sizeof(ae.session_id) - 1);
                     strncpy(ae.tool_name, resp.blocks[i].tool_use.name, 63);
                     if (tool_results[tool_count_exec - 1].is_error)
                         strncpy(ae.action, "error", 15);
@@ -947,6 +1074,7 @@ void agent_print_summary(const struct agent_result *result)
     case AGENT_STOP_SPECIFIC_TOOL: stop_str = "terminal_tool"; break;
     case AGENT_STOP_ERROR:         stop_str = "error"; break;
     case AGENT_STOP_TOKEN_LIMIT:   stop_str = "token_limit"; break;
+    case AGENT_STOP_APPROVAL_REQUIRED: stop_str = "approval_required"; break;
     default:                       stop_str = "unknown"; break;
     }
 

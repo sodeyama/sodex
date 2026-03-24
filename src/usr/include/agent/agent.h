@@ -9,6 +9,8 @@
 
 #include <agent/conversation.h>
 #include <agent/claude_adapter.h>
+#include <agent/permissions.h>
+#include <agent/term_command_block.h>
 
 #define AGENT_DEFAULT_MAX_STEPS     10
 #define AGENT_DEFAULT_MAX_TOKENS  4096
@@ -24,6 +26,7 @@ enum agent_stop_condition {
     AGENT_STOP_SPECIFIC_TOOL,     /* Terminal tool called */
     AGENT_STOP_ERROR,             /* Unrecoverable error */
     AGENT_STOP_TOKEN_LIMIT,       /* Token budget exceeded */
+    AGENT_STOP_APPROVAL_REQUIRED, /* shell command proposal を承認待ち */
 };
 
 enum agent_event_type {
@@ -78,6 +81,8 @@ struct agent_result {
     enum agent_stop_condition stop_reason;
     char final_text[AGENT_MAX_RESPONSE];
     int  final_text_len;
+    char proposed_command[TERM_COMMAND_BLOCK_TEXT_MAX];
+    enum term_command_class proposed_command_class;
     int  steps_executed;
     int  total_input_tokens;
     int  total_output_tokens;
@@ -119,6 +124,15 @@ int agent_run(
 int agent_resume_latest_for_cwd(const char *cwd,
                                 char *session_id_out,
                                 int session_id_cap);
+
+/* 実行中 turn の permission mode を一時 override する */
+void agent_set_permission_mode_override(int enabled,
+                                        enum permission_mode mode);
+int agent_get_permission_mode_override(enum permission_mode *mode_out);
+void agent_set_shell_proposal_mode(int enabled);
+
+/* audit に紐づける session id を設定する */
+void agent_set_active_session_id(const char *session_id);
 
 /* CLI へ進捗イベントを通知する */
 void agent_set_event_callback(agent_event_fn callback, void *userdata);

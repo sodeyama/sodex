@@ -87,9 +87,11 @@ int shell_execute_buffer(struct shell_state *state, const char *name,
 
   if (state == 0 || text == 0)
     return 1;
+  shell_state_clear_last_error(state);
 
   program = (struct shell_program *)malloc(sizeof(*program));
   if (program == 0) {
+    shell_state_set_last_error(state, "sh: out of memory\n");
     shell_write_error_text("sh: out of memory\n");
     return 1;
   }
@@ -107,6 +109,7 @@ int shell_execute_buffer(struct shell_state *state, const char *name,
     state->param_count = saved_param_count;
     memcpy(state->param_storage, saved_params, sizeof(saved_params));
     state->last_status = 2;
+    shell_state_set_last_error(state, "sh: parse error\n");
     shell_write_error_text("sh: parse error\n");
     free(program);
     return 2;
@@ -132,9 +135,11 @@ int shell_execute_file(struct shell_state *state, const char *path,
 
   if (state == 0 || path == 0)
     return 1;
+  shell_state_clear_last_error(state);
 
   fd = open(path, O_RDONLY, 0);
   if (fd < 0) {
+    shell_state_set_last_error(state, "sh: cannot open script\n");
     shell_write_error_text("sh: cannot open script\n");
     return 1;
   }
@@ -142,6 +147,7 @@ int shell_execute_file(struct shell_state *state, const char *path,
   text = shell_read_fd_all(fd, &len);
   close(fd);
   if (text == 0) {
+    shell_state_set_last_error(state, "sh: out of memory\n");
     shell_write_error_text("sh: out of memory\n");
     return 1;
   }

@@ -9,6 +9,9 @@
 - 2026-03-24: M0 の MVP として boot profile syscall、`@terminal`、`init` 解決、`agent-term` fallback、`@...` による明示 agent route、host/QEMU smoke を実装
 - 2026-03-24: `eshell` に `/mode auto|shell|agent`、mode badge、shell route probe、agent mode の plain text route を追加
 - 2026-03-24: `agent-term` 欠落時に `init` が `/usr/bin/term` へ退避する fallback smoke を追加
+- 2026-03-24: M1 として command-not-found recovery、typo/path suggestion、permission/upstream hint、destructive auto-apply deny、host/QEMU 回帰を実装
+- 2026-03-24: M2 の MVP として session surface、`/status` `/sessions` `/resume` `/clear` `/compact` `/permissions` `/drawer`、recent command bridge、permission override、audit/session 表示を実装
+- 2026-03-24: M3 の MVP として `run_command` proposal stop、command block、`/approve once|session`、`/deny`、approved 実行と compact/recent 反映を実装
 
 ## M0: terminal profile 切替と unified input router
 
@@ -27,37 +30,50 @@
 注記:
 現時点の QEMU smoke は `agent` profile での login、`agent-term` 起動、明示 agent route (`@memory add ...`) に加え、
 `/mode agent` 後の plain text route (`memory add ...`)、
+`/mode shell` での typo recovery (`ecoh` -> `echo`) と path recovery (`cd /hme/user` -> `cd /home/user`)、
 および `/usr/bin/agent-term` 欠落時の `init -> /usr/bin/term` fallback まで検証する。
 
 ## M1: typo 補正と safe correction
 
 | 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
 |---|---|---|---|---|---|
-| [ ] | ASF-10 | command-not-found 時の recovery hook を実装する | 02 | ASF-07 | shell 失敗後に suggestion path へ入れる |
-| [ ] | ASF-11 | executable / path / history を使う typo suggestion engine を実装する | 02 | ASF-10, `shell-and-init` | `sl` -> `ls` などの代表 typo を候補提示できる |
-| [ ] | ASF-12 | console error パターンに基づく recovery hint を追加する | 02 | ASF-10 | permission denied, missing upstream などで修正候補が出る |
-| [ ] | ASF-13 | destructive command の auto-apply 禁止ポリシーを入れる | 02 | ASF-11, ASF-12 | `rm`, `mv`, `git push` 等は suggestion 止まりになる |
-| [ ] | ASF-14 | typo / recovery の host test と QEMU smoke を追加する | 02 | ASF-11, ASF-12, ASF-13 | candidate ranking と accept path が guest 上で固定される |
+| [x] | ASF-10 | command-not-found 時の recovery hook を実装する | 02 | ASF-07 | shell 失敗後に suggestion path へ入れる |
+| [x] | ASF-11 | executable / path / history を使う typo suggestion engine を実装する | 02 | ASF-10, `shell-and-init` | `sl` -> `ls` などの代表 typo を候補提示できる |
+| [x] | ASF-12 | console error パターンに基づく recovery hint を追加する | 02 | ASF-10 | permission denied, missing upstream などで修正候補が出る |
+| [x] | ASF-13 | destructive command の auto-apply 禁止ポリシーを入れる | 02 | ASF-11, ASF-12 | `rm`, `mv`, `git push` 等は suggestion 止まりになる |
+| [x] | ASF-14 | typo / recovery の host test と QEMU smoke を追加する | 02 | ASF-11, ASF-12, ASF-13 | candidate ranking と accept path が guest 上で固定される |
 
 ## M2: agent session surface と policy control
 
 | 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
 |---|---|---|---|---|---|
-| [ ] | ASF-15 | `agent-term` に agent drawer を追加する | 03 | ASF-08, `rich-terminal` | transcript と status を terminal 内で表示できる |
-| [ ] | ASF-16 | session id / cwd / context usage / permission mode を drawer に出す | 03 | ASF-15, `agent-transport` | 実行中 session の状態を常時確認できる |
-| [ ] | ASF-17 | `/clear`, `/compact`, `/permissions`, `/sessions`, `/resume` を drawer 経由で扱えるようにする | 03 | ASF-15, `agent-transport` | `agent` REPL 相当操作を `agent-term` 上で継続できる |
-| [ ] | ASF-18 | recent command block を agent 文脈へ橋渡しする | 03 | ASF-15, ASF-16 | 直前の shell 実行結果を会話へ再利用できる |
+| [x] | ASF-15 | `agent-term` に agent drawer を追加する | 03 | ASF-08, `rich-terminal` | transcript と status を terminal 内で表示できる |
+| [x] | ASF-16 | session id / cwd / context usage / permission mode を drawer に出す | 03 | ASF-15, `agent-transport` | 実行中 session の状態を常時確認できる |
+| [x] | ASF-17 | `/clear`, `/compact`, `/permissions`, `/sessions`, `/resume` を drawer 経由で扱えるようにする | 03 | ASF-15, `agent-transport` | `agent` REPL 相当操作を `agent-term` 上で継続できる |
+| [x] | ASF-18 | recent command block を agent 文脈へ橋渡しする | 03 | ASF-15, ASF-16 | 直前の shell 実行結果を会話へ再利用できる |
 | [ ] | ASF-19 | approval / deny / session-allow と audit 表示を追加する | 03 | ASF-16, `agent-transport` | tool / shell action の許可状態と監査結果が見える |
+
+注記:
+現時点の M2 は `term` overlay ではなく、`eshell --agent-fusion` が描く text drawer MVP で実装している。
+`/permissions`、`/clear`、`/resume`、recent command bridge は host test で回帰し、
+QEMU smoke は boot/profile、明示 agent route、`/status`、typo/path recovery を確認する。
 
 ## M3: agent mediated shell actions
 
 | 状態 | ID | タスク | Plan | 主な依存 | 完了条件 |
 |---|---|---|---|---|---|
-| [ ] | ASF-20 | agent が shell command proposal を返せる surface を作る | 04 | ASF-15, ASF-19 | command 提案が単なる text でなく実行候補 block として表示される |
-| [ ] | ASF-21 | `1回許可` / `session許可` / `deny` の approval flow を実装する | 04 | ASF-20, ASF-19 | command 実行前に policy を選べる |
-| [ ] | ASF-22 | approved command を shell 経由で実行し、bounded output を session に戻す | 04 | ASF-20, ASF-21, `agent-transport` | run_command 出力が terminal と agent session の両方に反映される |
+| [x] | ASF-20 | agent が shell command proposal を返せる surface を作る | 04 | ASF-15, ASF-19 | command 提案が単なる text でなく実行候補 block として表示される |
+| [x] | ASF-21 | `1回許可` / `session許可` / `deny` の approval flow を実装する | 04 | ASF-20, ASF-19 | command 実行前に policy を選べる |
+| [x] | ASF-22 | approved command を shell 経由で実行し、bounded output を session に戻す | 04 | ASF-20, ASF-21, `agent-transport` | run_command 出力が terminal と agent session の両方に反映される |
 | [ ] | ASF-23 | long-running shell command の attach / detach を追加する | 04 | ASF-22 | tailing / build / test のような長時間 command を扱える |
 | [ ] | ASF-24 | shell action の host/QEMU 回帰を追加する | 04 | ASF-22, ASF-23 | approve path と deny path が smoke で固定される |
+
+注記:
+現時点の M3 は `run_command` を backend で即実行せず、
+`AGENT_STOP_APPROVAL_REQUIRED` と audit `propose` に変換して
+`eshell --agent-fusion` の text drawer へ proposal block を出す。
+承認済み command 実行は `tool_run_command` の bounded capture を再利用し、
+recent block と session compact summary に反映する。
 
 ## M4: interactive PTY observe / attach
 

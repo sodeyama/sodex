@@ -19,6 +19,7 @@
 #include <agent/claude_client.h>
 #include <agent/memory_store.h>
 #include <agent/path_utils.h>
+#include <agent/term_session_surface.h>
 #include <agent/tool_handlers.h>
 #include <agent/session.h>
 
@@ -406,6 +407,7 @@ static void print_usage(void)
     printf("\nOptions:\n");
     printf("  -s <N>   Max steps\n");
     printf("  -p       単発モード\n");
+    printf("  --proposal-shell  run_command を承認待ち提案にする\n");
 }
 
 static int safe_copy(char *dst, int cap, const char *src)
@@ -546,6 +548,8 @@ static int read_line_stdin(char *buf, int cap)
 
 static void print_result(const struct agent_result *result)
 {
+    int printed_text = 0;
+
     if (!result)
         return;
     clear_loading_line();
@@ -556,7 +560,7 @@ static void print_result(const struct agent_result *result)
         write_rendered_text(result->final_text, result->final_text_len);
         if (s_cli.layout.current_col != 0)
             render_newline();
-        return;
+        printed_text = 1;
     }
 
     switch (result->stop_reason) {
@@ -568,6 +572,15 @@ static void print_result(const struct agent_result *result)
         break;
     case AGENT_STOP_ERROR:
         printf("[stopped: error]\n");
+        break;
+    case AGENT_STOP_APPROVAL_REQUIRED:
+        if (!printed_text)
+            printf("[approval required]\n");
+        if (result->proposed_command[0] != '\0') {
+            printf("[proposal:%s] %s\n",
+                   term_command_block_class_name(result->proposed_command_class),
+                   result->proposed_command);
+        }
         break;
     default:
         break;
@@ -589,6 +602,15 @@ static void print_result_status_only(const struct agent_result *result)
         break;
     case AGENT_STOP_ERROR:
         printf("[stopped: error]\n");
+        break;
+    case AGENT_STOP_APPROVAL_REQUIRED:
+        if (result->proposed_command[0] != '\0') {
+            printf("[proposal:%s] %s\n",
+                   term_command_block_class_name(result->proposed_command_class),
+                   result->proposed_command);
+        } else {
+            printf("[approval required]\n");
+        }
         break;
     default:
         break;
@@ -914,11 +936,13 @@ static int run_single_turn(struct agent_state *state,
     start_turn = state->conv.turn_count;
     reset_render_state();
     s_streamed_chars = 0;
+    agent_set_active_session_id(session->id);
     agent_set_event_callback(repl_agent_event, (void *)0);
     claude_client_set_text_stream_callback(repl_stream_text, (void *)0);
     ret = agent_run_turn(&s_config, state, prompt, &s_result);
     claude_client_set_text_stream_callback((claude_stream_text_fn)0, (void *)0);
     agent_set_event_callback((agent_event_fn)0, (void *)0);
+    agent_set_active_session_id("");
     clear_loading_line();
     if (ret == 0)
         persist_new_turns(session->id, state, start_turn, &s_result);
@@ -1009,7 +1033,22 @@ static int handle_slash_command(char *line,
 
     if (strcmp(line, "/permissions") == 0 ||
         strncmp(line, "/permissions ", 13) == 0) {
-        printf("permissions: standard\n");
+        enum permission_mode mode = PERM_STANDARD;
+
+        if (strcmp(line, "/permissions") == 0) {
+            if (agent_get_permission_mode_override(&mode) < 0)
+                mode = PERM_STANDARD;
+            printf("permissions: %s\n",
+                   term_session_surface_permission_name(mode));
+            return 0;
+        }
+        if (term_session_surface_permission_parse(line + 13, &mode) < 0) {
+            printf("permissions: usage /permissions strict|standard|permissive\n");
+            return 0;
+        }
+        agent_set_permission_mode_override(1, mode);
+        printf("permissions: %s\n",
+               term_session_surface_permission_name(mode));
         return 0;
     }
 
@@ -1099,11 +1138,13 @@ static int run_oneshot(const char *prompt)
 
     reset_render_state();
     s_streamed_chars = 0;
+    agent_set_active_session_id("");
     agent_set_event_callback(repl_agent_event, (void *)0);
     claude_client_set_text_stream_callback(repl_stream_text, (void *)0);
     ret = agent_run(&s_config, prompt, &s_result);
     claude_client_set_text_stream_callback((claude_stream_text_fn)0, (void *)0);
     agent_set_event_callback((agent_event_fn)0, (void *)0);
+    agent_set_active_session_id("");
     clear_loading_line();
     if (s_streamed_chars > 0) {
         if (s_cli.layout.current_col != 0)
@@ -1118,10 +1159,13 @@ static int run_oneshot(const char *prompt)
 int main(int argc, char *argv[])
 {
     enum agent_cli_mode mode = AGENT_MODE_REPL;
+    enum permission_mode permission_mode = PERM_STANDARD;
     char prompt[PROMPT_MAX];
     char session_id[SESSION_ID_LEN + 1];
     char delete_id[SESSION_ID_LEN + 1];
     int custom_steps = 0;
+    int permission_override = 0;
+    int proposal_mode = 0;
     int i;
     int prompt_start = -1;
 
@@ -1135,6 +1179,13 @@ int main(int argc, char *argv[])
             return 0;
         } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
             custom_steps = atoi(argv[++i]);
+        } else if (strncmp(argv[i], "--perm-mode=", 12) == 0) {
+            if (term_session_surface_permission_parse(argv[i] + 12,
+                                                      &permission_mode) == 0) {
+                permission_override = 1;
+            }
+        } else if (strcmp(argv[i], "--proposal-shell") == 0) {
+            proposal_mode = 1;
         } else if (strcmp(argv[i], "-p") == 0) {
             mode = AGENT_MODE_ONESHOT;
             prompt_start = i + 1;
@@ -1214,6 +1265,8 @@ int main(int argc, char *argv[])
 
     if (prepare_agent_config(custom_steps) < 0)
         return 1;
+    agent_set_permission_mode_override(permission_override, permission_mode);
+    agent_set_shell_proposal_mode(proposal_mode);
 
     if (mode == AGENT_MODE_ONESHOT || mode == AGENT_MODE_RUN) {
         if (prompt[0] == '\0') {
@@ -1232,6 +1285,8 @@ int main(int argc, char *argv[])
             printf("continue: failed %s\n", session_id);
             return 1;
         }
+        if (prompt[0] != '\0')
+            return run_single_turn(&s_state, &s_session, prompt) == 0 ? 0 : 1;
         return repl_loop(&s_state, &s_session, 0, custom_steps) == 0 ? 0 : 1;
     }
 
@@ -1245,6 +1300,8 @@ int main(int argc, char *argv[])
             printf("resume: failed %s\n", session_id);
             return 1;
         }
+        if (prompt[0] != '\0')
+            return run_single_turn(&s_state, &s_session, prompt) == 0 ? 0 : 1;
         return repl_loop(&s_state, &s_session, 0, custom_steps) == 0 ? 0 : 1;
     }
 

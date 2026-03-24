@@ -83,6 +83,16 @@ static int shell_execute_node(struct shell_state *state,
                               const struct shell_program *program,
                               int node_index, int async);
 
+static struct shell_state *g_shell_error_state = 0;
+
+static struct shell_state *shell_set_error_state(struct shell_state *state)
+{
+  struct shell_state *previous = g_shell_error_state;
+
+  g_shell_error_state = state;
+  return previous;
+}
+
 static void shell_copy_text(char *dst, int cap, const char *src)
 {
   int i;
@@ -1248,6 +1258,8 @@ static int shell_write_text(const char *text)
 
 static int shell_write_error_text(const char *text)
 {
+  if (g_shell_error_state != 0)
+    shell_state_set_last_error(g_shell_error_state, text);
   return shell_write_fd_text(STDERR_FILENO, text);
 }
 
@@ -2434,9 +2446,15 @@ static int shell_execute_list(struct shell_state *state,
 int shell_execute_program(struct shell_state *state,
                           const struct shell_program *program)
 {
+  struct shell_state *previous_state;
+
   if (state == 0 || program == 0)
     return 1;
-  return shell_execute_list(state, program, program->root_list_index);
+  shell_state_clear_last_error(state);
+  previous_state = shell_set_error_state(state);
+  state->last_status = shell_execute_list(state, program, program->root_list_index);
+  shell_set_error_state(previous_state);
+  return state->last_status;
 }
 
 int shell_execute_string(struct shell_state *state, const char *text)

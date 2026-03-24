@@ -24,15 +24,29 @@ editor-native integration を段階導入する。
 - `@...` を明示 agent route として `agent` CLI へ橋渡しする MVP
 - `/mode auto|shell|agent` と mode badge
 - shell route probe による `shell builtin` / `shell path` / `unknown command` の reason 表示
-- host unit test と `make test-qemu-agent-fusion` による route/fallback を含む QEMU smoke
+- command-not-found recovery、typo/path suggestion、permission/upstream hint
+- destructive command の auto-apply deny
+- `term_session_surface` による session surface と text drawer MVP
+- `/status` `/sessions` `/resume` `/clear` `/compact` `/permissions` `/drawer`
+- recent shell command block の prompt bridge
+- `agent --perm-mode=<mode>` と `agent --resume <session-id> <prompt>` の単発実行
+- `run_command` を approval-required proposal として止める backend hook
+- command proposal block と `/approve once|session` `/deny`
+- approved command の bounded 実行結果を recent block / compact summary へ反映
+- host unit test と `make test-qemu-agent-fusion` による route/fallback/recovery を含む QEMU smoke
 
 未実装:
 
-- mode badge / route reason UI
-- typo correction と command-not-found recovery
-- agent drawer / approval UI / command proposal block
+- term overlay としての drawer 本体
+- button-like approval UI と proposal edit 導線
+- long-running command attach / detach
 - PTY observe / attach
 - `vi` agent-native command
+
+注記:
+現時点の session surface は `term` の下部 overlay ではなく、
+`eshell --agent-fusion` が prompt 近傍へ描く text drawer MVP として実装している。
+approval / deny / session-allow は未着手で、次の M3 で扱う。
 
 ## この spec の位置づけ
 

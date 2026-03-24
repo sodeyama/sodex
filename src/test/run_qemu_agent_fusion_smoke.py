@@ -56,13 +56,14 @@ class QemuMonitor:
                 break
         return b"".join(chunks).decode(errors="replace")
 
-    def send_key(self, key: str, delay: float = 0.03) -> None:
+    def send_key(self, key: str, delay: float = 0.06) -> None:
         self.command(f"sendkey {key}", pause=0.05)
         time.sleep(delay)
 
     def send_text(self, text: str) -> None:
         for ch in text:
             self.send_key(qemu_key_for_char(ch))
+        time.sleep(0.2)
 
     def close(self) -> None:
         self.sock.close()
@@ -73,6 +74,8 @@ def qemu_key_for_char(ch: str) -> str:
         " ": "spc",
         "\n": "ret",
         "/": "slash",
+        ".": "dot",
+        ">": "shift-dot",
         "-": "minus",
         "_": "shift-minus",
         ":": "shift-semicolon",
@@ -136,6 +139,12 @@ def wait_for_serial_count(serial_log: pathlib.Path, text: str,
                 return serial_text
         time.sleep(0.2)
     raise TimeoutError(f"serial text count not reached: {text} >= {minimum}")
+
+
+def serial_count(serial_log: pathlib.Path, text: str) -> int:
+    if not serial_log.exists():
+        return 0
+    return serial_log.read_text(errors="replace").count(text)
 
 
 def inode_bytes(image: bytes, ino: int) -> bytes:
@@ -276,13 +285,28 @@ def main() -> int:
             monitor = QemuMonitor(monitor_sock)
             wait_for_serial_text(serial_log, "AUDIT term_agent_fusion_enabled", timeout)
             wait_for_serial_text(serial_log, "AUDIT eshell_agent_fusion_enabled", timeout)
+            time.sleep(1.0)
 
+            route_done_count = serial_count(serial_log, "AUDIT eshell_agent_route_done")
             monitor.send_text("@memory add fusion-note\n")
-            wait_for_serial_count(serial_log, "AUDIT eshell_agent_route_done", 1, timeout)
-            monitor.send_text("/mode agent\n")
-            wait_for_serial_text(serial_log, "AUDIT eshell_agent_mode=agent", timeout)
-            monitor.send_text("memory add mode-note\n")
-            wait_for_serial_count(serial_log, "AUDIT eshell_agent_route_done", 2, timeout)
+            wait_for_serial_count(serial_log, "AUDIT eshell_agent_route_done",
+                                  route_done_count + 1, timeout)
+            time.sleep(1.0)
+            monitor.send_text("/status\n")
+            wait_for_serial_count(serial_log, "AUDIT eshell_fusion_status", 1, timeout)
+            time.sleep(1.0)
+            auto_apply_count = serial_count(serial_log,
+                                            "AUDIT eshell_recovery_auto_apply=")
+            monitor.send_text("ecoh fused > /home/user/typo_echo.txt\n")
+            wait_for_serial_count(serial_log, "AUDIT eshell_recovery_auto_apply=",
+                                  auto_apply_count + 1, timeout)
+            auto_apply_count = serial_count(serial_log,
+                                            "AUDIT eshell_recovery_auto_apply=")
+            monitor.send_text("cd /hme/user\n")
+            wait_for_serial_count(serial_log, "AUDIT eshell_recovery_auto_apply=",
+                                  auto_apply_count + 1, timeout)
+            monitor.send_text("echo recovered > /home/user/recovery_path.txt\n")
+            time.sleep(0.5)
 
             print("=== AGENT FUSION QEMU SMOKE DONE ===")
             print(f"Artifacts: {serial_log}, {qemu_log}, {qemu_stderr_log}")
@@ -290,11 +314,19 @@ def main() -> int:
             qemu.wait(timeout=5)
             image = fsboot.read_bytes()
             workspace_path = f"/var/agent/memory/{agent_hash_path('/home/user'):08x}.md"
+            session_index = read_file_by_path(image, "/var/agent/sessions/index.txt")
             workspace_text = read_file_by_path(image, workspace_path)
+            typo_echo_text = read_file_by_path(image, "/home/user/typo_echo.txt")
+            recovery_path_text = read_file_by_path(image, "/home/user/recovery_path.txt")
+            session_ids = [line for line in session_index.splitlines() if line]
+            if len(session_ids) < 1:
+                raise AssertionError(f"session index count mismatch: {session_ids!r}")
             if "fusion-note" not in workspace_text:
                 raise AssertionError("workspace memory file does not contain fusion-note")
-            if "mode-note" not in workspace_text:
-                raise AssertionError("workspace memory file does not contain mode-note")
+            if typo_echo_text != "fused\n":
+                raise AssertionError(f"typo_echo.txt mismatch: {typo_echo_text!r}")
+            if recovery_path_text != "recovered\n":
+                raise AssertionError(f"recovery_path.txt mismatch: {recovery_path_text!r}")
             return 0
         except Exception as exc:
             print(f"agent fusion smoke failed: {exc}", file=sys.stderr)

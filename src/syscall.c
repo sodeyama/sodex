@@ -35,6 +35,7 @@
 #include <admin_server.h>
 #include <network_config.h>
 #include <ssh_crypto.h>
+#include <boot_profile.h>
 
 PRIVATE int sys_open(const char* pathname, int flags, mode_t mode);
 PRIVATE int sys_creat(const char* pathname, mode_t mode);
@@ -65,6 +66,7 @@ PRIVATE int sys_get_winsize(int fd, struct winsize *winsize);
 PRIVATE int sys_set_winsize(int fd, const struct winsize *winsize);
 PRIVATE int sys_get_fb_info(struct fb_info *info);
 PRIVATE void sys_fb_flush(void);
+PRIVATE int sys_get_boot_profile(struct boot_profile_info *info);
 PRIVATE int sys_debug_write(const char *buf, size_t len);
 PRIVATE int sys_tcgetattr(int fd, struct termios *termios);
 PRIVATE int sys_tcsetattr(int fd, int optional_actions,
@@ -90,6 +92,10 @@ PRIVATE int sys_ssh_signer_roundtrip(int port, const void *request,
 #define SYS_SSH_CURVE25519_RESPONSE_BYTES \
   (SYS_SSH_SIGNER_MAGIC_BYTES + SSH_CRYPTO_CURVE25519_BYTES + \
    SSH_CRYPTO_CURVE25519_BYTES)
+
+#ifndef SODEX_BOOT_TERMINAL_PROFILE
+#define SODEX_BOOT_TERMINAL_PROFILE BOOT_PROFILE_TERMINAL_CLASSIC
+#endif
 
 PRIVATE int sys_ssh_signer_local_roundtrip(const void *request, int request_len,
                                            void *response, int response_len)
@@ -300,6 +306,10 @@ PUBLIC void i80h_syscall(int is_usermode, u_int32_t iret_eip,
 
   case SYS_CALL_FB_FLUSH:
     sys_fb_flush();
+    break;
+
+  case SYS_CALL_GET_BOOT_PROFILE:
+    ret = sys_get_boot_profile((struct boot_profile_info *)p1);
     break;
 
   case SYS_CALL_DEBUG_WRITE:
@@ -688,6 +698,18 @@ PRIVATE int sys_get_fb_info(struct fb_info *info)
 PRIVATE void sys_fb_flush(void)
 {
   fb_flush();
+}
+
+PRIVATE int sys_get_boot_profile(struct boot_profile_info *info)
+{
+  if (info == NULL)
+    return -1;
+
+  info->version = BOOT_PROFILE_VERSION;
+  info->terminal_profile = SODEX_BOOT_TERMINAL_PROFILE;
+  info->flags = 0;
+  info->reserved = 0;
+  return 0;
 }
 
 PRIVATE int sys_tcgetattr(int fd, struct termios *termios)

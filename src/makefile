@@ -84,7 +84,10 @@ SODEX_SSH_PASSWORD ?= root-secret
 SODEX_SSH_SIGNER_PORT ?= 0
 SODEX_SSH_HOSTKEY_ED25519_SEED ?= 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
 SODEX_SSH_RNG_SEED ?= ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100
+SODEX_TERM_PROFILE ?= classic
 MEMORY_SCALE_CFLAGS =
+BOOT_PROFILE_CFLAGS =
+BOOT_PROFILE_STATE = $(BUILDDIR)/boot_profile_state.txt
 ROOTFS_OVERLAY_ARG = $(if $(strip $(SODEX_ROOTFS_OVERLAY)),$(SODEX_ROOTFS_OVERLAY))
 BOOT_KERNEL_MAX_SECTS = 1240
 
@@ -92,18 +95,37 @@ ifneq ($(strip $(SODEX_RAM_CAP_MB)),0)
 MEMORY_SCALE_CFLAGS += -DSODEX_RAM_CAP_MB=$(SODEX_RAM_CAP_MB)
 endif
 
+ifeq ($(strip $(SODEX_TERM_PROFILE)),agent)
+BOOT_PROFILE_CFLAGS += -DSODEX_BOOT_TERMINAL_PROFILE=1
+else ifeq ($(strip $(SODEX_TERM_PROFILE)),classic)
+BOOT_PROFILE_CFLAGS += -DSODEX_BOOT_TERMINAL_PROFILE=0
+else
+$(error unsupported SODEX_TERM_PROFILE=$(SODEX_TERM_PROFILE))
+endif
+
 # === Build directory creation (done upfront via shell) ===
 $(shell mkdir -p $(OBJDIR) $(BIN) $(LIST) $(LOGDIR) $(BUILDDIR)/tools $(OBJDIR)/test $(INITDIR)/bin)
 
 # === Main targets ===
 
-.PHONY: all usr-build regen-font8x16 regen-font16x16 regen-fonts
+.PHONY: all usr-build regen-font8x16 regen-font16x16 regen-fonts boot-profile-sync
 .PHONY: kernel-subdirs drivers-build lib-build net-build display-build tty-build
-all : ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} kernel-subdirs ${KERNEL} ${ACIENT} ${MIDDLE} tools
+all : boot-profile-sync ${FONT_HEADERS} usr-build ${IME_DICT_BLOB} kernel-subdirs ${KERNEL} ${ACIENT} ${MIDDLE} tools
 	@if [ ! -e ${FSBOOT} ]; then touch ${FSBOOT}; fi
 	$(MAKE) ptest
 	${KMKFS} ${ACIENT} ${MIDDLE} ${KERNEL} ${FSBOOT} ${INIT} ${INIT2} ${ROOTFS_OVERLAY_ARG}
 	@printf 'rootfs_overlay=%s\n' "${ROOTFS_OVERLAY_ARG}" > ${FSBOOT_PROFILE}
+	@printf 'term_profile=%s\n' "${SODEX_TERM_PROFILE}" >> ${FSBOOT_PROFILE}
+
+boot-profile-sync:
+	@prev=""; \
+	if [ -f ${BOOT_PROFILE_STATE} ]; then \
+		prev=`cat ${BOOT_PROFILE_STATE}`; \
+	fi; \
+	if [ "$$prev" != "${SODEX_TERM_PROFILE}" ]; then \
+		rm -f ${OBJDIR}/syscall.o ${KERNEL} ${ACIENT}; \
+	fi; \
+	printf '%s\n' "${SODEX_TERM_PROFILE}" > ${BOOT_PROFILE_STATE}
 
 regen-font8x16: ${FONT8X16_HEADER}
 
@@ -199,7 +221,7 @@ ${BUILDDIR}/boot.ld: boot.ld.S
 # === Pattern rules (C and assembly -> build/obj/) ===
 
 $(OBJDIR)/%.o: %.c ${FONT_HEADERS}
-	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} ${EXTRA_CFLAGS} ${MEMORY_SCALE_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
+	$(CC) -D ${DEVICE}=DEFINED -c ${CFLAGS} ${EXTRA_CFLAGS} ${MEMORY_SCALE_CFLAGS} ${BOOT_PROFILE_CFLAGS} -I ${INCLUDE} -I . -o $@ $<
 
 $(OBJDIR)/%.o: %.S
 	${AS} ${ASFLAGS} -I $(INCLUDE) -I . -o $@ $<
@@ -232,7 +254,7 @@ ${PTEST2} : ${INITDIR}/ptest2.S
 
 # === QEMU integration tests ===
 
-.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-term-scrollback test-qemu-fs test-qemu-shell-io test-qemu-shell-programmable test-qemu-shell-long-list test-qemu-shell-usability test-qemu-cat-multifile test-qemu-shell-redirection-pager test-qemu-shell-completion test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-qemu-unix-text-tools test-qemu-sxi test-qemu-sxi-agent test-agent-bringup test-claude-smoke test-agent-full ktest-build
+.PHONY: test-qemu test-qemu-memory test-qemu-user-memory test-qemu-term test-qemu-term-scrollback test-qemu-fs test-qemu-shell-io test-qemu-shell-programmable test-qemu-shell-long-list test-qemu-shell-usability test-qemu-cat-multifile test-qemu-shell-redirection-pager test-qemu-shell-completion test-qemu-vi test-qemu-ime test-qemu-ext3-large test-qemu-server test-qemu-debug-shell test-qemu-ssh test-qemu-init-rc test-qemu-init-failure test-qemu-service test-qemu-service-contract test-qemu-jobs test-qemu-curl-https test-qemu-unix-text-tools test-qemu-sxi test-qemu-sxi-agent test-qemu-agent-fusion test-agent-bringup test-claude-smoke test-agent-full ktest-build
 TERM_ROOTFS_OVERLAY = $(LOGDIR)/term-rootfs-overlay
 TERM_FSBOOT = $(LOGDIR)/term-fsboot.bin
 TERM_FSBOOT_PROFILE = $(LOGDIR)/term-fsboot.profile
@@ -259,6 +281,15 @@ test-qemu-term:
 	@$(MAKE) SODEX_ROOTFS_OVERLAY=$(TERM_ROOTFS_OVERLAY) FSBOOT=$(TERM_FSBOOT) FSBOOT_PROFILE=$(TERM_FSBOOT_PROFILE) all
 	@echo "=== Running rich terminal smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_terminal_smoke.py $(TERM_FSBOOT) $(LOGDIR)
+
+test-qemu-agent-fusion:
+	@python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(TERM_ROOTFS_OVERLAY)
+	@printf 'echo AUDIT rcS_begin\n' > $(TERM_ROOTFS_OVERLAY)/etc/init.d/rcS
+	@printf 'echo AUDIT rcS_done\n' >> $(TERM_ROOTFS_OVERLAY)/etc/init.d/rcS
+	@printf 'exit 0\n' >> $(TERM_ROOTFS_OVERLAY)/etc/init.d/rcS
+	@$(MAKE) SODEX_TERM_PROFILE=agent SODEX_ROOTFS_OVERLAY=$(TERM_ROOTFS_OVERLAY) FSBOOT=$(TERM_FSBOOT) FSBOOT_PROFILE=$(TERM_FSBOOT_PROFILE) all
+	@echo "=== Running agent fusion smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_agent_fusion_smoke.py $(TERM_FSBOOT) $(LOGDIR)
 
 test-qemu-term-scrollback:
 	@python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(TERM_SCROLLBACK_ROOTFS_OVERLAY)

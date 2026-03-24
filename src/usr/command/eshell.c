@@ -8,6 +8,7 @@
 #include <termios.h>
 #include <winsize.h>
 #include <shell.h>
+#include <agent_fusion.h>
 
 static void set_prompt(char *prompt);
 static char *get_path_recursively(ext3_dentry *dentry);
@@ -20,6 +21,7 @@ static int shell_append_input(char **buf, int *buf_size, int *len,
                               const char *line, int line_len, int add_newline);
 static int shell_replace_input(char **buf, int *buf_size, int *len,
                                const char *text);
+static int shell_run_agent_fusion(const char *text);
 static int shell_read_input_line(char **buf, int *buf_size,
                                  int *data_pos, int *data_len,
                                  int tty_echoes_newline,
@@ -43,11 +45,10 @@ int main(int argc, char **argv)
   int input_pos;
   int last_status = 0;
   int tty_echoes_newline;
-
-  (void)argc;
-  (void)argv;
+  int fusion_enabled;
 
   shell_state_init(state, 1);
+  fusion_enabled = agent_fusion_enabled(argc, argv);
   memset(prompt, 0, sizeof(prompt));
   set_prompt(prompt);
   input_buf_size = shell_buf_size();
@@ -72,6 +73,8 @@ int main(int argc, char **argv)
   input_data_len = 0;
   input_pos = 0;
   debug_write("AUDIT eshell_ready\n", 19);
+  if (fusion_enabled != 0)
+    debug_write("AUDIT eshell_agent_fusion_enabled\n", 34);
 
   while (1) {
     char *line;
@@ -159,7 +162,12 @@ int main(int argc, char **argv)
       shell_history_add(state, command_buf);
     }
 
-    status = shell_execute_string(state, command_buf);
+    if (fusion_enabled != 0)
+      status = shell_run_agent_fusion(command_buf);
+    else
+      status = 0;
+    if (fusion_enabled == 0 || status == -2)
+      status = shell_execute_string(state, command_buf);
     last_status = status;
     if (status == 2)
       write(STDERR_FILENO, "eshell: parse error\n", 20);
@@ -461,4 +469,34 @@ int pipe_check(const char **arg_buf)
 {
   (void)arg_buf;
   return FALSE;
+}
+
+static int shell_run_agent_fusion(const char *text)
+{
+  char storage[AGENT_FUSION_MAX_ARGS][AGENT_FUSION_TEXT_MAX];
+  char *argv[AGENT_FUSION_MAX_ARGS + 1];
+  int argc;
+  int status = 0;
+  pid_t pid;
+
+  argc = agent_fusion_build_argv(text, storage, argv);
+  if (argc == 0)
+    return -2;
+  if (argc < 0) {
+    write(STDERR_FILENO, "eshell: invalid agent command\n", 30);
+    return 1;
+  }
+
+  debug_write("AUDIT eshell_agent_route_begin\n", 31);
+  pid = execve("/usr/bin/agent", argv, 0);
+  if (pid < 0) {
+    write(STDERR_FILENO, "eshell: failed to launch agent\n", 31);
+    return 1;
+  }
+  set_foreground_pid(STDIN_FILENO, pid);
+  if (waitpid(pid, &status, 0) < 0)
+    status = 1;
+  set_foreground_pid(STDIN_FILENO, 0);
+  debug_write("AUDIT eshell_agent_route_done\n", 30);
+  return status;
 }

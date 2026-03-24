@@ -1,4 +1,5 @@
 #include <init_policy.h>
+#include <boot_profile.h>
 #include <string.h>
 
 static void policy_copy_text(char *dst, int cap, const char *src)
@@ -182,7 +183,7 @@ void init_inittab_init(struct init_inittab *inittab)
   policy_copy_text(inittab->respawns[0].runlevel,
                    sizeof(inittab->respawns[0].runlevel), "default");
   policy_copy_text(inittab->respawns[0].command,
-                   sizeof(inittab->respawns[0].command), "/usr/bin/term");
+                   sizeof(inittab->respawns[0].command), INIT_POLICY_TERMINAL_TOKEN);
   inittab->respawn_count = 1;
 }
 
@@ -396,4 +397,37 @@ const char *init_policy_find_respawn(const struct init_inittab *inittab,
       return inittab->respawns[i].command;
   }
   return "";
+}
+
+int init_policy_resolve_terminal_command(u_int32_t terminal_profile,
+                                         char *out, int out_cap)
+{
+  if (out == 0 || out_cap <= 0)
+    return -1;
+
+  if (terminal_profile == BOOT_PROFILE_TERMINAL_AGENT) {
+    policy_copy_text(out, out_cap, "/usr/bin/agent-term");
+    return 0;
+  }
+
+  policy_copy_text(out, out_cap, "/usr/bin/term");
+  return 0;
+}
+
+int init_policy_resolve_respawn_command(const char *command,
+                                        u_int32_t terminal_profile,
+                                        char *out, int out_cap)
+{
+  if (out == 0 || out_cap <= 0)
+    return -1;
+
+  if (command == 0 || command[0] == '\0') {
+    out[0] = '\0';
+    return -1;
+  }
+  if (strcmp(command, INIT_POLICY_TERMINAL_TOKEN) == 0)
+    return init_policy_resolve_terminal_command(terminal_profile, out, out_cap);
+
+  policy_copy_text(out, out_cap, command);
+  return 0;
 }

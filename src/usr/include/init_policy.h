@@ -1,12 +1,15 @@
 #ifndef _USR_INIT_POLICY_H
 #define _USR_INIT_POLICY_H
 
+#include <sys/types.h>
+
 #define INIT_POLICY_NAME_MAX 32
 #define INIT_POLICY_PATH_MAX 128
 #define INIT_POLICY_CMD_MAX 128
 #define INIT_POLICY_MAX_TOKENS 8
 #define INIT_POLICY_MAX_SERVICES 16
 #define INIT_POLICY_MAX_RESPAWNS 4
+#define INIT_POLICY_TERMINAL_TOKEN "@terminal"
 
 struct init_service_info {
   char name[INIT_POLICY_NAME_MAX];
@@ -43,5 +46,10 @@ int init_policy_order_services(const struct init_service_info *services,
 int init_policy_parse_inittab(const char *text, struct init_inittab *inittab);
 const char *init_policy_find_respawn(const struct init_inittab *inittab,
                                      const char *runlevel);
+int init_policy_resolve_terminal_command(u_int32_t terminal_profile,
+                                         char *out, int out_cap);
+int init_policy_resolve_respawn_command(const char *command,
+                                        u_int32_t terminal_profile,
+                                        char *out, int out_cap);
 
 #endif /* _USR_INIT_POLICY_H */

@@ -71,6 +71,7 @@ struct term_app {
   pid_t shell_pid;
   int master_fd;
   int use_framebuffer;
+  int agent_fusion_enabled;
   int cursor_valid;
   int ime_overlay_valid;
   int last_cursor_col;
@@ -193,11 +194,14 @@ u_int32_t get_kernel_tick(void);
 int main(int argc, char** argv)
 {
   struct term_app *app = &term_state;
-  char *shell_argv[2];
+  char *shell_argv[3];
+  int i;
 
-  (void)argc;
-  (void)argv;
   memset(app, 0, sizeof(struct term_app));
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--agent-fusion") == 0)
+      app->agent_fusion_enabled = 1;
+  }
 
   app->master_fd = openpty();
   if (app->master_fd < 0) {
@@ -217,6 +221,8 @@ int main(int argc, char** argv)
     term_audit_log("AUDIT term_mode=framebuffer\n");
   else
     term_audit_log("AUDIT term_mode=console\n");
+  if (app->agent_fusion_enabled != 0)
+    term_audit_log("AUDIT term_agent_fusion_enabled\n");
 
   if (app->use_framebuffer == 0)
     console_clear();
@@ -229,13 +235,16 @@ int main(int argc, char** argv)
   }
 
   shell_argv[0] = "eshell";
-  shell_argv[1] = NULL;
+  shell_argv[1] = app->agent_fusion_enabled != 0 ? "--agent-fusion" : 0;
+  shell_argv[2] = NULL;
   app->shell_pid = execve_pty("/usr/bin/eshell", shell_argv, app->master_fd);
   shell_completion_state_set_shell_pid(&app->completion, app->shell_pid);
   if (app->shell_pid < 0) {
     term_audit_log("AUDIT term_execve_pty_failed\n");
     set_input_mode(INPUT_MODE_CONSOLE);
     write(1, "term: fallback to eshell\n", 25);
+    if (app->agent_fusion_enabled != 0)
+      return execve("/usr/bin/eshell", shell_argv, 0);
     return execve("/usr/bin/eshell", 0, 0);
   }
 

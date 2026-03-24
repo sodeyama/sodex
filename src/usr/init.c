@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <malloc.h>
 #include <fs.h>
+#include <boot_profile.h>
 #include <init_policy.h>
 #include <sleep.h>
 
@@ -22,6 +23,29 @@ static void init_debug_value(const char *label, const char *value)
     return;
   debug_write(label, strlen(label));
   debug_write(value, strlen(value));
+  debug_write("\n", 1);
+}
+
+static void init_debug_uint(const char *label, u_int32_t value)
+{
+  char buf[16];
+  int len = 0;
+
+  if (label == 0)
+    return;
+  debug_write(label, strlen(label));
+  if (value == 0) {
+    debug_write("0\n", 2);
+    return;
+  }
+  while (value > 0 && len < (int)sizeof(buf)) {
+    buf[len++] = (char)('0' + (value % 10));
+    value /= 10;
+  }
+  while (len > 0) {
+    len--;
+    debug_write(&buf[len], 1);
+  }
   debug_write("\n", 1);
 }
 
@@ -121,30 +145,113 @@ static void init_restore_default_dir(void)
   chdir("/");
 }
 
+static u_int32_t init_boot_terminal_profile(void)
+{
+  struct boot_profile_info info;
+
+  memset(&info, 0, sizeof(info));
+  if (get_boot_profile(&info) < 0) {
+    init_debug_log("AUDIT init_boot_profile_unavailable\n");
+    return BOOT_PROFILE_TERMINAL_CLASSIC;
+  }
+  init_debug_uint("AUDIT init_boot_profile_terminal=", info.terminal_profile);
+  if (info.version != BOOT_PROFILE_VERSION)
+    init_debug_log("AUDIT init_boot_profile_version_mismatch\n");
+  return info.terminal_profile;
+}
+
+static int init_terminal_candidates(char commands[][INIT_POLICY_CMD_MAX],
+                                    int max_commands)
+{
+  char primary[INIT_POLICY_CMD_MAX];
+  u_int32_t terminal_profile;
+  int count = 0;
+
+  if (commands == 0 || max_commands <= 0)
+    return 0;
+
+  terminal_profile = init_boot_terminal_profile();
+  if (init_policy_resolve_terminal_command(terminal_profile,
+                                           primary, sizeof(primary)) < 0)
+    return 0;
+
+  memset(commands, 0, (size_t)(max_commands * INIT_POLICY_CMD_MAX));
+  memcpy(commands[count], primary, strlen(primary));
+  count++;
+  if (strcmp(primary, "/usr/bin/agent-term") == 0 && count < max_commands) {
+    memcpy(commands[count], "/usr/bin/term", strlen("/usr/bin/term"));
+    count++;
+  }
+  if (count < max_commands) {
+    memcpy(commands[count], "/usr/bin/eshell", strlen("/usr/bin/eshell"));
+    count++;
+  }
+  return count;
+}
+
+static pid_t init_spawn_argv(const char *path, char **argv)
+{
+  pid_t pid;
+
+  init_restore_default_dir();
+  pid = execve(path, argv, 0);
+  if (pid < 0)
+    init_debug_value("AUDIT init_spawn_failed=", path);
+  else
+    init_debug_value("AUDIT init_spawned=", path);
+  return pid;
+}
+
 static pid_t init_spawn_command(const char *command)
 {
   char buf[INIT_POLICY_CMD_MAX];
+  char resolved[INIT_POLICY_CMD_MAX];
+  char terminal_commands[3][INIT_POLICY_CMD_MAX];
   char *argv[8];
   int argc;
+  int candidate_count;
+  int i;
   pid_t pid;
 
   if (command == 0 || command[0] == '\0')
     return -1;
 
-  memset(buf, 0, sizeof(buf));
-  memcpy(buf, command, strlen(command) < sizeof(buf) - 1 ?
-         strlen(command) : sizeof(buf) - 1);
-  argc = init_split_command(buf, argv, 8);
-  if (argc <= 0)
-    return -1;
-  init_restore_default_dir();
-  pid = execve(argv[0], argv, 0);
-  if (pid < 0) {
-    init_debug_value("AUDIT init_spawn_failed=", argv[0]);
+  if (strcmp(command, INIT_POLICY_TERMINAL_TOKEN) == 0) {
+    candidate_count = init_terminal_candidates(terminal_commands,
+                                               sizeof(terminal_commands) /
+                                                   sizeof(terminal_commands[0]));
+    for (i = 0; i < candidate_count; i++) {
+      char *terminal_argv[2];
+
+      terminal_argv[0] = terminal_commands[i];
+      terminal_argv[1] = 0;
+      if (i > 0)
+        init_debug_value("AUDIT init_spawn_fallback_try=", terminal_commands[i]);
+      pid = init_spawn_argv(terminal_commands[i], terminal_argv);
+      if (pid >= 0) {
+        set_foreground_pid(STDIN_FILENO, pid);
+        return pid;
+      }
+    }
     set_foreground_pid(STDIN_FILENO, 0);
     return -1;
   }
-  init_debug_value("AUDIT init_spawned=", argv[0]);
+
+  if (init_policy_resolve_respawn_command(command,
+                                          BOOT_PROFILE_TERMINAL_CLASSIC,
+                                          resolved, sizeof(resolved)) < 0)
+    return -1;
+  memset(buf, 0, sizeof(buf));
+  memcpy(buf, resolved, strlen(resolved) < sizeof(buf) - 1 ?
+         strlen(resolved) : sizeof(buf) - 1);
+  argc = init_split_command(buf, argv, 8);
+  if (argc <= 0)
+    return -1;
+  pid = init_spawn_argv(argv[0], argv);
+  if (pid < 0) {
+    set_foreground_pid(STDIN_FILENO, 0);
+    return -1;
+  }
   set_foreground_pid(STDIN_FILENO, pid);
   return pid;
 }

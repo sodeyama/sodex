@@ -57,15 +57,26 @@ TEST(parse_inittab_and_respawn) {
         "# 最小 inittab\n"
         "initdefault:server-headless\n"
         "sysinit:/etc/init.d/rcS\n"
-        "respawn:user:/usr/bin/term\n"
+        "respawn:user:@terminal\n"
         "respawn:rescue:/usr/bin/eshell\n";
 
     ASSERT_EQ(init_policy_parse_inittab(text, &inittab), 0);
     ASSERT_STR_EQ(inittab.runlevel, "server-headless");
     ASSERT_STR_EQ(inittab.sysinit, "/etc/init.d/rcS");
     ASSERT_EQ(inittab.respawn_count, 2);
-    ASSERT_STR_EQ(init_policy_find_respawn(&inittab, "user"), "/usr/bin/term");
+    ASSERT_STR_EQ(init_policy_find_respawn(&inittab, "user"), "@terminal");
     ASSERT_STR_EQ(init_policy_find_respawn(&inittab, "server-headless"), "");
+}
+
+TEST(resolve_terminal_profile_command) {
+    char resolved[128];
+
+    ASSERT_EQ(init_policy_resolve_respawn_command("@terminal", 0, resolved, sizeof(resolved)), 0);
+    ASSERT_STR_EQ(resolved, "/usr/bin/term");
+    ASSERT_EQ(init_policy_resolve_respawn_command("@terminal", 1, resolved, sizeof(resolved)), 0);
+    ASSERT_STR_EQ(resolved, "/usr/bin/agent-term");
+    ASSERT_EQ(init_policy_resolve_respawn_command("/usr/bin/eshell", 1, resolved, sizeof(resolved)), 0);
+    ASSERT_STR_EQ(resolved, "/usr/bin/eshell");
 }
 
 int main(void)
@@ -75,6 +86,7 @@ int main(void)
     RUN_TEST(parse_service_metadata);
     RUN_TEST(order_services_by_required_start);
     RUN_TEST(parse_inittab_and_respawn);
+    RUN_TEST(resolve_terminal_profile_command);
 
     TEST_REPORT();
 }

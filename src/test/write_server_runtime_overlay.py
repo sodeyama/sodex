@@ -110,7 +110,7 @@ def main() -> int:
             "# minimal inittab",
             f"initdefault:{runlevel}",
             f"sysinit:{init_sysinit}",
-            "respawn:user:/usr/bin/term",
+            "respawn:user:@terminal",
             "respawn:rescue:/usr/bin/eshell",
             "",
         ]

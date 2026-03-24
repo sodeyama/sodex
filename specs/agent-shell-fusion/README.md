@@ -24,7 +24,7 @@ editor-native integration を段階導入する。
 - `@...` を明示 agent route として `agent` CLI へ橋渡しする MVP
 - `/mode auto|shell|agent` と mode badge
 - shell route probe による `shell builtin` / `shell path` / `unknown command` の reason 表示
-- host unit test と `make test-qemu-agent-fusion` による QEMU smoke
+- host unit test と `make test-qemu-agent-fusion` による route/fallback を含む QEMU smoke
 
 未実装:
 

@@ -8,6 +8,7 @@
 - 2026-03-24 時点では、計画作成のみで実装は未着手
 - 2026-03-24: M0 の MVP として boot profile syscall、`@terminal`、`init` 解決、`agent-term` fallback、`@...` による明示 agent route、host/QEMU smoke を実装
 - 2026-03-24: `eshell` に `/mode auto|shell|agent`、mode badge、shell route probe、agent mode の plain text route を追加
+- 2026-03-24: `agent-term` 欠落時に `init` が `/usr/bin/term` へ退避する fallback smoke を追加
 
 ## M0: terminal profile 切替と unified input router
 
@@ -21,12 +22,12 @@
 | [x] | ASF-06 | `agent-term` 入力面の mode state (`auto` / `shell` / `agent`) 契約を固定する | 01 | ASF-04 | mode 遷移と line-local override の仕様が文書と実装で一致する |
 | [x] | ASF-07 | shell fast path 判定を `agent-term` 側へ追加する | 01 | ASF-06, `shell-and-init` | builtin / alias / external command が LLM を通らず実行される |
 | [x] | ASF-08 | agent force の入力導線と mode badge / route reason 表示を追加する | 01 | ASF-06, `agent-transport` | shell / agent へなぜ流れたかをユーザーが視認できる |
-| [ ] | ASF-09 | boot profile / `@terminal` / fallback / route の host/QEMU test を追加する | 01 | ASF-05, ASF-07, ASF-08 | `classic` / `agent` 切替と fallback を回帰検知できる |
+| [x] | ASF-09 | boot profile / `@terminal` / fallback / route の host/QEMU test を追加する | 01 | ASF-05, ASF-07, ASF-08 | `classic` / `agent` 切替と fallback を回帰検知できる |
 
 注記:
 現時点の QEMU smoke は `agent` profile での login、`agent-term` 起動、明示 agent route (`@memory add ...`) に加え、
-`/mode agent` 後の plain text route (`memory add ...`) まで検証する。
-fallback 失敗系の網羅 smoke は未完了のため、ASF-09 は open のままにしている。
+`/mode agent` 後の plain text route (`memory add ...`)、
+および `/usr/bin/agent-term` 欠落時の `init -> /usr/bin/term` fallback まで検証する。
 
 ## M1: typo 補正と safe correction
 

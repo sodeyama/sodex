@@ -290,6 +290,8 @@ test-qemu-agent-fusion:
 	@$(MAKE) SODEX_TERM_PROFILE=agent SODEX_ROOTFS_OVERLAY=$(TERM_ROOTFS_OVERLAY) FSBOOT=$(TERM_FSBOOT) FSBOOT_PROFILE=$(TERM_FSBOOT_PROFILE) all
 	@echo "=== Running agent fusion smoke in QEMU ==="
 	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_agent_fusion_smoke.py $(TERM_FSBOOT) $(LOGDIR)
+	@echo "=== Running agent fallback smoke in QEMU ==="
+	@SODEX_QEMU_MEM_MB=$(SODEX_QEMU_MEM_MB) python3 $(BASEDIR)/src/test/run_qemu_agent_fallback_smoke.py $(TERM_FSBOOT) $(LOGDIR)
 
 test-qemu-term-scrollback:
 	@python3 $(BASEDIR)/src/test/write_server_runtime_overlay.py $(TERM_SCROLLBACK_ROOTFS_OVERLAY)

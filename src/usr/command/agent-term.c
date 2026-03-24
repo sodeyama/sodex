@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <debug.h>
+#include <agent_fusion.h>
 
 static int run_process(const char *path, char **argv)
 {
@@ -19,17 +20,24 @@ static int run_process(const char *path, char **argv)
 
 int main(int argc, char **argv)
 {
-  char *term_argv[3];
+  char *term_argv[4];
   char *fallback_argv[2];
+  char *mode_arg = 0;
   int status;
+  int i;
 
-  (void)argc;
-  (void)argv;
+  for (i = 1; i < argc; i++) {
+    if (strncmp(argv[i], "--agent-mode=", 13) == 0) {
+      mode_arg = argv[i];
+      break;
+    }
+  }
 
   debug_write("AUDIT agent_term_enter\n", 23);
   term_argv[0] = "term";
   term_argv[1] = "--agent-fusion";
-  term_argv[2] = 0;
+  term_argv[2] = mode_arg;
+  term_argv[3] = 0;
   status = run_process("/usr/bin/term", term_argv);
   if (status >= 0)
     return status;

@@ -279,6 +279,10 @@ def main() -> int:
 
             monitor.send_text("@memory add fusion-note\n")
             wait_for_serial_count(serial_log, "AUDIT eshell_agent_route_done", 1, timeout)
+            monitor.send_text("/mode agent\n")
+            wait_for_serial_text(serial_log, "AUDIT eshell_agent_mode=agent", timeout)
+            monitor.send_text("memory add mode-note\n")
+            wait_for_serial_count(serial_log, "AUDIT eshell_agent_route_done", 2, timeout)
 
             print("=== AGENT FUSION QEMU SMOKE DONE ===")
             print(f"Artifacts: {serial_log}, {qemu_log}, {qemu_stderr_log}")
@@ -286,8 +290,11 @@ def main() -> int:
             qemu.wait(timeout=5)
             image = fsboot.read_bytes()
             workspace_path = f"/var/agent/memory/{agent_hash_path('/home/user'):08x}.md"
-            if "fusion-note" not in read_file_by_path(image, workspace_path):
+            workspace_text = read_file_by_path(image, workspace_path)
+            if "fusion-note" not in workspace_text:
                 raise AssertionError("workspace memory file does not contain fusion-note")
+            if "mode-note" not in workspace_text:
+                raise AssertionError("workspace memory file does not contain mode-note")
             return 0
         except Exception as exc:
             print(f"agent fusion smoke failed: {exc}", file=sys.stderr)

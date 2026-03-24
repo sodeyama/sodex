@@ -99,20 +99,9 @@ static int fusion_is_direct_mode(const char *text)
   return 0;
 }
 
-int agent_fusion_enabled(int argc, char **argv)
-{
-  int i;
-
-  for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--agent-fusion") == 0)
-      return 1;
-  }
-  return 0;
-}
-
-int agent_fusion_build_argv(const char *input,
-                            char storage[AGENT_FUSION_MAX_ARGS][AGENT_FUSION_TEXT_MAX],
-                            char *argv[AGENT_FUSION_MAX_ARGS + 1])
+static int fusion_build_argv_impl(const char *input, int force_agent,
+                                  char storage[AGENT_FUSION_MAX_ARGS][AGENT_FUSION_TEXT_MAX],
+                                  char *argv[AGENT_FUSION_MAX_ARGS + 1])
 {
   char trimmed[AGENT_FUSION_TEXT_MAX];
   int start = 0;
@@ -124,11 +113,13 @@ int agent_fusion_build_argv(const char *input,
 
   while (fusion_is_space(input[start]))
     start++;
-  if (input[start] != '@')
-    return 0;
-  start++;
-  while (fusion_is_space(input[start]))
+  if (input[start] == '@') {
     start++;
+    while (fusion_is_space(input[start]))
+      start++;
+  } else if (force_agent == 0) {
+    return 0;
+  }
   if (input[start] == '\0')
     return -1;
 
@@ -153,4 +144,72 @@ int agent_fusion_build_argv(const char *input,
   argv[2] = storage[2];
   argv[3] = 0;
   return 3;
+}
+
+int agent_fusion_enabled(int argc, char **argv)
+{
+  int i;
+
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--agent-fusion") == 0)
+      return 1;
+  }
+  return 0;
+}
+
+int agent_fusion_parse_mode_text(const char *text, int *mode_out)
+{
+  if (text == 0 || mode_out == 0)
+    return -1;
+  if (strcmp(text, "auto") == 0) {
+    *mode_out = AGENT_FUSION_MODE_AUTO;
+    return 0;
+  }
+  if (strcmp(text, "shell") == 0) {
+    *mode_out = AGENT_FUSION_MODE_SHELL;
+    return 0;
+  }
+  if (strcmp(text, "agent") == 0) {
+    *mode_out = AGENT_FUSION_MODE_AGENT;
+    return 0;
+  }
+  return -1;
+}
+
+const char *agent_fusion_mode_name(int mode)
+{
+  if (mode == AGENT_FUSION_MODE_SHELL)
+    return "shell";
+  if (mode == AGENT_FUSION_MODE_AGENT)
+    return "agent";
+  return "auto";
+}
+
+int agent_fusion_mode_from_argv(int argc, char **argv, int fallback_mode)
+{
+  int i;
+
+  for (i = 1; i < argc; i++) {
+    if (strncmp(argv[i], "--agent-mode=", 13) == 0) {
+      int mode;
+
+      if (agent_fusion_parse_mode_text(argv[i] + 13, &mode) == 0)
+        return mode;
+    }
+  }
+  return fallback_mode;
+}
+
+int agent_fusion_build_argv(const char *input,
+                            char storage[AGENT_FUSION_MAX_ARGS][AGENT_FUSION_TEXT_MAX],
+                            char *argv[AGENT_FUSION_MAX_ARGS + 1])
+{
+  return fusion_build_argv_impl(input, 0, storage, argv);
+}
+
+int agent_fusion_build_mode_argv(const char *input, int force_agent,
+                                 char storage[AGENT_FUSION_MAX_ARGS][AGENT_FUSION_TEXT_MAX],
+                                 char *argv[AGENT_FUSION_MAX_ARGS + 1])
+{
+  return fusion_build_argv_impl(input, force_agent, storage, argv);
 }

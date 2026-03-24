@@ -60,6 +60,17 @@ enum shell_loop_control {
   SHELL_LOOP_CONTINUE = 2
 };
 
+enum shell_route_probe_kind {
+  SHELL_ROUTE_INVALID = 0,
+  SHELL_ROUTE_ASSIGNMENTS = 1,
+  SHELL_ROUTE_ALIAS = 2,
+  SHELL_ROUTE_BUILTIN = 3,
+  SHELL_ROUTE_EXTERNAL = 4,
+  SHELL_ROUTE_PATH = 5,
+  SHELL_ROUTE_COMPOUND = 6,
+  SHELL_ROUTE_UNKNOWN = 7
+};
+
 struct shell_redirection {
   enum shell_redirection_type type;
   int fd;
@@ -210,6 +221,7 @@ int shell_execute_buffer(struct shell_state *state, const char *name,
                          int sourced);
 int shell_execute_file(struct shell_state *state, const char *path,
                        int argc, char **argv, int sourced);
+int shell_route_probe(const struct shell_state *state, const char *text);
 void shell_reap_background(struct shell_state *state);
 
 #endif /* _USR_SHELL_H */

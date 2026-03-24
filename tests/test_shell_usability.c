@@ -149,6 +149,31 @@ TEST(tilde_and_glob_expand) {
     rmdir("shell_glob_tmp");
 }
 
+TEST(route_probe_classifies_command_kinds) {
+    struct shell_state state;
+    char cwd[512];
+    char lookup_dir[640];
+
+    shell_state_init(&state, 0);
+    ASSERT_NOT_NULL(getcwd(cwd, sizeof(cwd)));
+    ASSERT_EQ(ensure_dir("shell_route_bin"), 0);
+    ASSERT_EQ(write_text_file("shell_route_bin/routecmd", "dummy\n"), 0);
+    snprintf(lookup_dir, sizeof(lookup_dir), "%s/%s", cwd, "shell_route_bin");
+    ASSERT_EQ(shell_var_set(&state, "PATH", lookup_dir, 1), 0);
+    ASSERT_EQ(shell_alias_set(&state, "hi", "echo hi"), 0);
+
+    ASSERT_EQ(shell_route_probe(&state, "hi"), SHELL_ROUTE_ALIAS);
+    ASSERT_EQ(shell_route_probe(&state, "echo ok"), SHELL_ROUTE_BUILTIN);
+    ASSERT_EQ(shell_route_probe(&state, "routecmd"), SHELL_ROUTE_EXTERNAL);
+    ASSERT_EQ(shell_route_probe(&state, "./shell_route_bin/routecmd"), SHELL_ROUTE_PATH);
+    ASSERT_EQ(shell_route_probe(&state, "NAME=value"), SHELL_ROUTE_ASSIGNMENTS);
+    ASSERT_EQ(shell_route_probe(&state, "echo ok | cat"), SHELL_ROUTE_COMPOUND);
+    ASSERT_EQ(shell_route_probe(&state, "missingcmd"), SHELL_ROUTE_UNKNOWN);
+
+    remove("shell_route_bin/routecmd");
+    rmdir("shell_route_bin");
+}
+
 int main(void)
 {
     printf("=== shell usability tests ===\n");
@@ -157,6 +182,7 @@ int main(void)
     RUN_TEST(type_and_command_v);
     RUN_TEST(history_helpers_and_builtin);
     RUN_TEST(tilde_and_glob_expand);
+    RUN_TEST(route_probe_classifies_command_kinds);
 
     TEST_REPORT();
 }

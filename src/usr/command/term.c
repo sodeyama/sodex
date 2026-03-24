@@ -13,6 +13,7 @@
 #include <terminal_surface.h>
 #include <termios.h>
 #include <tty.h>
+#include <agent_fusion.h>
 #include <utf8.h>
 #include <vt_parser.h>
 #include <wcwidth.h>
@@ -72,6 +73,7 @@ struct term_app {
   int master_fd;
   int use_framebuffer;
   int agent_fusion_enabled;
+  int agent_fusion_mode;
   int cursor_valid;
   int ime_overlay_valid;
   int last_cursor_col;
@@ -194,13 +196,17 @@ u_int32_t get_kernel_tick(void);
 int main(int argc, char** argv)
 {
   struct term_app *app = &term_state;
-  char *shell_argv[3];
+  char *shell_argv[4];
   int i;
 
   memset(app, 0, sizeof(struct term_app));
+  app->agent_fusion_mode = AGENT_FUSION_MODE_AUTO;
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--agent-fusion") == 0)
       app->agent_fusion_enabled = 1;
+    else if (strncmp(argv[i], "--agent-mode=", 13) == 0)
+      app->agent_fusion_mode =
+        agent_fusion_mode_from_argv(argc, argv, app->agent_fusion_mode);
   }
 
   app->master_fd = openpty();
@@ -235,8 +241,15 @@ int main(int argc, char** argv)
   }
 
   shell_argv[0] = "eshell";
-  shell_argv[1] = app->agent_fusion_enabled != 0 ? "--agent-fusion" : 0;
-  shell_argv[2] = NULL;
+  i = 1;
+  if (app->agent_fusion_enabled != 0) {
+    shell_argv[i++] = "--agent-fusion";
+    if (app->agent_fusion_mode == AGENT_FUSION_MODE_SHELL)
+      shell_argv[i++] = "--agent-mode=shell";
+    else if (app->agent_fusion_mode == AGENT_FUSION_MODE_AGENT)
+      shell_argv[i++] = "--agent-mode=agent";
+  }
+  shell_argv[i] = NULL;
   app->shell_pid = execve_pty("/usr/bin/eshell", shell_argv, app->master_fd);
   shell_completion_state_set_shell_pid(&app->completion, app->shell_pid);
   if (app->shell_pid < 0) {

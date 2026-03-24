@@ -21,12 +21,31 @@ static int shell_append_input(char **buf, int *buf_size, int *len,
                               const char *line, int line_len, int add_newline);
 static int shell_replace_input(char **buf, int *buf_size, int *len,
                                const char *text);
-static int shell_run_agent_fusion(const char *text);
+static int shell_run_agent_fusion(const char *text, int force_agent);
+static void shell_write_fusion_status(int fusion_mode, int route_reason);
+static int shell_handle_fusion_mode_command(const char *text, int *fusion_mode);
+static int shell_route_reason_from_probe(const struct shell_state *state,
+                                         const char *text);
+static const char *shell_route_reason_text(int route_reason);
 static int shell_read_input_line(char **buf, int *buf_size,
                                  int *data_pos, int *data_len,
                                  int tty_echoes_newline,
                                  char **line, int *line_len,
                                  int *add_newline);
+
+enum shell_fusion_route_reason {
+  SHELL_FUSION_ROUTE_NONE = 0,
+  SHELL_FUSION_ROUTE_AGENT_FORCED = 1,
+  SHELL_FUSION_ROUTE_AGENT_MODE = 2,
+  SHELL_FUSION_ROUTE_SHELL_MODE = 3,
+  SHELL_FUSION_ROUTE_SHELL_ALIAS = 4,
+  SHELL_FUSION_ROUTE_SHELL_BUILTIN = 5,
+  SHELL_FUSION_ROUTE_SHELL_EXTERNAL = 6,
+  SHELL_FUSION_ROUTE_SHELL_PATH = 7,
+  SHELL_FUSION_ROUTE_SHELL_ASSIGNMENTS = 8,
+  SHELL_FUSION_ROUTE_SHELL_COMPOUND = 9,
+  SHELL_FUSION_ROUTE_UNKNOWN_COMMAND = 10
+};
 
 char g_pathname[PATH_MAX];
 static struct shell_state g_shell_state;
@@ -44,11 +63,14 @@ int main(int argc, char **argv)
   int input_data_len;
   int input_pos;
   int last_status = 0;
+  int fusion_mode;
+  int route_reason = SHELL_FUSION_ROUTE_NONE;
   int tty_echoes_newline;
   int fusion_enabled;
 
   shell_state_init(state, 1);
   fusion_enabled = agent_fusion_enabled(argc, argv);
+  fusion_mode = agent_fusion_mode_from_argv(argc, argv, AGENT_FUSION_MODE_AUTO);
   memset(prompt, 0, sizeof(prompt));
   set_prompt(prompt);
   input_buf_size = shell_buf_size();
@@ -73,8 +95,13 @@ int main(int argc, char **argv)
   input_data_len = 0;
   input_pos = 0;
   debug_write("AUDIT eshell_ready\n", 19);
-  if (fusion_enabled != 0)
+  if (fusion_enabled != 0) {
     debug_write("AUDIT eshell_agent_fusion_enabled\n", 34);
+    debug_write("AUDIT eshell_agent_mode=", 24);
+    debug_write(agent_fusion_mode_name(fusion_mode),
+                strlen(agent_fusion_mode_name(fusion_mode)));
+    debug_write("\n", 1);
+  }
 
   while (1) {
     char *line;
@@ -93,8 +120,11 @@ int main(int argc, char **argv)
     }
     if (command_len > 0)
       write(STDOUT_FILENO, "...> ", 5);
-    else
+    else {
+      if (fusion_enabled != 0)
+        shell_write_fusion_status(fusion_mode, route_reason);
       write(STDOUT_FILENO, prompt, strlen(prompt));
+    }
     read_status = shell_read_input_line(&buf, &input_buf_size,
                                         &input_pos, &input_data_len,
                                         tty_echoes_newline,
@@ -162,12 +192,34 @@ int main(int argc, char **argv)
       shell_history_add(state, command_buf);
     }
 
-    if (fusion_enabled != 0)
-      status = shell_run_agent_fusion(command_buf);
-    else
-      status = 0;
-    if (fusion_enabled == 0 || status == -2)
+    if (fusion_enabled != 0) {
+      status = shell_handle_fusion_mode_command(command_buf, &fusion_mode);
+      if (status != -2) {
+        route_reason = SHELL_FUSION_ROUTE_NONE;
+        last_status = status;
+        set_prompt(prompt);
+        command_len = 0;
+        command_buf[0] = '\0';
+        continue;
+      }
+      if (fusion_mode == AGENT_FUSION_MODE_AGENT) {
+        route_reason = SHELL_FUSION_ROUTE_AGENT_MODE;
+        status = shell_run_agent_fusion(command_buf, 1);
+      } else {
+        status = shell_run_agent_fusion(command_buf, 0);
+        if (status != -2) {
+          route_reason = SHELL_FUSION_ROUTE_AGENT_FORCED;
+        } else {
+          if (fusion_mode == AGENT_FUSION_MODE_SHELL)
+            route_reason = SHELL_FUSION_ROUTE_SHELL_MODE;
+          else
+            route_reason = shell_route_reason_from_probe(state, command_buf);
+          status = shell_execute_string(state, command_buf);
+        }
+      }
+    } else {
       status = shell_execute_string(state, command_buf);
+    }
     last_status = status;
     if (status == 2)
       write(STDERR_FILENO, "eshell: parse error\n", 20);
@@ -471,7 +523,129 @@ int pipe_check(const char **arg_buf)
   return FALSE;
 }
 
-static int shell_run_agent_fusion(const char *text)
+static void shell_write_fusion_status(int fusion_mode, int route_reason)
+{
+  const char *mode_text;
+  const char *reason_text;
+
+  mode_text = agent_fusion_mode_name(fusion_mode);
+  write(STDOUT_FILENO, "[", 1);
+  write(STDOUT_FILENO, mode_text, strlen(mode_text));
+  if (fusion_mode == AGENT_FUSION_MODE_AUTO) {
+    reason_text = shell_route_reason_text(route_reason);
+    if (reason_text != 0) {
+      write(STDOUT_FILENO, ":", 1);
+      write(STDOUT_FILENO, reason_text, strlen(reason_text));
+    }
+  }
+  write(STDOUT_FILENO, "]\n", 2);
+}
+
+static int shell_handle_fusion_mode_command(const char *text, int *fusion_mode)
+{
+  char token[AGENT_FUSION_TEXT_MAX];
+  int start = 0;
+  int len = 0;
+  int mode;
+
+  if (text == 0 || fusion_mode == 0)
+    return -2;
+
+  while (text[start] == ' ' || text[start] == '\t' ||
+         text[start] == '\r' || text[start] == '\n') {
+    start++;
+  }
+  while (text[start] != '\0' &&
+         text[start] != ' ' && text[start] != '\t' &&
+         text[start] != '\r' && text[start] != '\n' &&
+         len < AGENT_FUSION_TEXT_MAX - 1) {
+    token[len++] = text[start++];
+  }
+  token[len] = '\0';
+  if (strcmp(token, "/mode") != 0)
+    return -2;
+
+  while (text[start] == ' ' || text[start] == '\t' ||
+         text[start] == '\r' || text[start] == '\n') {
+    start++;
+  }
+  if (text[start] == '\0') {
+    write(STDOUT_FILENO, "mode: ", 6);
+    write(STDOUT_FILENO, agent_fusion_mode_name(*fusion_mode),
+          strlen(agent_fusion_mode_name(*fusion_mode)));
+    write(STDOUT_FILENO, "\n", 1);
+    return 0;
+  }
+
+  len = 0;
+  while (text[start] != '\0' &&
+         text[start] != ' ' && text[start] != '\t' &&
+         text[start] != '\r' && text[start] != '\n' &&
+         len < AGENT_FUSION_TEXT_MAX - 1) {
+    token[len++] = text[start++];
+  }
+  token[len] = '\0';
+  if (agent_fusion_parse_mode_text(token, &mode) < 0) {
+    write(STDERR_FILENO, "eshell: usage: /mode auto|shell|agent\n", 39);
+    return 1;
+  }
+
+  *fusion_mode = mode;
+  debug_write("AUDIT eshell_agent_mode=", 24);
+  debug_write(agent_fusion_mode_name(mode),
+              strlen(agent_fusion_mode_name(mode)));
+  debug_write("\n", 1);
+  write(STDOUT_FILENO, "mode: ", 6);
+  write(STDOUT_FILENO, agent_fusion_mode_name(mode),
+        strlen(agent_fusion_mode_name(mode)));
+  write(STDOUT_FILENO, "\n", 1);
+  return 0;
+}
+
+static int shell_route_reason_from_probe(const struct shell_state *state,
+                                         const char *text)
+{
+  int route = shell_route_probe(state, text);
+
+  if (route == SHELL_ROUTE_ASSIGNMENTS)
+    return SHELL_FUSION_ROUTE_SHELL_ASSIGNMENTS;
+  if (route == SHELL_ROUTE_ALIAS)
+    return SHELL_FUSION_ROUTE_SHELL_ALIAS;
+  if (route == SHELL_ROUTE_BUILTIN)
+    return SHELL_FUSION_ROUTE_SHELL_BUILTIN;
+  if (route == SHELL_ROUTE_EXTERNAL)
+    return SHELL_FUSION_ROUTE_SHELL_EXTERNAL;
+  if (route == SHELL_ROUTE_PATH)
+    return SHELL_FUSION_ROUTE_SHELL_PATH;
+  if (route == SHELL_ROUTE_COMPOUND)
+    return SHELL_FUSION_ROUTE_SHELL_COMPOUND;
+  if (route == SHELL_ROUTE_UNKNOWN)
+    return SHELL_FUSION_ROUTE_UNKNOWN_COMMAND;
+  return SHELL_FUSION_ROUTE_NONE;
+}
+
+static const char *shell_route_reason_text(int route_reason)
+{
+  if (route_reason == SHELL_FUSION_ROUTE_AGENT_FORCED)
+    return "agent forced";
+  if (route_reason == SHELL_FUSION_ROUTE_SHELL_ALIAS)
+    return "shell alias";
+  if (route_reason == SHELL_FUSION_ROUTE_SHELL_BUILTIN)
+    return "shell builtin";
+  if (route_reason == SHELL_FUSION_ROUTE_SHELL_EXTERNAL)
+    return "shell external";
+  if (route_reason == SHELL_FUSION_ROUTE_SHELL_PATH)
+    return "shell path";
+  if (route_reason == SHELL_FUSION_ROUTE_SHELL_ASSIGNMENTS)
+    return "shell assignments";
+  if (route_reason == SHELL_FUSION_ROUTE_SHELL_COMPOUND)
+    return "shell compound";
+  if (route_reason == SHELL_FUSION_ROUTE_UNKNOWN_COMMAND)
+    return "unknown command";
+  return 0;
+}
+
+static int shell_run_agent_fusion(const char *text, int force_agent)
 {
   char storage[AGENT_FUSION_MAX_ARGS][AGENT_FUSION_TEXT_MAX];
   char *argv[AGENT_FUSION_MAX_ARGS + 1];
@@ -479,7 +653,7 @@ static int shell_run_agent_fusion(const char *text)
   int status = 0;
   pid_t pid;
 
-  argc = agent_fusion_build_argv(text, storage, argv);
+  argc = agent_fusion_build_mode_argv(text, force_agent, storage, argv);
   if (argc == 0)
     return -2;
   if (argc < 0) {

@@ -2444,3 +2444,40 @@ int shell_execute_string(struct shell_state *state, const char *text)
   return shell_execute_buffer(state, state != 0 ? state->script_name : "sh",
                               text, 0, 0, 1);
 }
+
+int shell_route_probe(const struct shell_state *state, const char *text)
+{
+  struct shell_program program;
+  const struct shell_command *command = 0;
+  const char *alias_value = 0;
+  char path[SHELL_WORD_SIZE];
+  int parse_status;
+  enum shell_lookup_kind kind;
+
+  if (text == 0 || text[0] == '\0')
+    return SHELL_ROUTE_INVALID;
+
+  parse_status = shell_parse_program(text, (int)strlen(text), &program);
+  if (parse_status < 0)
+    return SHELL_ROUTE_INVALID;
+  if (shell_extract_single_command(&program, &command) < 0)
+    return SHELL_ROUTE_COMPOUND;
+  if (command == 0)
+    return SHELL_ROUTE_INVALID;
+  if (command->argc <= 0)
+    return SHELL_ROUTE_ASSIGNMENTS;
+
+  path[0] = '\0';
+  kind = shell_lookup_command(state, command->argv[0],
+                              &alias_value, path, sizeof(path));
+  if (kind == SHELL_LOOKUP_ALIAS)
+    return SHELL_ROUTE_ALIAS;
+  if (kind == SHELL_LOOKUP_BUILTIN)
+    return SHELL_ROUTE_BUILTIN;
+  if (kind == SHELL_LOOKUP_EXTERNAL) {
+    if (strchr(command->argv[0], '/') != 0)
+      return SHELL_ROUTE_PATH;
+    return SHELL_ROUTE_EXTERNAL;
+  }
+  return SHELL_ROUTE_UNKNOWN;
+}
